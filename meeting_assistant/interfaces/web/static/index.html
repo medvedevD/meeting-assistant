@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Meeting Assistant</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Sidebar ── -->
+  <aside id="sidebar">
+    <div class="sidebar-top">
+      <div class="sidebar-brand">
+        <h1>Meeting Assistant</h1>
+        <span class="badge">Local</span>
+      </div>
+      <input class="search-input" type="search" id="search-input"
+             placeholder="Поиск встреч..." oninput="onSearch(this.value)">
+    </div>
+
+    <div class="sidebar-list" id="meetings-list">
+      <div class="sidebar-section">Встречи</div>
+      <div class="skel-item"><div class="skel-line" style="width:75%"></div><div class="skel-line" style="width:50%"></div></div>
+      <div class="skel-item"><div class="skel-line" style="width:60%"></div><div class="skel-line" style="width:40%"></div></div>
+      <div class="skel-item"><div class="skel-line" style="width:80%"></div><div class="skel-line" style="width:55%"></div></div>
+    </div>
+
+    <div class="sidebar-bottom">
+      <button class="btn-record" id="btn-record" onclick="toggleRecord()">
+        <span id="rec-btn-icon">●</span>
+        <span id="rec-btn-label">Новая запись</span>
+      </button>
+      <button class="btn-record btn-record--secondary" onclick="toggleUpload()">↑ Загрузить аудио</button>
+      <button class="btn-record btn-record--secondary" onclick="showProcess()">▶ Обработать запись</button>
+      <div class="sidebar-settings">
+        <button class="settings-link" id="settings-link" onclick="showSettings()">⚙ Настройки</button>
+        <span style="font-size:.65rem;color:var(--text-muted)">v0.1-local</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Main ── -->
+  <main id="main">
+
+    <!-- Home (empty state) -->
+    <div class="view active" id="view-home">
+      <div class="home-empty">
+        <div class="icon">◈</div>
+        <h2>Выберите встречу</h2>
+        <p>Выберите встречу из списка слева, чтобы просмотреть транскрипцию или протокол. Нажмите «Новая запись», чтобы начать запись.</p>
+      </div>
+    </div>
+
+    <!-- Record view (also used as Upload view) -->
+    <div class="view" id="view-record">
+      <div class="record-panel">
+        <div class="panel-title">
+          <button class="back-btn" onclick="showHome()">← назад</button>
+          <span id="record-panel-title">Новая запись</span>
+        </div>
+
+        <!-- Record-only controls -->
+        <div id="rec-controls">
+          <div class="form-row">
+            <div class="field">
+              <label>Микрофон</label>
+              <select id="mic-src"><option value="">— по умолчанию —</option></select>
+            </div>
+            <div class="field">
+              <label>Системный звук</label>
+              <select id="sys-src"><option value="">— по умолчанию —</option></select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Имя встречи</label>
+            <input type="text" id="rec-name" placeholder="daily  (пусто = дата/время)">
+            <span class="hint">Создаёт папку meetings/&lt;имя&gt;/recording.wav</span>
+          </div>
+          <div class="chk-row">
+            <input type="checkbox" id="prepend-date" checked>
+            <label for="prepend-date">Добавлять дату в начало имени</label>
+          </div>
+        </div>
+
+        <!-- Upload-only controls -->
+        <div id="upload-controls" style="display:none">
+          <div class="field">
+            <label>Название встречи</label>
+            <input type="text" id="upload-title" placeholder="1-на-1 с коллегой  (пусто = дата/время)">
+          </div>
+          <div class="upload-drop-zone" id="upload-drop-zone"
+               ondragover="onDropOver(event)" ondragleave="onDropLeave(event)" ondrop="onDrop(event)"
+               onclick="document.getElementById('upload-file-input').click()">
+            <div class="upload-drop-icon">↑</div>
+            <div class="upload-drop-text" id="upload-drop-text">Перетащите аудиофайл сюда<br><span style="font-size:.75rem;color:var(--text-muted)">или нажмите для выбора</span></div>
+            <input type="file" id="upload-file-input" accept=".wav,.mp3,.m4a,.flac,.ogg,.opus,.webm"
+                   style="display:none" onchange="onFileSelected(this)">
+          </div>
+          <div class="hint" style="margin-top:4px">Поддерживаются: wav, mp3, m4a, flac, ogg, opus, webm</div>
+        </div>
+
+        <!-- Post-recording pipeline preview -->
+        <div id="pipeline-preview" style="margin-bottom:16px">
+          <div style="font-size:.65rem;color:var(--text-muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">После остановки</div>
+          <div style="display:grid;grid-template-columns:20px 1fr auto;grid-template-rows:auto auto">
+            <div style="grid-column:1;grid-row:1/3;display:flex;flex-direction:column;align-items:center;height:92px">
+              <div class="pipe-dot" id="pipe-dot-transcribe" style="margin-top:10px;flex-shrink:0"></div>
+              <div class="pipe-line" style="flex:1;margin:4px 0"></div>
+              <div class="pipe-dot" id="pipe-dot-protocol" style="margin-bottom:10px;flex-shrink:0"></div>
+            </div>
+            <div id="pipe-transcribe" class="pipeline-step" style="grid-column:2;grid-row:1;padding:8px 0 8px 10px">
+              <div class="pipe-body">
+                <div class="pipe-title">Транскрипция</div>
+                <div class="pipe-desc" id="pipe-transcribe-desc">faster-whisper · medium · ru · CPU</div>
+              </div>
+            </div>
+            <label class="pipe-toggle" title="Транскрибировать запись" style="grid-column:3;grid-row:1;align-self:center;margin-left:8px">
+              <input type="checkbox" id="pipe-chk-transcribe" checked onchange="togglePipeStep('transcribe')">
+              <span class="pipe-track"></span><span class="pipe-thumb"></span>
+            </label>
+            <div id="pipe-protocol" class="pipeline-step" style="grid-column:2;grid-row:2;padding:8px 0 8px 10px">
+              <div class="pipe-body">
+                <div class="pipe-title">Протокол</div>
+                <div class="pipe-desc" id="pipe-protocol-desc">—</div>
+              </div>
+            </div>
+            <label class="pipe-toggle" title="Сгенерировать протокол" id="pipe-toggle-protocol" style="grid-column:3;grid-row:2;align-self:center;margin-left:8px">
+              <input type="checkbox" id="pipe-chk-protocol" checked onchange="togglePipeStep('protocol')">
+              <span class="pipe-track"></span><span class="pipe-thumb"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="rec-actions" id="rec-action-buttons">
+          <button class="btn btn-primary" id="btn-rec-start" onclick="startRec()">● Начать запись</button>
+          <button class="btn btn-danger"  id="btn-rec-stop"  onclick="stopRec()" disabled>■ Остановить</button>
+          <div class="rec-status" id="rec-st">Готово к записи</div>
+        </div>
+        <div id="rec-warning" style="display:none;margin-top:10px;padding:8px 12px;background:#fff3cd;color:#664d03;border-radius:6px;font-size:.85rem;border:1px solid #ffc107;line-height:1.4"></div>
+        <div class="rec-actions" id="upload-action-buttons" style="display:none">
+          <button class="btn btn-primary" id="btn-upload-start" onclick="startUpload()">↑ Загрузить и обработать</button>
+          <div class="rec-status" id="upload-st"></div>
+        </div>
+
+        <!-- Pipeline progress + log (shown after stop) -->
+        <div class="log-wrap" id="log-wrap" style="display:none">
+          <div class="pipe-progress" id="pipe-progress">
+            <div class="pipe-steps-row">
+              <div class="pipe-step-item">
+                <div class="pipe-step-circle" id="pstep-save">1</div>
+                <div class="pipe-step-label" id="pstep-save-lbl">Сохранение</div>
+              </div>
+              <div class="pipe-step-connector"><div class="pipe-step-connector-fill" id="pconn-1"></div></div>
+              <div class="pipe-step-item">
+                <div class="pipe-step-circle" id="pstep-tr">2</div>
+                <div class="pipe-step-label" id="pstep-tr-lbl">Транскрипция</div>
+              </div>
+              <div class="pipe-step-connector"><div class="pipe-step-connector-fill" id="pconn-2"></div></div>
+              <div class="pipe-step-item">
+                <div class="pipe-step-circle" id="pstep-pr">3</div>
+                <div class="pipe-step-label" id="pstep-pr-lbl">Протокол</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="pipe-bar-wrap" style="flex:1"><div class="pipe-bar-fill" id="pipe-bar"></div></div>
+              <div id="pipe-bar-pct" style="font-size:.7rem;color:var(--text-muted);font-family:var(--font-mono);min-width:30px;text-align:right">0%</div>
+            </div>
+          </div>
+          <details class="log-details" id="log-details">
+            <summary>Вывод терминала</summary>
+            <div class="terminal" id="log-output"></div>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <!-- Meeting viewer -->
+    <div class="view" id="view-meeting">
+      <div class="viewer-header">
+        <button class="back-btn-sm" onclick="closeViewer()">← назад</button>
+        <div class="viewer-title" id="viewer-title"></div>
+        <div class="viewer-tabs">
+          <button class="tab-btn" id="tab-transcript" onclick="showTab('transcript')">Транскрипция</button>
+          <button class="tab-btn active" id="tab-protocol" onclick="showTab('protocol')">Протокол</button>
+        </div>
+        <div class="viewer-actions-bar">
+          <button class="btn-ghost btn" style="font-size:.78rem;padding:5px 10px" onclick="copyContent()">Копировать</button>
+          <button class="btn-ghost btn" id="btn-regen" style="font-size:.78rem;padding:5px 10px" onclick="regenProtocol()">↻ Протокол</button>
+        </div>
+      </div>
+      <div class="viewer-body" id="viewer-body"></div>
+    </div>
+
+    <!-- Process view -->
+    <div class="view" id="view-process">
+      <div class="process-panel">
+        <div class="panel-title">
+          <button class="back-btn" onclick="showHome()">← назад</button>
+          <span>Обработка записи</span>
+        </div>
+
+        <div class="proc-step">
+          <div class="proc-step-num">1</div>
+          <div class="proc-step-body">
+            <div class="proc-step-title">Выбери встречу</div>
+            <div class="field" style="margin-bottom:0">
+              <select id="proc-folder"><option value="">— выбери встречу —</option></select>
+              <div class="err-msg" id="proc-folder-err" style="display:none">Выбери встречу из списка</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="proc-step">
+          <div class="proc-step-num">2</div>
+          <div class="proc-step-body">
+            <div class="proc-step-title">Параметры</div>
+            <div class="field" style="margin-bottom:8px">
+              <label>Имя для протокола (необязательно)</label>
+              <input type="text" id="proc-name" placeholder="например, 1-на-1 с коллегой">
+            </div>
+            <div class="chk-row" style="margin-bottom:0">
+              <input type="checkbox" id="only-transcript">
+              <label for="only-transcript">Только транскрипция (без протокола)</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="proc-step">
+          <div class="proc-step-num">3</div>
+          <div class="proc-step-body">
+            <div class="proc-step-title">Запустить</div>
+            <div class="proc-run-row">
+              <button class="btn btn-primary" id="btn-proc" onclick="startProc()">▶ Запустить</button>
+              <span class="rec-status" id="proc-st"></span>
+            </div>
+            <div class="log-wrap" id="proc-log-wrap" style="display:none;margin-top:10px">
+              <details class="log-details">
+                <summary>Вывод терминала</summary>
+                <div class="terminal" id="proc-out"></div>
+              </details>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings view -->
+    <div class="view" id="view-settings">
+      <div class="settings-wrap">
+        <div class="panel-title" style="margin-bottom:16px">
+          <button class="back-btn" onclick="showHome()">← назад</button>
+          <span>Настройки</span>
+        </div>
+
+        <!-- 1. Транскрипция -->
+        <div class="settings-section">
+          <div class="section-head open" onclick="toggleSection(this)">
+            <h3>Транскрипция</h3><span class="section-arrow">▾</span>
+          </div>
+          <div class="section-body open">
+            <div class="row">
+              <div class="field">
+                <label>Модель Whisper</label>
+                <select id="cfg-model">
+                  <option value="tiny">tiny — быстро, хуже</option>
+                  <option value="small">small</option>
+                  <option value="medium">medium (рекомендуется)</option>
+                  <option value="large-v3">large-v3 — медленно, лучше</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Язык</label>
+                <input type="text" id="cfg-lang" placeholder="ru">
+              </div>
+            </div>
+            <div class="row">
+              <div class="field">
+                <label>Устройство</label>
+                <select id="cfg-device" onchange="updateComputeTypes()">
+                  <option value="cpu">CPU</option>
+                  <option value="cuda">GPU (CUDA)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Тип вычислений</label>
+                <select id="cfg-compute"></select>
+              </div>
+              <div class="field">
+                <label>Beam size</label>
+                <input type="number" id="cfg-beam" min="1" max="10" step="1">
+              </div>
+            </div>
+            <div class="chk-row">
+              <input type="checkbox" id="cfg-vad" onchange="toggleVad()">
+              <label for="cfg-vad">Фильтр тишины (VAD)</label>
+            </div>
+            <div class="row" id="vad-params">
+              <div class="field">
+                <label>Минимальная тишина (мс)</label>
+                <input type="number" id="cfg-silence" min="100" max="5000" step="100">
+              </div>
+              <div class="field">
+                <label>Отступ вокруг речи (мс)</label>
+                <input type="number" id="cfg-pad" min="0" max="1000" step="50">
+              </div>
+            </div>
+            <div class="save-row">
+              <button class="btn btn-primary" onclick="saveConfig()">Сохранить</button>
+              <span class="save-flash" id="save-flash-t">✓ Сохранено</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Протокол и API -->
+        <div class="settings-section">
+          <div class="section-head" onclick="toggleSection(this)">
+            <h3>Протокол и API</h3><span class="section-arrow">▾</span>
+          </div>
+          <div class="section-body">
+            <div class="kind-tabs">
+              <button class="kind-tab active" id="tab-cloud" onclick="switchKind('cloud')">☁ Облачные</button>
+              <button class="kind-tab" id="tab-local" onclick="switchKind('local')">⬡ Локальные</button>
+            </div>
+            <!-- Облачные -->
+            <div id="kind-cloud">
+              <div class="row">
+                <div class="field">
+                  <label>Провайдер</label>
+                  <select id="cfg-provider" onchange="toggleProviderFields()">
+                    <option value="claude">Claude (Anthropic)</option>
+                    <option value="gemini">Gemini (Google)</option>
+                    <option value="mistral">Mistral AI</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Max tokens</label>
+                  <select id="cfg-tokens">
+                    <option value="2048">2 048 — краткий протокол</option>
+                    <option value="4096">4 096 — стандартная встреча (~60 мин)</option>
+                    <option value="8192">8 192 — подробный / длинная встреча</option>
+                    <option value="16384">16 384 — максимум</option>
+                  </select>
+                </div>
+              </div>
+              <div id="claude-fields">
+                <div class="row">
+                  <div class="field">
+                    <label>Модель Claude</label>
+                    <select id="cfg-claude"></select>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>ANTHROPIC_API_KEY</label>
+                  <div class="key-row">
+                    <input type="password" id="cfg-key" placeholder="sk-ant-..." oninput="clearKeyInfo('cfg-key')">
+                    <button class="show-btn" onclick="toggleKey('cfg-key')">показать</button>
+                  </div>
+                  <div id="cfg-key-info" class="key-info"></div>
+                  <span class="hint">Приоритет: переменная окружения → системный keyring. Сохранение из UI пишет в keyring.</span>
+                </div>
+              </div>
+              <div id="gemini-fields" style="display:none">
+                <div class="row">
+                  <div class="field">
+                    <label>Модель Gemini</label>
+                    <select id="cfg-gemini"></select>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>GEMINI_API_KEY</label>
+                  <div class="key-row">
+                    <input type="password" id="cfg-gemini-key" placeholder="AIza..." oninput="clearKeyInfo('cfg-gemini-key')">
+                    <button class="show-btn" onclick="toggleKey('cfg-gemini-key')">показать</button>
+                  </div>
+                  <div id="cfg-gemini-key-info" class="key-info"></div>
+                  <span class="hint">Приоритет: переменная окружения → системный keyring.</span>
+                </div>
+              </div>
+              <div id="mistral-fields" style="display:none">
+                <div class="row">
+                  <div class="field">
+                    <label>Модель Mistral</label>
+                    <select id="cfg-mistral"></select>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>MISTRAL_API_KEY</label>
+                  <div class="key-row">
+                    <input type="password" id="cfg-mistral-key" placeholder="..." oninput="clearKeyInfo('cfg-mistral-key')">
+                    <button class="show-btn" onclick="toggleKey('cfg-mistral-key')">показать</button>
+                  </div>
+                  <div id="cfg-mistral-key-info" class="key-info"></div>
+                  <span class="hint">Приоритет: переменная окружения → системный keyring.</span>
+                </div>
+              </div>
+            </div>
+            <!-- Локальные -->
+            <div id="kind-local" style="display:none">
+              <span class="privacy-badge">🔒 Данные не покидают компьютер</span>
+              <div class="field">
+                <label>Модель Ollama</label>
+                <input list="ollama-datalist" id="cfg-ollama-model" placeholder="qwen2.5:14b-instruct-q4_K_M">
+                <datalist id="ollama-datalist"></datalist>
+                <span class="hint">Введи имя любой установленной модели или выбери из списка</span>
+              </div>
+              <div class="field">
+                <label>Ollama Base URL</label>
+                <input type="text" id="cfg-ollama-url" placeholder="http://localhost:11434/v1">
+              </div>
+              <div class="ollama-status" id="ollama-status-row">
+                <span id="ollama-dot" class="dot-err"></span>
+                <span id="ollama-status-text">Статус неизвестен</span>
+                <button class="show-btn" onclick="checkOllamaStatus()">Проверить</button>
+              </div>
+            </div>
+            <div class="save-row" style="margin-top:4px">
+              <button class="btn btn-primary" onclick="saveProtocolConfig()">Сохранить</button>
+              <span class="save-flash" id="save-flash-p">✓ Сохранено</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Шаблоны промптов -->
+        <div class="settings-section">
+          <div class="section-head" onclick="toggleSection(this)">
+            <h3>Шаблоны промптов</h3><span class="section-arrow">▾</span>
+          </div>
+          <div class="section-body">
+            <div class="field">
+              <label>Активный шаблон</label>
+              <div class="tmpl-head">
+                <select id="tmpl-select" onchange="onTmplSelect()"></select>
+                <button class="btn btn-ghost" onclick="addTemplate()">+ Новый</button>
+                <button class="btn btn-ghost" onclick="deleteTemplate()">Удалить</button>
+              </div>
+              <span class="hint">Файлы в папке prompts/ — каждый файл один шаблон</span>
+            </div>
+            <div class="field">
+              <label>Промпт (используй {meeting_name} и {transcript})</label>
+              <textarea id="tmpl-prompt" rows="10"></textarea>
+            </div>
+            <div class="save-row">
+              <button class="btn btn-primary" onclick="saveTemplate()">Сохранить шаблон</button>
+              <span class="save-flash" id="save-flash-tmpl">✓ Сохранено</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Хранилище -->
+        <div class="settings-section">
+          <div class="section-head" onclick="toggleSection(this)">
+            <h3>Хранилище</h3><span class="section-arrow">▾</span>
+          </div>
+          <div class="section-body">
+            <div class="field">
+              <label>Папка для встреч</label>
+              <div class="key-row">
+                <input type="text" id="storage-dir" placeholder="~/Documents/meetings" oninput="onStorageDirInput()">
+                <button class="btn btn-ghost" onclick="resetStorageDir()">Сбросить</button>
+              </div>
+              <span class="hint" id="storage-resolved"></span>
+              <span id="storage-status"></span>
+            </div>
+            <div class="save-row">
+              <button class="btn btn-primary" onclick="saveStorageDir()">Сохранить путь</button>
+              <span class="save-flash" id="save-flash-storage">✓ Сохранено</span>
+            </div>
+            <span class="hint">После смены пути существующие встречи в старой папке остаются — перенесите вручную при необходимости.</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Confirm overlay -->
+    <div id="confirm-overlay" onclick="if(event.target===this)closeConfirm()">
+      <div class="confirm-box">
+        <h3 id="confirm-title">Удалить встречу?</h3>
+        <p id="confirm-msg">Это действие нельзя отменить.</p>
+        <div class="confirm-actions">
+          <button class="btn btn-ghost" onclick="closeConfirm()">Отмена</button>
+          <button class="btn btn-danger" onclick="confirmDelete()">Удалить</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
