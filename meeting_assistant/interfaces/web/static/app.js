@@ -506,6 +506,7 @@ async function fetchSources() {
   d.sinks.forEach(s => ss.add(new Option(s, s)));
   if (window._savedMic) ms.value = window._savedMic;
   if (window._savedSys) ss.value = window._savedSys;
+  checkMicMute();
 }
 
 // ============================================================
@@ -525,7 +526,58 @@ async function fetchRecordings() {
 let recTimer = null;
 let _recFolder = null;
 
+function _showRecWarning(msg) {
+  const el = document.getElementById('rec-warning');
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+function _hideRecWarning() {
+  document.getElementById('rec-warning').style.display = 'none';
+}
+
+let _audioMonitorTimer = null;
+let _silentTicks = 0;
+const _SILENCE_THRESHOLD_DB = -40;
+const _SILENCE_WARN_SECS = 5;
+
+function _startAudioMonitor() {
+  _silentTicks = 0;
+  _audioMonitorTimer = setInterval(async () => {
+    try {
+      const r = await fetch('/api/record/audio-level');
+      const d = await r.json();
+      if (!d.recording) { _stopAudioMonitor(); return; }
+      const silent = d.max_db === null || d.max_db < _SILENCE_THRESHOLD_DB;
+      if (silent) {
+        _silentTicks++;
+        if (_silentTicks >= _SILENCE_WARN_SECS) {
+          _showRecWarning('⚠ Не слышно звука — проверь микрофон');
+        }
+      } else {
+        _silentTicks = 0;
+        _hideRecWarning();
+      }
+    } catch (_) {}
+  }, 1000);
+}
+
+function _stopAudioMonitor() {
+  if (_audioMonitorTimer) { clearInterval(_audioMonitorTimer); _audioMonitorTimer = null; }
+  _silentTicks = 0;
+}
+
+async function checkMicMute() {
+  const source = document.getElementById('mic-src').value;
+  try {
+    const r = await fetch('/api/record/mic-mute?source=' + encodeURIComponent(source));
+    const d = await r.json();
+    document.getElementById('mic-mute-dot').style.display = d.muted ? '' : 'none';
+  } catch (_) {}
+}
+
 async function startRec() {
+  _hideRecWarning();
   const name = document.getElementById('rec-name').value.trim();
   const prependDate = document.getElementById('prepend-date').checked;
   await fetch('/api/config', {
@@ -551,9 +603,11 @@ async function startRec() {
   document.getElementById('rec-btn-label').textContent = 'Запись...';
   btnRec.onclick = () => showView('record');
   recTimer = setInterval(pollRec, 1000);
+  _startAudioMonitor();
 }
 
 async function stopRec() {
+  _stopAudioMonitor();
   await fetch('/api/record/stop', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: _recFolder || '' }),
@@ -1117,3 +1171,4 @@ async function startUpload() {
 fetchConfig().then(fetchSources);
 fetchMeetings();
 fetchTemplates();
+setInterval(checkMicMute, 2000);

@@ -58,6 +58,14 @@ find "$CACHE_DIR" -name "current-*.wav" -mmin +1440 -delete 2>/dev/null || true
 show_result() {
     if [[ -f "$OUTPUT" && -s "$OUTPUT" ]]; then
         echo "Файл записан: $OUTPUT"
+        # Проверяем, не беззвучна ли запись
+        MAX_VOL=$(ffmpeg -i "$OUTPUT" -af "volumedetect" -f null /dev/null 2>&1 \
+            | grep -oP 'max_volume:\s*\K[-0-9.]+' | head -1)
+        if [[ -n "$MAX_VOL" ]] && awk "BEGIN{exit !($MAX_VOL < -40)}"; then
+            echo ""
+            echo "ВНИМАНИЕ: Запись почти беззвучна (max_volume: ${MAX_VOL} dB)."
+            echo "Возможно, микрофон был выключен во время записи."
+        fi
         echo ""
         echo "Для создания протокола запусти:"
         echo "  cd $ROOT_DIR && ./scripts/process-meeting.sh \"$OUTPUT\""
@@ -103,6 +111,7 @@ MONITOR_SOURCE="${MONITOR_SOURCE:-$(pactl get-default-sink).monitor}"
 echo "Микрофон:        $MIC_SOURCE"
 echo "Системный аудио: $MONITOR_SOURCE"
 echo ""
+
 echo "Папка встречи: $MEETING_DIR"
 echo "Запись → $OUTPUT"
 echo "Нажми Ctrl+C чтобы остановить."

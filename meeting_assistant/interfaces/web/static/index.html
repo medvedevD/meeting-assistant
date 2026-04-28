@@ -65,8 +65,12 @@
         <div id="rec-controls">
           <div class="form-row">
             <div class="field">
-              <label>Микрофон</label>
-              <select id="mic-src"><option value="">— по умолчанию —</option></select>
+              <label style="display:flex;align-items:center;gap:6px">
+                Микрофон
+                <span id="mic-mute-dot" title="Микрофон выключен (muted)"
+                      style="display:none;width:7px;height:7px;border-radius:50%;background:var(--danger-text);flex-shrink:0"></span>
+              </label>
+              <select id="mic-src" onchange="checkMicMute()"><option value="">— по умолчанию —</option></select>
             </div>
             <div class="field">
               <label>Системный звук</label>

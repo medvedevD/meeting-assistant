@@ -1,5 +1,7 @@
+import math
 import re
 import signal
+import struct
 import subprocess
 import time
 from pathlib import Path
@@ -7,6 +9,11 @@ from fastapi import APIRouter, Request, HTTPException
 from ..schemas import RecordStartRequest, RecordStopRequest
 
 router = APIRouter()
+
+_CACHE_DIR = Path.home() / ".cache/meeting-assistant/recording"
+_WAV_HEADER = 44
+_SAMPLE_RATE = 16000
+_BYTES_PER_SAMPLE = 2  # pcm_s16le
 
 
 def _get_mic_source(container) -> str:
@@ -23,25 +30,52 @@ def _is_mic_muted(source: str) -> bool:
                 ["pactl", "get-default-source"], text=True, timeout=2
             ).strip()
         out = subprocess.check_output(
-            ["pactl", "get-source-mute", source], text=True, timeout=2
+            ["pactl", "get-source-mute", source], text=True, timeout=2,
+            env={**__import__("os").environ, "LANG": "C"},
         )
         return "yes" in out.lower()
     except Exception:
         return False
 
 
-def _is_audio_silent(wav_path: Path, threshold_db: float = -40.0) -> bool:
+def _live_wav_max_db(window_secs: float = 2.0) -> float | None:
+    """Peak dB over the last `window_secs` of the current live recording, or None."""
+    if not _CACHE_DIR.exists():
+        return None
+    files = sorted(_CACHE_DIR.glob("current-*.wav"), key=lambda f: f.stat().st_mtime, reverse=True)
+    if not files:
+        return None
+    read_bytes = int(window_secs * _SAMPLE_RATE * _BYTES_PER_SAMPLE)
     try:
-        result = subprocess.run(
-            ["ffmpeg", "-i", str(wav_path), "-af", "volumedetect", "-f", "null", "/dev/null"],
-            capture_output=True, text=True, timeout=60,
-        )
-        m = re.search(r"max_volume:\s*([-\d.]+)\s*dB", result.stderr)
-        if m:
-            return float(m.group(1)) < threshold_db
+        with open(files[0], "rb") as f:
+            total = f.seek(0, 2)
+            available = total - _WAV_HEADER
+            if available <= 0:
+                return None
+            to_read = min(read_bytes, available) & ~1  # keep even
+            f.seek(-to_read, 2)
+            data = f.read(to_read)
+        samples = struct.unpack(f"<{len(data) // 2}h", data)
+        peak = max(abs(s) for s in samples)
+        return 20 * math.log10(peak / 32767.0) if peak > 0 else -96.0
     except Exception:
-        pass
-    return False
+        return None
+
+
+@router.get("/record/mic-mute")
+def get_mic_mute(source: str = "", request: Request = None):
+    return {"muted": _is_mic_muted(source)}
+
+
+@router.get("/record/audio-level")
+def get_audio_level(request: Request):
+    ws = request.app.state.web_state
+    with ws.rec_lock:
+        recording = ws.rec_proc is not None and ws.rec_proc.poll() is None
+    if not recording:
+        return {"recording": False}
+    max_db = _live_wav_max_db()
+    return {"recording": True, "max_db": max_db}
 
 
 @router.get("/record/status")
@@ -74,9 +108,7 @@ def post_rec_start(data: RecordStartRequest, request: Request):
         )
         ws.rec_start = time.time()
 
-    mic_source = _get_mic_source(request.app.state.container)
-    warning = "mic_muted" if _is_mic_muted(mic_source) else None
-    return {"ok": True, "folder": name, "warning": warning}
+    return {"ok": True, "folder": name}
 
 
 @router.post("/record/stop")
@@ -100,15 +132,4 @@ def post_rec_stop(data: RecordStopRequest, request: Request):
                 old_path.rename(new_path)
                 ws.rec_folder = new_name
 
-    warning = None
-    folder = ws.rec_folder
-    if folder:
-        wav = meetings_dir / folder / "recording.wav"
-        # ffmpeg needs a moment to flush before we can read the file
-        deadline = time.time() + 3.0
-        while not wav.exists() and time.time() < deadline:
-            time.sleep(0.1)
-        if wav.exists():
-            warning = "silent_audio" if _is_audio_silent(wav) else None
-
-    return {"ok": True, "folder": ws.rec_folder, "warning": warning}
+    return {"ok": True, "folder": ws.rec_folder}
