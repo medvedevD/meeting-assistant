@@ -20,7 +20,7 @@ class MistralProvider(BaseLLMProvider):
             raise SystemExit(
                 "Ошибка: MISTRAL_API_KEY не задан. Укажи ключ в настройках или переменной окружения."
             )
-        model = self._config.get("protocol", "mistral_model", "mistral-small-latest")
+        model = getattr(self, "_model_override", None) or self._config.get("protocol", "mistral_model", "mistral-small-latest")
         prompt = f"{transcript}\n\n{instructions}" if instructions else transcript
         client = Mistral(api_key=api_key)
         with client.chat.stream(

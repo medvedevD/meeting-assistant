@@ -11,6 +11,7 @@ from ..domain.ports.template_repository import ITemplateRepository
 from ..domain.ports.config_provider import IConfigProvider
 from ..domain.ports.event_bus import IEventBus
 from ..domain.entities.recording import Recording
+from ..domain.value_objects.meeting_status import MeetingStatus
 from .events import TranscriptReady, ProtocolGenerated
 
 _log = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class ProcessMeetingUseCase:
         self,
         req: ProcessMeetingRequest,
         on_stage: Callable[[str], None] | None = None,
+        on_progress: Callable[[float], None] | None = None,
     ) -> ProcessMeetingResult:
         def notify(stage: str) -> None:
             if on_stage:
@@ -73,8 +75,13 @@ class ProcessMeetingUseCase:
         else:
             notify("transcribe")
             _log.info("Транскрибирую: %s", req.audio_path)
+            self._try_update_status(slug, MeetingStatus.TRANSCRIBING)
             recording = Recording(path=req.audio_path)
-            transcript = self._transcriber.transcribe(recording, req.whisper_model)
+            try:
+                transcript = self._transcriber.transcribe(recording, req.whisper_model, on_progress=on_progress)
+            except Exception:
+                self._try_update_status(slug, MeetingStatus.TRANSCRIBE_FAILED)
+                raise
             transcript_text = transcript.to_text()
             transcript_path = self._repo.save_transcript(slug, req.meeting_name, transcript_text, date_str)
             _log.info("Транскрипция сохранена: %s", transcript_path)
@@ -85,8 +92,13 @@ class ProcessMeetingUseCase:
         if req.generate_protocol:
             notify("protocol")
             protocol_path = meeting_dir / "protocol.md"
+            self._try_update_status(slug, MeetingStatus.GENERATING)
             instructions = self._build_instructions(transcript_text, req.meeting_name)
-            content = self._llm.generate(transcript_text, instructions, partial_save_path=protocol_path)
+            try:
+                content = self._llm.generate(transcript_text, instructions, partial_save_path=protocol_path)
+            except Exception:
+                self._try_update_status(slug, MeetingStatus.PROTOCOL_FAILED)
+                raise
             protocol_path = self._repo.save_protocol(slug, req.meeting_name, content, date_str)
             _log.info("Протокол сохранён: %s", protocol_path)
             if self._bus:
@@ -97,6 +109,12 @@ class ProcessMeetingUseCase:
             protocol_path=protocol_path,
             meeting_name=req.meeting_name,
         )
+
+    def _try_update_status(self, slug, status: MeetingStatus) -> None:
+        try:
+            self._repo.update_status(slug, status)
+        except Exception:
+            pass  # state machine violation or DB error — don't break the pipeline
 
     def _build_instructions(self, transcript: str, meeting_name: str) -> str | None:
         active_name = self._config.get("protocol", "active_template", "")

@@ -24,7 +24,8 @@ class BaseLLMProvider(ABC):
     @abstractmethod
     def _stream_chunks(self, transcript: str, instructions: str | None): ...
 
-    def generate(self, transcript: str, instructions: str | None, partial_save_path: Path) -> str:
+    def generate(self, transcript: str, instructions: str | None, partial_save_path: Path, *, model: str | None = None) -> str:
+        self._model_override = model or None
         max_retries = len(self.RETRY_WAITS) + 1
         for attempt in range(max_retries):
             result: list[str] = []

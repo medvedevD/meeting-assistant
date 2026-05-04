@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import BinaryIO
 from ..entities.meeting import Meeting
 from ..value_objects.meeting_slug import MeetingSlug
+from ..value_objects.meeting_status import MeetingStatus
 
 
 class IMeetingRepository(ABC):
@@ -33,4 +34,25 @@ class IMeetingRepository(ABC):
     def list(self) -> list[Meeting]: ...
 
     @abstractmethod
+    def get(self, slug: MeetingSlug) -> Meeting | None: ...
+
+    @abstractmethod
     def delete(self, slug: MeetingSlug) -> None: ...
+
+    @abstractmethod
+    def has_transcript(self, slug: MeetingSlug) -> bool: ...
+
+    @abstractmethod
+    def has_protocol(self, slug: MeetingSlug) -> bool: ...
+
+    @abstractmethod
+    def update_status(self, slug: MeetingSlug, new_status: MeetingStatus) -> None: ...
+
+    @abstractmethod
+    def delete_transcript(self, slug: MeetingSlug) -> None: ...
+
+    @abstractmethod
+    def delete_protocol(self, slug: MeetingSlug) -> None: ...
+
+    @abstractmethod
+    def delete_audio(self, slug: MeetingSlug) -> None: ...

@@ -1,9 +1,11 @@
+import logging
 import os
 from pathlib import Path
 import sys
 
 _ROOT_DIR = Path(__file__).parent.parent.parent  # project root
 _SCRIPTS_DIR = _ROOT_DIR / "scripts"
+_log = logging.getLogger(__name__)
 
 
 def _resolve_config_path() -> Path:
@@ -32,7 +34,9 @@ if str(_SCRIPTS_DIR) not in sys.path:
 from ..adapters.config.json_config import JsonConfigProvider
 from ..adapters.config.filesystem_template_repo import FilesystemTemplateRepository
 from ..adapters.storage.filesystem_meeting_repo import FilesystemMeetingRepository
+from ..adapters.storage.sqlite_meeting_repo import SqliteMeetingRepository
 from ..adapters.storage.sqlite_index import SqliteIndexAdapter
+from ..adapters.storage.sqlite_job_repo import SqliteJobRepo
 from ..adapters.transcription.faster_whisper import FasterWhisperTranscriber
 from ..adapters.llm.provider_adapter import LLMProviderAdapter
 from ..adapters.event_bus.in_process import InProcessEventBus
@@ -50,7 +54,9 @@ class Container:
         self.scripts_dir = root_dir / "scripts"
         self.config = JsonConfigProvider(_resolve_config_path())
         self.template_repo = FilesystemTemplateRepository(root_dir / "prompts")
-        self.meeting_repo = FilesystemMeetingRepository(self._resolve_meetings_dir())
+        _fs_repo = FilesystemMeetingRepository(self._resolve_meetings_dir())
+        self.meeting_repo = SqliteMeetingRepository(_fs_repo)
+        self.meeting_repo.backfill()
         self.transcriber = FasterWhisperTranscriber(self.config)
         self.llm_provider = LLMProviderAdapter(self.config)
 
@@ -80,6 +86,34 @@ class Container:
         self.delete_meeting = DeleteMeetingUseCase(self.meeting_repo, event_bus=self.event_bus)
         self.manage_templates = ManageTemplatesUseCase(self.template_repo)
 
+        # ── RQ pipeline (optional, enabled by JOB_RUNNER=rq) ─────────────────
+        self.job_runner = None
+        self.job_repo = None
+        self.pipeline_coordinator = None
+        if os.environ.get("JOB_RUNNER", "").lower() == "rq":
+            self._init_rq()
+
+
+    def _init_rq(self) -> None:
+        from ..adapters.jobs.rq_runner import RQRunner
+        from ..application.orchestration.pipeline_coordinator import PipelineCoordinator
+        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+        self.job_runner = RQRunner(redis_url)
+        if not self.job_runner.ping():
+            _log.warning(
+                "Redis not reachable at %s — RQ pipeline disabled. "
+                "Start Redis or set JOB_RUNNER=legacy to suppress this warning.",
+                redis_url,
+            )
+            self.job_runner = None
+            return
+        self.job_repo = SqliteJobRepo(self.meeting_repo._db_path)
+        self.pipeline_coordinator = PipelineCoordinator(
+            meeting_repo=self.meeting_repo,
+            job_repo=self.job_repo,
+            job_runner=self.job_runner,
+        )
+        _log.info("RQ pipeline enabled (Redis: %s)", redis_url)
 
     def _resolve_meetings_dir(self) -> Path:
         raw = (
@@ -94,11 +128,15 @@ class Container:
     def rebuild_meeting_repo(self, new_path: str) -> None:
         path = Path(new_path).expanduser()
         path.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.meeting_repo = FilesystemMeetingRepository(path)
+        _fs_repo = FilesystemMeetingRepository(path)
+        self.meeting_repo = SqliteMeetingRepository(_fs_repo)
+        self.meeting_repo.backfill()
         self.process_meeting.meeting_repo = self.meeting_repo
         self.regenerate_protocol.meeting_repo = self.meeting_repo
         self.list_meetings.meeting_repo = self.meeting_repo
         self.delete_meeting.meeting_repo = self.meeting_repo
+        if self.pipeline_coordinator is not None:
+            self.pipeline_coordinator._repo = self.meeting_repo
 
 
 def build_container(root_dir: Path = _ROOT_DIR) -> Container:

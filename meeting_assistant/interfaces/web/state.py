@@ -14,3 +14,5 @@ class WebState:
     proc_lock: threading.Lock = field(default_factory=threading.Lock)
     proc_queue: queue.Queue = field(default_factory=queue.Queue)
     proc_running: bool = False
+    proc_proc: subprocess.Popen | None = None
+    rq_current_slug: str | None = None

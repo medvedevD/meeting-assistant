@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import threading
@@ -11,8 +12,9 @@ from fastapi.staticfiles import StaticFiles
 
 from ...infrastructure.container import build_container
 from ...infrastructure.logging_setup import configure_logging
+from ...application.watchdog import run_watchdog
 from .state import WebState
-from .routes import config, meetings, recording, processing, templates, search, upload
+from .routes import config, meetings, recording, processing, templates, search, upload, pipeline
 
 configure_logging()
 _log = logging.getLogger(__name__)
@@ -26,7 +28,30 @@ async def lifespan(app: FastAPI):
     url = f"http://127.0.0.1:{port}"
     _log.info("Meeting Assistant → %s", url)
     threading.Timer(0.4, lambda: webbrowser.open(url)).start()
+
+    # Reconcile orphaned RQ jobs (re-queue anything that was running before restart)
+    coordinator = getattr(app.state.container, "pipeline_coordinator", None)
+    if coordinator is not None:
+        try:
+            requeued = coordinator.reconcile()
+            if requeued:
+                _log.info("Reconciled %d orphaned job(s) back to queued", requeued)
+        except Exception:
+            _log.exception("Reconcile failed — continuing startup")
+
+    # Start watchdog: stale-job detection + recording-limit enforcement
+    watchdog_task = asyncio.create_task(
+        run_watchdog(app.state.container, web_state=app.state.web_state),
+        name="watchdog",
+    )
+
     yield
+
+    watchdog_task.cancel()
+    try:
+        await watchdog_task
+    except asyncio.CancelledError:
+        pass
 
 
 def create_app() -> FastAPI:
@@ -40,6 +65,7 @@ def create_app() -> FastAPI:
         meetings.router,
         recording.router,
         processing.router,
+        pipeline.router,
         templates.router,
         search.router,
         upload.router,

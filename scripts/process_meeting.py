@@ -59,7 +59,10 @@ def main():
     def on_stage(stage: str) -> None:
         print(f"__STAGE:{stage}__", flush=True)
 
-    container.process_meeting.execute(request, on_stage=on_stage)
+    def on_progress(value: float) -> None:
+        print(f"__PROGRESS:{value:.3f}__", flush=True)
+
+    container.process_meeting.execute(request, on_stage=on_stage, on_progress=on_progress)
 
 
 if __name__ == "__main__":

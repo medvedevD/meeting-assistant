@@ -1,6 +1,4 @@
-import itertools
-import threading
-import time
+from collections.abc import Callable
 from pathlib import Path
 
 from ...domain.ports.transcriber import ITranscriber
@@ -19,35 +17,25 @@ class FasterWhisperTranscriber(ITranscriber):
     def __init__(self, config: IConfigProvider):
         self._config = config
 
-    def transcribe(self, recording: Recording, model_name: str) -> Transcript:
+    def transcribe(
+        self,
+        recording: Recording,
+        model_name: str,
+        on_progress: Callable[[float], None] | None = None,
+    ) -> Transcript:
         from faster_whisper import WhisperModel
-        import wave
 
         device = self._config.get("transcription", "device", "cpu")
         compute_type = self._config.get("transcription", "compute_type", "int8")
         beam_size = self._config.get("transcription", "beam_size", 5)
 
         if _is_model_cached(model_name):
-            print(f"Загружаю модель Whisper ({model_name}, {device})...")
+            print(f"Загружаю модель Whisper ({model_name}, {device})...", flush=True)
         else:
             sizes = {"tiny": "75 МБ", "small": "244 МБ", "medium": "1.5 ГБ", "large-v3": "3 ГБ"}
             size = sizes.get(model_name, "?")
-            print(f"Загружаю модель Whisper ({model_name}, первый раз — скачает ~{size})...")
+            print(f"Загружаю модель Whisper ({model_name}, первый раз — скачает ~{size})...", flush=True)
         model = WhisperModel(model_name, device=device, compute_type=compute_type)
-
-        stop_event = threading.Event()
-
-        def spinner():
-            frames = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
-            start = time.time()
-            while not stop_event.is_set():
-                elapsed = int(time.time() - start)
-                m, s = divmod(elapsed, 60)
-                print(f"\r  {next(frames)} {m:02d}:{s:02d}", end="", flush=True)
-                time.sleep(0.1)
-
-        t = threading.Thread(target=spinner, daemon=True)
-        t.start()
 
         language = self._config.get("transcription", "language", "ru")
         vad_filter = self._config.get("transcription", "vad_filter", True)
@@ -61,14 +49,18 @@ class FasterWhisperTranscriber(ITranscriber):
             vad_filter=vad_filter,
             vad_parameters=dict(min_silence_duration_ms=min_silence, speech_pad_ms=speech_pad),
         )
-        segments = [
-            TranscriptSegment(start=seg.start, end=seg.end, text=seg.text.strip())
-            for seg in raw_segments
-        ]
 
-        stop_event.set()
-        t.join()
-        print(f"\r  ✓ Готово — язык: {info.language} ({info.language_probability:.0%})      ")
+        total_duration = info.duration or 0.0
+        segments = []
+        for seg in raw_segments:
+            segments.append(TranscriptSegment(start=seg.start, end=seg.end, text=seg.text.strip()))
+            if on_progress and total_duration > 0:
+                on_progress(min(seg.end / total_duration, 1.0))
+
+        if on_progress:
+            on_progress(1.0)
+
+        print(f"  ✓ Готово — язык: {info.language} ({info.language_probability:.0%})", flush=True)
 
         return Transcript(
             segments=segments,

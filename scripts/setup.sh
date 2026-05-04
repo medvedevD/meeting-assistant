@@ -36,8 +36,8 @@ fi
 
 echo ""
 echo "=== Установка Python-зависимостей ==="
-"$ROOT_DIR/.venv/bin/pip" install --quiet --upgrade faster-whisper anthropic google-genai mistralai openai fastapi "uvicorn[standard]" pydantic keyring python-multipart
-echo "  ✓ faster-whisper, anthropic, google-genai, mistralai, openai, fastapi, uvicorn, pydantic, keyring, python-multipart"
+"$ROOT_DIR/.venv/bin/python3" -m pip install --quiet --upgrade faster-whisper anthropic google-genai mistralai openai fastapi "uvicorn[standard]" pydantic keyring python-multipart rq redis
+echo "  ✓ faster-whisper, anthropic, google-genai, mistralai, openai, fastapi, uvicorn, pydantic, keyring, python-multipart, rq, redis"
 
 echo ""
 echo "=== Создание директорий ==="

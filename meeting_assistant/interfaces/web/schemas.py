@@ -15,6 +15,9 @@ class ProcessStartRequest(BaseModel):
     folder: str
     name: str = ""
     model: str = ""
+    template: str = ""
+    provider: str = ""
+    llm_model: str = ""
     no_protocol: bool = False
     from_transcript: bool = False
 
