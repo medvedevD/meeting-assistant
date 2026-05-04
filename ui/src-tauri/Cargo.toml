@@ -1,0 +1,23 @@
+[package]
+name = "meeting-assistant-tauri"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "meeting_assistant_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "meeting-assistant-tauri"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+meeting-core = { path = "../../rust/crates/core" }
+meeting-adapters = { path = "../../rust/crates/adapters" }
+tauri = { version = "2", features = [] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+anyhow = "1"

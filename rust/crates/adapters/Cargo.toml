@@ -1,0 +1,14 @@
+[package]
+name = "meeting-adapters"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+meeting-core = { path = "../core" }
+whisper-rs = "0.14"
+hound = "3"
+tokio = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
