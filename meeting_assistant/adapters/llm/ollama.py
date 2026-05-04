@@ -13,7 +13,7 @@ class OllamaProvider(BaseLLMProvider):
     def _stream_chunks(self, transcript: str, instructions: str | None):
         from openai import OpenAI
         base_url = self._config.get("protocol", "ollama_base_url", "http://localhost:11434/v1")
-        model = self._config.get("protocol", "ollama_model", "qwen2.5:14b-instruct-q4_K_M")
+        model = getattr(self, "_model_override", None) or self._config.get("protocol", "ollama_model", "qwen2.5:14b-instruct-q4_K_M")
         prompt = f"{transcript}\n\n{instructions}" if instructions else transcript
         client = OpenAI(api_key="ollama", base_url=base_url)
         with client.chat.completions.create(

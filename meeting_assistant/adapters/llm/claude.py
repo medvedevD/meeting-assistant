@@ -19,7 +19,7 @@ class ClaudeProvider(BaseLLMProvider):
         )
         if not api_key:
             raise SystemExit("Ошибка: ANTHROPIC_API_KEY не задан. Запусти setup.sh для инструкции.")
-        model = self._config.get("protocol", "claude_model", "claude-sonnet-4-6")
+        model = getattr(self, "_model_override", None) or self._config.get("protocol", "claude_model", "claude-sonnet-4-6")
         max_tokens = self._config.get("protocol", "max_tokens", 8192)
         # Transcript as a cached block — regenerating with a different template hits the cache.
         transcript_block = {

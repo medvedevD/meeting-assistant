@@ -13,6 +13,7 @@ from meeting_assistant.domain.ports.meeting_repository import IMeetingRepository
 from meeting_assistant.domain.ports.template_repository import ITemplateRepository
 from meeting_assistant.domain.ports.transcriber import ITranscriber
 from meeting_assistant.domain.value_objects.meeting_slug import MeetingSlug
+from meeting_assistant.domain.value_objects.meeting_status import MeetingStatus
 from meeting_assistant.domain.value_objects.transcript_segment import TranscriptSegment
 
 
@@ -35,7 +36,7 @@ class FakeTranscriber(ITranscriber):
         self._text = result_text
         self.calls: list[tuple[Recording, str]] = []
 
-    def transcribe(self, recording: Recording, model_name: str) -> Transcript:
+    def transcribe(self, recording: Recording, model_name: str, on_progress=None) -> Transcript:
         self.calls.append((recording, model_name))
         seg = TranscriptSegment(start=0.0, end=5.0, text=self._text)
         return Transcript(segments=[seg])
@@ -57,12 +58,19 @@ class _MeetingRecord:
     transcript: str = ""
     protocol: str = ""
     deleted: bool = False
+    status: MeetingStatus = MeetingStatus.CREATED
 
 
 class FakeMeetingRepository(IMeetingRepository):
     def __init__(self, base_dir: Path | None = None):
         self._records: dict[str, _MeetingRecord] = {}
         self._base = base_dir or Path("/fake/meetings")
+
+    def create_meeting_from_upload(self, title: str, upload_stream, original_filename: str) -> Path:
+        from io import BytesIO
+        slug = MeetingSlug.from_title(title or "upload", "2024-01-01")
+        self._records.setdefault(slug.value, _MeetingRecord(slug=slug))
+        return self._base / slug.value / f"recording{Path(original_filename).suffix}"
 
     def resolve_slug_for_audio(self, audio_path: Path, meeting_name: str) -> MeetingSlug:
         return MeetingSlug.from_title(meeting_name, "2024-01-01")
@@ -73,6 +81,7 @@ class FakeMeetingRepository(IMeetingRepository):
     def save_transcript(self, slug: MeetingSlug, meeting_name: str, text: str, date_str: str) -> Path:
         rec = self._records.setdefault(slug.value, _MeetingRecord(slug=slug))
         rec.transcript = text
+        rec.status = MeetingStatus.TRANSCRIBED
         return self._base / slug.value / "transcript.md"
 
     def load_transcript_text(self, slug: MeetingSlug) -> str:
@@ -84,14 +93,33 @@ class FakeMeetingRepository(IMeetingRepository):
     def save_protocol(self, slug: MeetingSlug, meeting_name: str, content: str, date_str: str) -> Path:
         rec = self._records.setdefault(slug.value, _MeetingRecord(slug=slug))
         rec.protocol = content
+        rec.status = MeetingStatus.COMPLETED
         return self._base / slug.value / "protocol.md"
 
     def list(self) -> list[Meeting]:
         return [
-            Meeting(slug=r.slug, title=r.slug.value.replace("_", " "))
+            Meeting(
+                slug=r.slug,
+                title=r.slug.value.replace("_", " "),
+                status=r.status,
+                has_transcript=bool(r.transcript),
+                has_protocol=bool(r.protocol),
+            )
             for r in self._records.values()
             if not r.deleted
         ]
+
+    def get(self, slug: MeetingSlug) -> Meeting | None:
+        rec = self._records.get(slug.value)
+        if not rec or rec.deleted:
+            return None
+        return Meeting(
+            slug=rec.slug,
+            title=rec.slug.value.replace("_", " "),
+            status=rec.status,
+            has_transcript=bool(rec.transcript),
+            has_protocol=bool(rec.protocol),
+        )
 
     def delete(self, slug: MeetingSlug) -> None:
         rec = self._records.get(slug.value)
@@ -105,6 +133,25 @@ class FakeMeetingRepository(IMeetingRepository):
     def has_protocol(self, slug: MeetingSlug) -> bool:
         rec = self._records.get(slug.value)
         return bool(rec and rec.protocol)
+
+    def update_status(self, slug: MeetingSlug, new_status: MeetingStatus) -> None:
+        rec = self._records.setdefault(slug.value, _MeetingRecord(slug=slug))
+        rec.status = new_status
+
+    def delete_transcript(self, slug: MeetingSlug) -> None:
+        rec = self._records.get(slug.value)
+        if rec:
+            rec.transcript = ""
+            rec.status = MeetingStatus.AUDIO_READY
+
+    def delete_protocol(self, slug: MeetingSlug) -> None:
+        rec = self._records.get(slug.value)
+        if rec:
+            rec.protocol = ""
+            rec.status = MeetingStatus.TRANSCRIBED if rec.transcript else MeetingStatus.AUDIO_READY
+
+    def delete_audio(self, slug: MeetingSlug) -> None:
+        pass
 
 
 class FakeTemplateRepository(ITemplateRepository):
@@ -123,6 +170,44 @@ class FakeTemplateRepository(ITemplateRepository):
 
     def delete(self, name: str) -> None:
         self._templates = [t for t in self._templates if t["name"] != name]
+
+
+class FakeJobRunner:
+    """In-memory stub for IJobRunner — records calls, returns deterministic IDs."""
+
+    def __init__(self):
+        self.enqueued: list[dict] = []
+        self._counter = 0
+
+    def _next_id(self) -> str:
+        self._counter += 1
+        return f"fake-rq-{self._counter}"
+
+    def enqueue_transcribe(self, job_id: str, slug: str, params: dict) -> str:
+        rq_id = self._next_id()
+        self.enqueued.append({"kind": "transcribe", "job_id": job_id, "slug": slug, "params": params, "delay": 0})
+        return rq_id
+
+    def enqueue_transcribe_delayed(self, job_id: str, slug: str, params: dict, delay_sec: int) -> str:
+        rq_id = self._next_id()
+        self.enqueued.append({"kind": "transcribe", "job_id": job_id, "slug": slug, "params": params, "delay": delay_sec})
+        return rq_id
+
+    def enqueue_protocol(self, job_id: str, slug: str, params: dict) -> str:
+        rq_id = self._next_id()
+        self.enqueued.append({"kind": "protocol", "job_id": job_id, "slug": slug, "params": params, "delay": 0})
+        return rq_id
+
+    def enqueue_protocol_delayed(self, job_id: str, slug: str, params: dict, delay_sec: int) -> str:
+        rq_id = self._next_id()
+        self.enqueued.append({"kind": "protocol", "job_id": job_id, "slug": slug, "params": params, "delay": delay_sec})
+        return rq_id
+
+    def cancel(self, rq_job_id: str) -> None:
+        pass
+
+    def is_alive(self, rq_job_id: str) -> bool:
+        return False
 
 
 class FakeEventBus(IEventBus):

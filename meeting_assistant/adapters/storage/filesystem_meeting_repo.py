@@ -9,6 +9,7 @@ from typing import BinaryIO
 from ...domain.ports.meeting_repository import IMeetingRepository
 from ...domain.entities.meeting import Meeting
 from ...domain.value_objects.meeting_slug import MeetingSlug
+from ...domain.value_objects.meeting_status import MeetingStatus
 
 _UNSAFE = re.compile(r"[^\w\-]")
 
@@ -152,10 +153,52 @@ class FilesystemMeetingRepository(IMeetingRepository):
             ))
         return meetings
 
+    def get(self, slug: MeetingSlug) -> Meeting | None:
+        meeting_dir = self.get_meeting_dir(slug)
+        if not meeting_dir.exists():
+            return None
+        has_t = (meeting_dir / "transcript.md").exists()
+        has_p = (meeting_dir / "protocol.md").exists()
+        if has_p:
+            status = MeetingStatus.COMPLETED
+        elif has_t:
+            status = MeetingStatus.TRANSCRIBED
+        elif any(meeting_dir.glob("recording.*")):
+            status = MeetingStatus.AUDIO_READY
+        else:
+            status = MeetingStatus.CREATED
+        return Meeting(
+            slug=slug,
+            title=slug.value.replace("_", " "),
+            status=status,
+            started_at=_parse_date_from_slug(slug.value),
+            has_transcript=has_t,
+            has_protocol=has_p,
+        )
+
     def delete(self, slug: MeetingSlug) -> None:
         meeting_dir = self.get_meeting_dir(slug)
         if meeting_dir.exists():
             shutil.rmtree(meeting_dir)
+
+    def has_transcript(self, slug: MeetingSlug) -> bool:
+        return (self.get_meeting_dir(slug) / "transcript.md").exists()
+
+    def has_protocol(self, slug: MeetingSlug) -> bool:
+        return (self.get_meeting_dir(slug) / "protocol.md").exists()
+
+    def update_status(self, slug: MeetingSlug, new_status: MeetingStatus) -> None:
+        pass  # filesystem repo has no persistent status — SqliteMeetingRepository overrides this
+
+    def delete_transcript(self, slug: MeetingSlug) -> None:
+        (self.get_meeting_dir(slug) / "transcript.md").unlink(missing_ok=True)
+
+    def delete_protocol(self, slug: MeetingSlug) -> None:
+        (self.get_meeting_dir(slug) / "protocol.md").unlink(missing_ok=True)
+
+    def delete_audio(self, slug: MeetingSlug) -> None:
+        for p in self.get_meeting_dir(slug).glob("recording.*"):
+            p.unlink()
 
 
 def _parse_date_from_slug(slug: str) -> datetime | None:

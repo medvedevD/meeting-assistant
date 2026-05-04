@@ -15,6 +15,12 @@
       <div class="sidebar-brand">
         <h1>Meeting Assistant</h1>
         <span class="badge">Local</span>
+        <button class="queue-badge" id="queue-badge" style="display:none" onclick="toggleQueuePanel(event)" title="Активные задачи"></button>
+      </div>
+      <!-- Queue dropdown panel -->
+      <div class="queue-panel" id="queue-panel" style="display:none">
+        <div class="queue-panel-header">Очередь задач</div>
+        <div id="queue-panel-list"></div>
       </div>
       <input class="search-input" type="search" id="search-input"
              placeholder="Поиск встреч..." oninput="onSearch(this.value)">
@@ -28,12 +34,10 @@
     </div>
 
     <div class="sidebar-bottom">
-      <button class="btn-record" id="btn-record" onclick="toggleRecord()">
-        <span id="rec-btn-icon">●</span>
-        <span id="rec-btn-label">Новая запись</span>
+      <button class="btn-record" id="btn-new-meeting" onclick="openNewMeetingDialog()">
+        <span id="new-meeting-icon">+</span>
+        <span id="new-meeting-label">Новая встреча</span>
       </button>
-      <button class="btn-record btn-record--secondary" onclick="toggleUpload()">↑ Загрузить аудио</button>
-      <button class="btn-record btn-record--secondary" onclick="showProcess()">▶ Обработать запись</button>
       <div class="sidebar-settings">
         <button class="settings-link" id="settings-link" onclick="showSettings()">⚙ Настройки</button>
         <span style="font-size:.65rem;color:var(--text-muted)">v0.1-local</span>
@@ -49,134 +53,7 @@
       <div class="home-empty">
         <div class="icon">◈</div>
         <h2>Выберите встречу</h2>
-        <p>Выберите встречу из списка слева, чтобы просмотреть транскрипцию или протокол. Нажмите «Новая запись», чтобы начать запись.</p>
-      </div>
-    </div>
-
-    <!-- Record view (also used as Upload view) -->
-    <div class="view" id="view-record">
-      <div class="record-panel">
-        <div class="panel-title">
-          <button class="back-btn" onclick="showHome()">← назад</button>
-          <span id="record-panel-title">Новая запись</span>
-        </div>
-
-        <!-- Record-only controls -->
-        <div id="rec-controls">
-          <div class="form-row">
-            <div class="field">
-              <label style="display:flex;align-items:center;gap:6px">
-                Микрофон
-                <span id="mic-mute-dot" title="Микрофон выключен (muted)"
-                      style="display:none;width:7px;height:7px;border-radius:50%;background:var(--danger-text);flex-shrink:0"></span>
-              </label>
-              <select id="mic-src" onchange="checkMicMute()"><option value="">— по умолчанию —</option></select>
-            </div>
-            <div class="field">
-              <label>Системный звук</label>
-              <select id="sys-src"><option value="">— по умолчанию —</option></select>
-            </div>
-          </div>
-          <div class="field">
-            <label>Имя встречи</label>
-            <input type="text" id="rec-name" placeholder="daily  (пусто = дата/время)">
-            <span class="hint">Создаёт папку meetings/&lt;имя&gt;/recording.wav</span>
-          </div>
-          <div class="chk-row">
-            <input type="checkbox" id="prepend-date" checked>
-            <label for="prepend-date">Добавлять дату в начало имени</label>
-          </div>
-        </div>
-
-        <!-- Upload-only controls -->
-        <div id="upload-controls" style="display:none">
-          <div class="field">
-            <label>Название встречи</label>
-            <input type="text" id="upload-title" placeholder="1-на-1 с коллегой  (пусто = дата/время)">
-          </div>
-          <div class="upload-drop-zone" id="upload-drop-zone"
-               ondragover="onDropOver(event)" ondragleave="onDropLeave(event)" ondrop="onDrop(event)"
-               onclick="document.getElementById('upload-file-input').click()">
-            <div class="upload-drop-icon">↑</div>
-            <div class="upload-drop-text" id="upload-drop-text">Перетащите аудиофайл сюда<br><span style="font-size:.75rem;color:var(--text-muted)">или нажмите для выбора</span></div>
-            <input type="file" id="upload-file-input" accept=".wav,.mp3,.m4a,.flac,.ogg,.opus,.webm"
-                   style="display:none" onchange="onFileSelected(this)">
-          </div>
-          <div class="hint" style="margin-top:4px">Поддерживаются: wav, mp3, m4a, flac, ogg, opus, webm</div>
-        </div>
-
-        <!-- Post-recording pipeline preview -->
-        <div id="pipeline-preview" style="margin-bottom:16px">
-          <div style="font-size:.65rem;color:var(--text-muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">После остановки</div>
-          <div style="display:grid;grid-template-columns:20px 1fr auto;grid-template-rows:auto auto">
-            <div style="grid-column:1;grid-row:1/3;display:flex;flex-direction:column;align-items:center;height:92px">
-              <div class="pipe-dot" id="pipe-dot-transcribe" style="margin-top:10px;flex-shrink:0"></div>
-              <div class="pipe-line" style="flex:1;margin:4px 0"></div>
-              <div class="pipe-dot" id="pipe-dot-protocol" style="margin-bottom:10px;flex-shrink:0"></div>
-            </div>
-            <div id="pipe-transcribe" class="pipeline-step" style="grid-column:2;grid-row:1;padding:8px 0 8px 10px">
-              <div class="pipe-body">
-                <div class="pipe-title">Транскрипция</div>
-                <div class="pipe-desc" id="pipe-transcribe-desc">faster-whisper · medium · ru · CPU</div>
-              </div>
-            </div>
-            <label class="pipe-toggle" title="Транскрибировать запись" style="grid-column:3;grid-row:1;align-self:center;margin-left:8px">
-              <input type="checkbox" id="pipe-chk-transcribe" checked onchange="togglePipeStep('transcribe')">
-              <span class="pipe-track"></span><span class="pipe-thumb"></span>
-            </label>
-            <div id="pipe-protocol" class="pipeline-step" style="grid-column:2;grid-row:2;padding:8px 0 8px 10px">
-              <div class="pipe-body">
-                <div class="pipe-title">Протокол</div>
-                <div class="pipe-desc" id="pipe-protocol-desc">—</div>
-              </div>
-            </div>
-            <label class="pipe-toggle" title="Сгенерировать протокол" id="pipe-toggle-protocol" style="grid-column:3;grid-row:2;align-self:center;margin-left:8px">
-              <input type="checkbox" id="pipe-chk-protocol" checked onchange="togglePipeStep('protocol')">
-              <span class="pipe-track"></span><span class="pipe-thumb"></span>
-            </label>
-          </div>
-        </div>
-
-        <div class="rec-actions" id="rec-action-buttons">
-          <button class="btn btn-primary" id="btn-rec-start" onclick="startRec()">● Начать запись</button>
-          <button class="btn btn-danger"  id="btn-rec-stop"  onclick="stopRec()" disabled>■ Остановить</button>
-          <div class="rec-status" id="rec-st">Готово к записи</div>
-        </div>
-        <div id="rec-warning" style="display:none;margin-top:10px;padding:8px 12px;background:#fff3cd;color:#664d03;border-radius:6px;font-size:.85rem;border:1px solid #ffc107;line-height:1.4"></div>
-        <div class="rec-actions" id="upload-action-buttons" style="display:none">
-          <button class="btn btn-primary" id="btn-upload-start" onclick="startUpload()">↑ Загрузить и обработать</button>
-          <div class="rec-status" id="upload-st"></div>
-        </div>
-
-        <!-- Pipeline progress + log (shown after stop) -->
-        <div class="log-wrap" id="log-wrap" style="display:none">
-          <div class="pipe-progress" id="pipe-progress">
-            <div class="pipe-steps-row">
-              <div class="pipe-step-item">
-                <div class="pipe-step-circle" id="pstep-save">1</div>
-                <div class="pipe-step-label" id="pstep-save-lbl">Сохранение</div>
-              </div>
-              <div class="pipe-step-connector"><div class="pipe-step-connector-fill" id="pconn-1"></div></div>
-              <div class="pipe-step-item">
-                <div class="pipe-step-circle" id="pstep-tr">2</div>
-                <div class="pipe-step-label" id="pstep-tr-lbl">Транскрипция</div>
-              </div>
-              <div class="pipe-step-connector"><div class="pipe-step-connector-fill" id="pconn-2"></div></div>
-              <div class="pipe-step-item">
-                <div class="pipe-step-circle" id="pstep-pr">3</div>
-                <div class="pipe-step-label" id="pstep-pr-lbl">Протокол</div>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px">
-              <div class="pipe-bar-wrap" style="flex:1"><div class="pipe-bar-fill" id="pipe-bar"></div></div>
-              <div id="pipe-bar-pct" style="font-size:.7rem;color:var(--text-muted);font-family:var(--font-mono);min-width:30px;text-align:right">0%</div>
-            </div>
-          </div>
-          <details class="log-details" id="log-details">
-            <summary>Вывод терминала</summary>
-            <div class="terminal" id="log-output"></div>
-          </details>
-        </div>
+        <p>Выберите встречу из списка слева или нажмите «Новая встреча», чтобы начать запись или загрузить аудио.</p>
       </div>
     </div>
 
@@ -185,69 +62,74 @@
       <div class="viewer-header">
         <button class="back-btn-sm" onclick="closeViewer()">← назад</button>
         <div class="viewer-title" id="viewer-title"></div>
-        <div class="viewer-tabs">
+        <span class="meeting-status-badge" id="viewer-status-badge" style="display:none"></span>
+        <div class="viewer-tabs" id="viewer-tabs">
           <button class="tab-btn" id="tab-transcript" onclick="showTab('transcript')">Транскрипция</button>
           <button class="tab-btn active" id="tab-protocol" onclick="showTab('protocol')">Протокол</button>
         </div>
         <div class="viewer-actions-bar">
-          <button class="btn-ghost btn" style="font-size:.78rem;padding:5px 10px" onclick="copyContent()">Копировать</button>
-          <button class="btn-ghost btn" id="btn-regen" style="font-size:.78rem;padding:5px 10px" onclick="regenProtocol()">↻ Протокол</button>
+          <button class="btn-ghost btn" id="btn-copy" style="font-size:.78rem;padding:5px 10px" onclick="copyContent()">Копировать</button>
+          <div class="viewer-menu-wrap">
+            <button class="btn-ghost btn viewer-menu-btn" onclick="toggleViewerMenu(event)" style="font-size:.78rem;padding:5px 10px">⋯</button>
+            <div class="viewer-menu-dropdown" id="viewer-menu-dropdown">
+              <button class="vmenu-item" id="vmenu-retranscribe" onclick="retranscribeMeeting()">↻ Перетранскрибировать</button>
+              <button class="vmenu-item" id="vmenu-regen" onclick="regenProtocol()">↻ Перегенерировать протокол</button>
+              <div class="vmenu-sep"></div>
+              <button class="vmenu-item" id="vmenu-delete-audio" onclick="deleteAudioOnly()">🗑 Удалить аудио</button>
+              <button class="vmenu-item vmenu-danger" onclick="openDeleteConfirm(event,_selectedSlug)">✕ Удалить встречу</button>
+            </div>
+          </div>
         </div>
       </div>
+
+      <!-- Recording bar (shown when status = RECORDING-like state) -->
+      <div class="meeting-rec-bar" id="meeting-rec-bar" style="display:none">
+        <span class="dot"></span>
+        <span id="meeting-rec-timer" class="rec-bar-timer">Запись: 0:00</span>
+        <button class="btn btn-danger" style="font-size:.78rem;padding:5px 12px;margin-left:auto" onclick="stopRecFromCard()">■ Остановить</button>
+      </div>
+
+      <!-- Progress panel (shown when TRANSCRIBING / GENERATING) -->
+      <div class="meeting-progress-panel" id="meeting-progress-panel" style="display:none">
+        <div class="pipe-progress">
+          <div class="pipe-steps-row">
+            <div class="pipe-step-item">
+              <div class="pipe-step-circle done" id="mpstep-audio">✓</div>
+              <div class="pipe-step-label done">Аудио</div>
+            </div>
+            <div class="pipe-step-connector"><div class="pipe-step-connector-fill" id="mpconn-1"></div></div>
+            <div class="pipe-step-item">
+              <div class="pipe-step-circle" id="mpstep-tr">2</div>
+              <div class="pipe-step-label" id="mpstep-tr-lbl">Транскрипция</div>
+            </div>
+            <div class="pipe-step-connector"><div class="pipe-step-connector-fill" id="mpconn-2"></div></div>
+            <div class="pipe-step-item">
+              <div class="pipe-step-circle" id="mpstep-pr">3</div>
+              <div class="pipe-step-label" id="mpstep-pr-lbl">Протокол</div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="pipe-bar-wrap" style="flex:1"><div class="pipe-bar-fill" id="meeting-pipe-bar"></div></div>
+            <div id="meeting-pipe-pct" style="font-size:.7rem;color:var(--text-muted);font-family:var(--font-mono);min-width:30px;text-align:right"></div>
+          </div>
+          <div class="pipe-sub-stage" id="meeting-pipe-sub"></div>
+        </div>
+        <div class="error-banner" id="meeting-error-banner">
+          <div class="error-banner-msg" id="meeting-error-msg"></div>
+          <div class="error-banner-actions" id="meeting-error-actions"></div>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px" id="meeting-job-actions">
+          <button class="btn btn-ghost" style="font-size:.78rem;padding:5px 10px;display:none" id="btn-cancel-job" onclick="cancelCurrentJob()">⛔ Отменить</button>
+          <button class="btn btn-ghost" style="font-size:.78rem;padding:5px 10px;display:none" id="btn-retry-job" onclick="retryCurrentJob()">↺ Повторить</button>
+        </div>
+      </div>
+
+      <!-- Params block -->
+      <details class="viewer-params" id="viewer-params" style="display:none">
+        <summary>Параметры обработки</summary>
+        <div class="viewer-params-body" id="viewer-params-body"></div>
+      </details>
       <div class="viewer-body" id="viewer-body"></div>
-    </div>
-
-    <!-- Process view -->
-    <div class="view" id="view-process">
-      <div class="process-panel">
-        <div class="panel-title">
-          <button class="back-btn" onclick="showHome()">← назад</button>
-          <span>Обработка записи</span>
-        </div>
-
-        <div class="proc-step">
-          <div class="proc-step-num">1</div>
-          <div class="proc-step-body">
-            <div class="proc-step-title">Выбери встречу</div>
-            <div class="field" style="margin-bottom:0">
-              <select id="proc-folder"><option value="">— выбери встречу —</option></select>
-              <div class="err-msg" id="proc-folder-err" style="display:none">Выбери встречу из списка</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="proc-step">
-          <div class="proc-step-num">2</div>
-          <div class="proc-step-body">
-            <div class="proc-step-title">Параметры</div>
-            <div class="field" style="margin-bottom:8px">
-              <label>Имя для протокола (необязательно)</label>
-              <input type="text" id="proc-name" placeholder="например, 1-на-1 с коллегой">
-            </div>
-            <div class="chk-row" style="margin-bottom:0">
-              <input type="checkbox" id="only-transcript">
-              <label for="only-transcript">Только транскрипция (без протокола)</label>
-            </div>
-          </div>
-        </div>
-
-        <div class="proc-step">
-          <div class="proc-step-num">3</div>
-          <div class="proc-step-body">
-            <div class="proc-step-title">Запустить</div>
-            <div class="proc-run-row">
-              <button class="btn btn-primary" id="btn-proc" onclick="startProc()">▶ Запустить</button>
-              <span class="rec-status" id="proc-st"></span>
-            </div>
-            <div class="log-wrap" id="proc-log-wrap" style="display:none;margin-top:10px">
-              <details class="log-details">
-                <summary>Вывод терминала</summary>
-                <div class="terminal" id="proc-out"></div>
-              </details>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Settings view -->
@@ -492,6 +374,135 @@
 
   </main>
 </div>
+
+<!-- ═══════════════════════════════════════════════
+     NEW MEETING DIALOG (modal overlay)
+════════════════════════════════════════════════ -->
+<div id="new-meeting-overlay" class="modal-overlay" onclick="if(event.target===this)closeNewMeetingDialog()">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title">Новая встреча</span>
+      <button class="modal-close" onclick="closeNewMeetingDialog()">✕</button>
+    </div>
+
+    <!-- Source tabs -->
+    <div class="modal-src-tabs">
+      <button class="msrc-tab active" id="msrc-record" onclick="switchDialogTab('record')">● Запись</button>
+      <button class="msrc-tab" id="msrc-upload" onclick="switchDialogTab('upload')">↑ Загрузить</button>
+      <button class="msrc-tab" id="msrc-folder" onclick="switchDialogTab('folder')">📁 Из папки</button>
+    </div>
+
+    <!-- Tab: Record -->
+    <div id="dialog-tab-record" class="dialog-tab">
+      <div class="form-row">
+        <div class="field">
+          <label style="display:flex;align-items:center;gap:6px">
+            Микрофон
+            <span id="dlg-mic-mute-dot" title="Микрофон выключен (muted)"
+                  style="display:none;width:7px;height:7px;border-radius:50%;background:var(--danger-text);flex-shrink:0"></span>
+          </label>
+          <select id="dlg-mic-src" onchange="checkDlgMicMute()"><option value="">— по умолчанию —</option></select>
+        </div>
+        <div class="field">
+          <label>Системный звук</label>
+          <select id="dlg-sys-src"><option value="">— по умолчанию —</option></select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Имя встречи</label>
+        <input type="text" id="dlg-rec-name" placeholder="daily  (пусто = дата/время)">
+        <span class="hint">Создаёт папку meetings/&lt;имя&gt;/recording.wav</span>
+      </div>
+      <div class="chk-row" style="margin-bottom:0">
+        <input type="checkbox" id="dlg-prepend-date" checked>
+        <label for="dlg-prepend-date">Добавлять дату в начало имени</label>
+      </div>
+    </div>
+
+    <!-- Tab: Upload -->
+    <div id="dialog-tab-upload" class="dialog-tab" style="display:none">
+      <div class="field">
+        <label>Название встречи</label>
+        <input type="text" id="dlg-upload-title" placeholder="1-на-1 с коллегой  (пусто = дата/время)">
+      </div>
+      <div class="upload-drop-zone" id="dlg-drop-zone"
+           ondragover="onDlgDropOver(event)" ondragleave="onDlgDropLeave(event)" ondrop="onDlgDrop(event)"
+           onclick="document.getElementById('dlg-file-input').click()">
+        <div class="upload-drop-icon">↑</div>
+        <div class="upload-drop-text" id="dlg-drop-text">Перетащите аудиофайл сюда<br><span style="font-size:.75rem;color:var(--text-muted)">или нажмите для выбора</span></div>
+        <input type="file" id="dlg-file-input" accept=".wav,.mp3,.m4a,.flac,.ogg,.opus,.webm"
+               style="display:none" onchange="onDlgFileSelected(this)">
+      </div>
+      <div class="hint" style="margin-top:4px">Поддерживаются: wav, mp3, m4a, flac, ogg, opus, webm</div>
+    </div>
+
+    <!-- Tab: From folder -->
+    <div id="dialog-tab-folder" class="dialog-tab" style="display:none">
+      <div class="field">
+        <label>Встреча с записью (без транскрипции)</label>
+        <select id="dlg-folder-select"><option value="">— выбери встречу —</option></select>
+        <span class="hint">Только встречи, у которых есть аудио, но нет транскрипции</span>
+      </div>
+    </div>
+
+    <!-- Shared: Pipeline settings -->
+    <div class="dialog-pipeline">
+      <div style="font-size:.65rem;color:var(--text-muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px">Pipeline после записи</div>
+      <div style="display:grid;grid-template-columns:20px 1fr auto;grid-template-rows:auto auto">
+        <div style="grid-column:1;grid-row:1/3;display:flex;flex-direction:column;align-items:center;height:92px">
+          <div class="pipe-dot" id="dlg-pipe-dot-tr" style="margin-top:10px;flex-shrink:0"></div>
+          <div class="pipe-line" style="flex:1;margin:4px 0"></div>
+          <div class="pipe-dot" id="dlg-pipe-dot-pr" style="margin-bottom:10px;flex-shrink:0"></div>
+        </div>
+        <div id="dlg-pipe-transcribe" class="pipeline-step" style="grid-column:2;grid-row:1;padding:8px 0 8px 10px">
+          <div class="pipe-body">
+            <div class="pipe-title">Транскрипция</div>
+            <select id="dlg-whisper-model" class="pipe-select">
+              <option value="tiny">tiny — быстро, хуже</option>
+              <option value="small">small</option>
+              <option value="medium" selected>medium (рекомендуется)</option>
+              <option value="large-v3">large-v3 — медленно, лучше</option>
+            </select>
+          </div>
+        </div>
+        <label class="pipe-toggle" title="Транскрибировать" style="grid-column:3;grid-row:1;align-self:center;margin-left:8px">
+          <input type="checkbox" id="dlg-chk-transcribe" checked onchange="toggleDlgPipeStep('transcribe')">
+          <span class="pipe-track"></span><span class="pipe-thumb"></span>
+        </label>
+        <div id="dlg-pipe-protocol" class="pipeline-step" style="grid-column:2;grid-row:2;padding:8px 0 8px 10px">
+          <div class="pipe-body">
+            <div class="pipe-title">Протокол</div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <select id="dlg-provider" class="pipe-select" style="width:auto;flex-shrink:0" onchange="onDlgProviderChange()">
+                <option value="claude">Claude</option>
+                <option value="gemini">Gemini</option>
+                <option value="mistral">Mistral</option>
+                <option value="ollama">Ollama</option>
+              </select>
+              <select id="dlg-llm-model" class="pipe-select"></select>
+              <select id="dlg-template" class="pipe-select" style="width:auto"></select>
+            </div>
+          </div>
+        </div>
+        <label class="pipe-toggle" title="Генерировать протокол" id="dlg-pipe-toggle-protocol" style="grid-column:3;grid-row:2;align-self:center;margin-left:8px">
+          <input type="checkbox" id="dlg-chk-protocol" checked onchange="toggleDlgPipeStep('protocol')">
+          <span class="pipe-track"></span><span class="pipe-thumb"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Warning line (mic mute, etc.) -->
+    <div id="dlg-warning" style="display:none;padding:8px 12px;background:#fff3cd;color:#664d03;border-radius:6px;font-size:.85rem;border:1px solid #ffc107;line-height:1.4;margin-top:4px"></div>
+
+    <!-- Footer -->
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeNewMeetingDialog()">Отмена</button>
+      <button class="btn btn-primary" id="dlg-btn-start" onclick="dialogStartAction()">▶ Старт</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
 <script src="/static/app.js"></script>
 </body>
 </html>

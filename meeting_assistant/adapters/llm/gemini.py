@@ -20,7 +20,7 @@ class GeminiProvider(BaseLLMProvider):
             raise SystemExit(
                 "Ошибка: GEMINI_API_KEY не задан. Укажи ключ в настройках или переменной окружения."
             )
-        model = self._config.get("protocol", "gemini_model", "gemini-2.0-flash-lite")
+        model = getattr(self, "_model_override", None) or self._config.get("protocol", "gemini_model", "gemini-2.0-flash-lite")
         prompt = f"{transcript}\n\n{instructions}" if instructions else transcript
         client = genai.Client(api_key=api_key)
         for chunk in client.models.generate_content_stream(model=model, contents=prompt):
