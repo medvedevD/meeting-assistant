@@ -2,8 +2,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use meeting_core::usecases::{generate_protocol, get_job_status, submit_transcription_job, transcribe_audio_file};
-use crate::container::{Container, default_db_path, default_model_path, default_prompts_dir};
+use meeting_core::usecases::{
+    generate_protocol, get_job_status, list_meetings,
+    start_recording, stop_recording, submit_transcription_job, transcribe_audio_file,
+};
+use crate::container::{
+    Container, default_db_path, default_model_path, default_prompts_dir, default_recordings_dir,
+};
 
 #[derive(Parser)]
 #[command(name = "meeting-assistant", about = "Meeting transcription and protocol generator")]
@@ -16,6 +21,9 @@ pub struct Cli {
 
     #[arg(long, env = "MEETING_ASSISTANT_PROMPTS")]
     prompts_dir: Option<PathBuf>,
+
+    #[arg(long, env = "MEETING_ASSISTANT_RECORDINGS")]
+    recordings_dir: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Command,
@@ -53,6 +61,19 @@ enum Command {
         #[arg(long, short = 'n')]
         name: Option<String>,
     },
+    /// Start recording from the default microphone. Prints the meeting ID.
+    RecordStart {
+        /// Human-readable meeting name.
+        #[arg(long, short = 'n')]
+        name: Option<String>,
+    },
+    /// Stop an active recording session.
+    RecordStop {
+        #[arg(value_name = "MEETING_ID")]
+        id: String,
+    },
+    /// List all recorded meetings.
+    Meetings,
     /// Start the HTTP server (also runs the background worker).
     Serve {
         #[arg(long, default_value = "0")]
@@ -65,7 +86,8 @@ impl Cli {
         let model = self.model.unwrap_or_else(default_model_path);
         let db = self.db.unwrap_or_else(default_db_path);
         let prompts = self.prompts_dir.unwrap_or_else(default_prompts_dir);
-        let container = Container::new_desktop(&model, &db, &prompts)?;
+        let recordings = self.recordings_dir.unwrap_or_else(default_recordings_dir);
+        let container = Container::new_desktop(&model, &db, &prompts, recordings)?;
 
         match self.command {
             Command::Transcribe { path } => {
@@ -115,6 +137,40 @@ impl Cli {
                 print!("{}", protocol.markdown);
             }
 
+            Command::RecordStart { name } => {
+                let meeting = start_recording(
+                    Arc::clone(&container.audio_capture),
+                    Arc::clone(&container.meeting_repo),
+                    &container.recordings_dir,
+                    name,
+                )
+                .await?;
+                println!("{}", meeting.id);
+                eprintln!("Recording started. Press Ctrl+C or run `record-stop {}` to stop.", meeting.id);
+            }
+
+            Command::RecordStop { id } => {
+                let meeting = stop_recording(
+                    Arc::clone(&container.audio_capture),
+                    Arc::clone(&container.meeting_repo),
+                    &id,
+                )
+                .await?;
+                println!("Stopped. Audio saved to: {}", meeting.audio_path.display());
+            }
+
+            Command::Meetings => {
+                let meetings = list_meetings(Arc::clone(&container.meeting_repo)).await?;
+                if meetings.is_empty() {
+                    println!("No meetings yet.");
+                } else {
+                    for m in &meetings {
+                        let transcript_mark = if m.transcript_text.is_some() { "✓" } else { " " };
+                        println!("[{transcript_mark}] {} | {} | {}", m.id, m.name, m.audio_path.display());
+                    }
+                }
+            }
+
             Command::Serve { port } => {
                 let _worker = container.spawn_worker();
 
@@ -130,6 +186,8 @@ impl Cli {
                     job_repo: container.job_repo,
                     llm: container.llm,
                     templates: container.templates,
+                    audio_capture: container.audio_capture,
+                    recordings_dir: container.recordings_dir,
                 };
                 axum::serve(listener, meeting_api::create_router(state)).await?;
             }
