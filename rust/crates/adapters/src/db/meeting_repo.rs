@@ -74,6 +74,38 @@ impl MeetingRepo for SqliteMeetingRepo {
 
         Ok(())
     }
+
+    async fn list_all(&self) -> Result<Vec<Meeting>, CoreError> {
+        let db = Arc::clone(&self.0);
+
+        tokio::task::spawn_blocking(move || {
+            let conn = db.conn.lock().unwrap();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, name, audio_path, transcript_text, created_at \
+                     FROM meetings ORDER BY created_at DESC",
+                )
+                .map_err(|e| CoreError::Storage(e.to_string()))?;
+
+            let rows = stmt
+                .query_map([], |row| {
+                    Ok(Meeting {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        audio_path: PathBuf::from(row.get::<_, String>(2)?),
+                        transcript_text: row.get(3)?,
+                        created_at: row.get(4)?,
+                    })
+                })
+                .map_err(|e| CoreError::Storage(e.to_string()))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| CoreError::Storage(e.to_string()))?;
+
+            Ok(rows)
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+    }
 }
 
 #[cfg(test)]
@@ -116,5 +148,27 @@ mod tests {
 
         let found = repo.find_by_id(&m.id).await.unwrap().unwrap();
         assert_eq!(found.transcript_text.as_deref(), Some("Привет мир"));
+    }
+
+    #[tokio::test]
+    async fn list_all_returns_all_in_desc_order() {
+        let repo = make_repo();
+        let m1 = Meeting::new("Первая".to_string(), PathBuf::from("/a.wav"));
+        let m2 = Meeting::new("Вторая".to_string(), PathBuf::from("/b.wav"));
+        repo.save(&m1).await.unwrap();
+        repo.save(&m2).await.unwrap();
+
+        let meetings = repo.list_all().await.unwrap();
+        assert_eq!(meetings.len(), 2);
+        let names: Vec<_> = meetings.iter().map(|m| m.name.as_str()).collect();
+        assert!(names.contains(&"Первая"));
+        assert!(names.contains(&"Вторая"));
+    }
+
+    #[tokio::test]
+    async fn list_all_empty() {
+        let repo = make_repo();
+        let meetings = repo.list_all().await.unwrap();
+        assert!(meetings.is_empty());
     }
 }

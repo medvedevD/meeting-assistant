@@ -12,3 +12,6 @@ pub use llm::AnthropicProvider;
 
 pub mod templates;
 pub use templates::FileTemplateLoader;
+
+pub mod audio;
+pub use audio::CpalAudioCapture;
