@@ -7,11 +7,12 @@
     "frontendDist": "../src"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Meeting Assistant",
         "width": 640,
-        "height": 480,
+        "height": 800,
         "resizable": true
       }
     ],
