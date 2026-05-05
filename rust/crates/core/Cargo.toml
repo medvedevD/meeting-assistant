@@ -3,7 +3,14 @@ name = "meeting-core"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+fakes = []
+
 [dependencies]
 thiserror = { workspace = true }
 serde = { workspace = true }
 async-trait = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

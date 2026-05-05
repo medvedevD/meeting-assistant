@@ -10,3 +10,8 @@ tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+meeting-core = { path = "../core", features = ["fakes"] }
+tower = { version = "0.4", features = ["util"] }
+http-body-util = "0.1"
