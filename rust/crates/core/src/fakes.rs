@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use crate::{
     CoreError,
     entities::{Job, JobStatus, Meeting, Transcript, Segment},
-    ports::{JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber},
+    ports::{AudioCapture, JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber},
 };
 
 // ── FakeTranscriber ──────────────────────────────────────────────────────────
@@ -63,6 +63,10 @@ impl MeetingRepo for FakeMeetingRepo {
         } else {
             Err(CoreError::NotFound(id.to_string()))
         }
+    }
+
+    async fn list_all(&self) -> Result<Vec<Meeting>, CoreError> {
+        Ok(self.store.lock().unwrap().clone())
     }
 }
 
@@ -195,5 +199,42 @@ impl TemplateLoader for FakeTemplateLoader {
 
     async fn list_names(&self) -> Result<Vec<String>, CoreError> {
         Ok(self.templates.keys().cloned().collect())
+    }
+}
+
+// ── FakeAudioCapture ─────────────────────────────────────────────────────────
+
+#[derive(Default)]
+pub struct FakeAudioCapture {
+    active: Mutex<HashSet<String>>,
+    pub started: Mutex<Vec<String>>,
+    pub stopped: Mutex<Vec<String>>,
+}
+
+impl FakeAudioCapture {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+}
+
+#[async_trait]
+impl AudioCapture for FakeAudioCapture {
+    async fn start_session(&self, session_id: &str, _output_path: &Path) -> Result<(), CoreError> {
+        self.active.lock().unwrap().insert(session_id.to_string());
+        self.started.lock().unwrap().push(session_id.to_string());
+        Ok(())
+    }
+
+    async fn stop_session(&self, session_id: &str) -> Result<(), CoreError> {
+        let removed = self.active.lock().unwrap().remove(session_id);
+        if !removed {
+            return Err(CoreError::Recording(format!("session not found: {session_id}")));
+        }
+        self.stopped.lock().unwrap().push(session_id.to_string());
+        Ok(())
+    }
+
+    fn is_active(&self, session_id: &str) -> bool {
+        self.active.lock().unwrap().contains(session_id)
     }
 }

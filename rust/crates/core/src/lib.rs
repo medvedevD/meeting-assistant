@@ -21,4 +21,6 @@ pub enum CoreError {
     Llm(String),
     #[error("template error: {0}")]
     Template(String),
+    #[error("recording error: {0}")]
+    Recording(String),
 }
