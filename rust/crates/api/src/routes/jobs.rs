@@ -79,7 +79,7 @@ mod tests {
     use axum::{body::Body, http::{Request, StatusCode}};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
-    use meeting_core::fakes::{FakeJobRepo, FakeLlmProvider, FakeMeetingRepo, FakeTemplateLoader, FakeTranscriber};
+    use meeting_core::fakes::{FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingRepo, FakeTemplateLoader, FakeTranscriber};
     use crate::router::{AppState, create_router};
 
     fn make_app() -> axum::Router {
@@ -89,6 +89,8 @@ mod tests {
             job_repo: FakeJobRepo::new(),
             llm: FakeLlmProvider::new(""),
             templates: FakeTemplateLoader::empty(),
+            audio_capture: FakeAudioCapture::new(),
+            recordings_dir: std::path::PathBuf::from("/tmp"),
         })
     }
 
@@ -147,6 +149,8 @@ mod tests {
             job_repo: Arc::clone(&jr) as Arc<dyn meeting_core::ports::JobRepo>,
             llm: FakeLlmProvider::new(""),
             templates: FakeTemplateLoader::empty(),
+            audio_capture: FakeAudioCapture::new(),
+            recordings_dir: std::path::PathBuf::from("/tmp"),
         });
 
         // submit

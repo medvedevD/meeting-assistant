@@ -38,7 +38,7 @@ mod tests {
     use axum::{body::Body, http::{Request, StatusCode}};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
-    use meeting_core::fakes::{FakeLlmProvider, FakeMeetingRepo, FakeJobRepo, FakeTemplateLoader, FakeTranscriber};
+    use meeting_core::fakes::{FakeAudioCapture, FakeLlmProvider, FakeMeetingRepo, FakeJobRepo, FakeTemplateLoader, FakeTranscriber};
     use crate::router::{AppState, create_router};
 
     fn make_app() -> axum::Router {
@@ -48,6 +48,8 @@ mod tests {
             job_repo: FakeJobRepo::new(),
             llm: FakeLlmProvider::new("# Протокол\n\nТекст."),
             templates: FakeTemplateLoader::empty(),
+            audio_capture: FakeAudioCapture::new(),
+            recordings_dir: std::path::PathBuf::from("/tmp"),
         })
     }
 
@@ -86,6 +88,8 @@ mod tests {
             job_repo: FakeJobRepo::new(),
             llm: FakeLlmProvider::new("irrelevant"),
             templates: FakeTemplateLoader::empty(),
+            audio_capture: FakeAudioCapture::new(),
+            recordings_dir: std::path::PathBuf::from("/tmp"),
         });
 
         let body = serde_json::json!({
@@ -120,6 +124,8 @@ mod tests {
             job_repo: FakeJobRepo::new(),
             llm: FakeLlmProvider::new("# 1-на-1 протокол"),
             templates,
+            audio_capture: FakeAudioCapture::new(),
+            recordings_dir: std::path::PathBuf::from("/tmp"),
         });
 
         let body = serde_json::json!({

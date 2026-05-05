@@ -1,7 +1,8 @@
 use axum::{routing::{get, post}, Router};
+use std::path::PathBuf;
 use std::sync::Arc;
-use meeting_core::ports::{JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber};
-use crate::routes::{transcribe, jobs, protocols};
+use meeting_core::ports::{AudioCapture, JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber};
+use crate::routes::{transcribe, jobs, protocols, recordings, meetings};
 
 pub struct AppState {
     pub transcriber: Arc<dyn Transcriber>,
@@ -9,6 +10,9 @@ pub struct AppState {
     pub job_repo: Arc<dyn JobRepo>,
     pub llm: Arc<dyn LlmProvider>,
     pub templates: Arc<dyn TemplateLoader>,
+    pub audio_capture: Arc<dyn AudioCapture>,
+    /// Directory where per-meeting recording subdirs are created.
+    pub recordings_dir: PathBuf,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -18,5 +22,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/v1/jobs", post(jobs::submit))
         .route("/api/v1/jobs/:id", get(jobs::status))
         .route("/api/v1/protocols", post(protocols::generate))
+        .route("/api/v1/recordings", post(recordings::start))
+        .route("/api/v1/recordings/:id/stop", post(recordings::stop))
+        .route("/api/v1/meetings", get(meetings::list))
         .with_state(state)
 }
