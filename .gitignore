@@ -6,6 +6,9 @@ __pycache__/
 .venv/
 venv/
 
+# Logs
+*.log
+
 # IDE / OS
 .DS_Store
 .idea/
