@@ -14,3 +14,11 @@ tracing = { workspace = true }
 anyhow = { workspace = true }
 uuid = { workspace = true }
 rusqlite = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+wiremock = { workspace = true }
+tokio = { workspace = true }
+tempfile = "3"

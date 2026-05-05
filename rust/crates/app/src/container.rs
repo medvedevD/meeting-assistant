@@ -1,23 +1,30 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use anyhow::Result;
-use meeting_core::ports::{JobRepo, MeetingRepo, Transcriber};
-use meeting_adapters::{Db, SqliteJobRepo, SqliteMeetingRepo, WhisperTranscriber, Worker};
+use anyhow::{Context, Result};
+use meeting_core::ports::{JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber};
+use meeting_adapters::{AnthropicProvider, Db, FileTemplateLoader, SqliteJobRepo, SqliteMeetingRepo, WhisperTranscriber, Worker};
 
 pub struct Container {
     pub transcriber: Arc<dyn Transcriber>,
     pub meeting_repo: Arc<dyn MeetingRepo>,
     pub job_repo: Arc<dyn JobRepo>,
+    pub llm: Arc<dyn LlmProvider>,
+    pub templates: Arc<dyn TemplateLoader>,
 }
 
 impl Container {
-    pub fn new_desktop(model_path: &Path, db_path: &Path) -> Result<Self> {
+    pub fn new_desktop(model_path: &Path, db_path: &Path, prompts_dir: &Path) -> Result<Self> {
         let transcriber = Arc::new(WhisperTranscriber::new(model_path)?);
         let db = Db::open(db_path)?;
         let meeting_repo = Arc::new(SqliteMeetingRepo(Arc::clone(&db)));
         let job_repo = Arc::new(SqliteJobRepo(Arc::clone(&db)));
 
-        Ok(Self { transcriber, meeting_repo, job_repo })
+        let api_key = std::env::var("ANTHROPIC_API_KEY")
+            .context("ANTHROPIC_API_KEY is not set")?;
+        let llm = Arc::new(AnthropicProvider::new(api_key));
+        let templates = Arc::new(FileTemplateLoader::new(prompts_dir));
+
+        Ok(Self { transcriber, meeting_repo, job_repo, llm, templates })
     }
 
     /// Spawn the background worker and return its join handle.
@@ -37,6 +44,18 @@ pub fn default_model_path() -> PathBuf {
 
 pub fn default_db_path() -> PathBuf {
     xdg_data_dir().join("meeting-assistant/index.db")
+}
+
+pub fn default_prompts_dir() -> PathBuf {
+    // Shared with Python: repo-root/prompts/
+    // Walk up from the binary location or fall back to CWD/prompts
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| {
+            // <repo>/rust/target/debug/meeting-assistant → <repo>/prompts
+            p.ancestors().nth(4).map(|root| root.join("prompts"))
+        })
+        .unwrap_or_else(|| PathBuf::from("prompts"))
 }
 
 fn xdg_data_dir() -> PathBuf {

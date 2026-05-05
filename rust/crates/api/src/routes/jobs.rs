@@ -79,7 +79,7 @@ mod tests {
     use axum::{body::Body, http::{Request, StatusCode}};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
-    use meeting_core::fakes::{FakeJobRepo, FakeMeetingRepo, FakeTranscriber};
+    use meeting_core::fakes::{FakeJobRepo, FakeLlmProvider, FakeMeetingRepo, FakeTemplateLoader, FakeTranscriber};
     use crate::router::{AppState, create_router};
 
     fn make_app() -> axum::Router {
@@ -87,6 +87,8 @@ mod tests {
             transcriber: FakeTranscriber::new("fake"),
             meeting_repo: FakeMeetingRepo::new(),
             job_repo: FakeJobRepo::new(),
+            llm: FakeLlmProvider::new(""),
+            templates: FakeTemplateLoader::empty(),
         })
     }
 
@@ -143,6 +145,8 @@ mod tests {
             transcriber: FakeTranscriber::new("fake"),
             meeting_repo: Arc::clone(&mr) as Arc<dyn meeting_core::ports::MeetingRepo>,
             job_repo: Arc::clone(&jr) as Arc<dyn meeting_core::ports::JobRepo>,
+            llm: FakeLlmProvider::new(""),
+            templates: FakeTemplateLoader::empty(),
         });
 
         // submit

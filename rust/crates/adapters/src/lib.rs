@@ -6,3 +6,9 @@ pub use db::{Db, SqliteMeetingRepo, SqliteJobRepo};
 
 mod worker;
 pub use worker::Worker;
+
+pub mod llm;
+pub use llm::AnthropicProvider;
+
+pub mod templates;
+pub use templates::FileTemplateLoader;

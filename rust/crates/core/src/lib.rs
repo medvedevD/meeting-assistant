@@ -17,4 +17,8 @@ pub enum CoreError {
     Storage(String),
     #[error("not found: {0}")]
     NotFound(String),
+    #[error("LLM error: {0}")]
+    Llm(String),
+    #[error("template error: {0}")]
+    Template(String),
 }

@@ -1,10 +1,11 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use crate::{
     CoreError,
     entities::{Job, JobStatus, Meeting, Transcript, Segment},
-    ports::{JobRepo, MeetingRepo, Transcriber},
+    ports::{JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber},
 };
 
 // ── FakeTranscriber ──────────────────────────────────────────────────────────
@@ -146,5 +147,53 @@ impl JobRepo for FakeJobRepo {
             j.updated_at = now_ts;
         }
         Ok(())
+    }
+}
+
+// ── FakeLlmProvider ──────────────────────────────────────────────────────────
+
+pub struct FakeLlmProvider {
+    response: String,
+}
+
+impl FakeLlmProvider {
+    pub fn new(response: impl Into<String>) -> Arc<Self> {
+        Arc::new(Self { response: response.into() })
+    }
+}
+
+#[async_trait]
+impl LlmProvider for FakeLlmProvider {
+    async fn generate(&self, _transcript: &str, _instructions: Option<&str>) -> Result<String, CoreError> {
+        Ok(self.response.clone())
+    }
+}
+
+// ── FakeTemplateLoader ───────────────────────────────────────────────────────
+
+pub struct FakeTemplateLoader {
+    templates: HashMap<String, String>,
+}
+
+impl FakeTemplateLoader {
+    pub fn new(templates: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>) -> Arc<Self> {
+        Arc::new(Self {
+            templates: templates.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
+        })
+    }
+
+    pub fn empty() -> Arc<Self> {
+        Arc::new(Self { templates: HashMap::new() })
+    }
+}
+
+#[async_trait]
+impl TemplateLoader for FakeTemplateLoader {
+    async fn load(&self, name: &str) -> Result<Option<String>, CoreError> {
+        Ok(self.templates.get(name).cloned())
+    }
+
+    async fn list_names(&self) -> Result<Vec<String>, CoreError> {
+        Ok(self.templates.keys().cloned().collect())
     }
 }

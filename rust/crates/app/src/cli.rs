@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use meeting_core::usecases::{get_job_status, submit_transcription_job, transcribe_audio_file};
-use crate::container::{Container, default_db_path, default_model_path};
+use meeting_core::usecases::{generate_protocol, get_job_status, submit_transcription_job, transcribe_audio_file};
+use crate::container::{Container, default_db_path, default_model_path, default_prompts_dir};
 
 #[derive(Parser)]
 #[command(name = "meeting-assistant", about = "Meeting transcription and protocol generator")]
@@ -13,6 +13,9 @@ pub struct Cli {
 
     #[arg(long, env = "MEETING_ASSISTANT_DB")]
     db: Option<PathBuf>,
+
+    #[arg(long, env = "MEETING_ASSISTANT_PROMPTS")]
+    prompts_dir: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Command,
@@ -38,6 +41,18 @@ enum Command {
         #[arg(value_name = "JOB_ID")]
         id: String,
     },
+    /// Generate a meeting protocol from a transcript file (requires ANTHROPIC_API_KEY).
+    Generate {
+        /// Path to the transcript text file.
+        #[arg(value_name = "TRANSCRIPT_FILE")]
+        transcript_path: PathBuf,
+        /// Template name (filename without .md extension from the prompts directory).
+        #[arg(long, short = 't')]
+        template: Option<String>,
+        /// Meeting name to inject into the template.
+        #[arg(long, short = 'n')]
+        name: Option<String>,
+    },
     /// Start the HTTP server (also runs the background worker).
     Serve {
         #[arg(long, default_value = "0")]
@@ -49,7 +64,8 @@ impl Cli {
     pub async fn run(self) -> Result<()> {
         let model = self.model.unwrap_or_else(default_model_path);
         let db = self.db.unwrap_or_else(default_db_path);
-        let container = Container::new_desktop(&model, &db)?;
+        let prompts = self.prompts_dir.unwrap_or_else(default_prompts_dir);
+        let container = Container::new_desktop(&model, &db, &prompts)?;
 
         match self.command {
             Command::Transcribe { path } => {
@@ -85,6 +101,20 @@ impl Cli {
                 }
             }
 
+            Command::Generate { transcript_path, template, name } => {
+                let transcript = tokio::fs::read_to_string(&transcript_path).await
+                    .map_err(|e| anyhow::anyhow!("cannot read {:?}: {e}", transcript_path))?;
+                let protocol = generate_protocol(
+                    Arc::clone(&container.llm),
+                    Arc::clone(&container.templates),
+                    &transcript,
+                    template.as_deref(),
+                    name.as_deref(),
+                )
+                .await?;
+                print!("{}", protocol.markdown);
+            }
+
             Command::Serve { port } => {
                 let _worker = container.spawn_worker();
 
@@ -98,6 +128,8 @@ impl Cli {
                     transcriber: container.transcriber,
                     meeting_repo: container.meeting_repo,
                     job_repo: container.job_repo,
+                    llm: container.llm,
+                    templates: container.templates,
                 };
                 axum::serve(listener, meeting_api::create_router(state)).await?;
             }

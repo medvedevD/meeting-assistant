@@ -6,3 +6,9 @@ pub use meeting_repo::MeetingRepo;
 
 mod job_repo;
 pub use job_repo::JobRepo;
+
+mod llm_provider;
+pub use llm_provider::LlmProvider;
+
+mod template_loader;
+pub use template_loader::TemplateLoader;

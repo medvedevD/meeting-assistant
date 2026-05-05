@@ -6,3 +6,6 @@ pub use meeting::Meeting;
 
 pub mod job;
 pub use job::{Job, JobKind, JobStatus};
+
+mod protocol;
+pub use protocol::Protocol;
