@@ -4,15 +4,29 @@
   "version": "0.1.0",
   "identifier": "dev.codemedvedev.meeting-assistant",
   "build": {
-    "frontendDist": "../src"
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
-    "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "Meeting Assistant",
-        "width": 640,
+        "width": 1200,
         "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true
+      },
+      {
+        "label": "debug",
+        "title": "Diagnostics",
+        "url": "debug.html",
+        "visible": false,
+        "width": 860,
+        "height": 700,
         "resizable": true
       }
     ],

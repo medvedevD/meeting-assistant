@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Diagnostics</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      padding: 24px;
+      font-size: 0.875rem;
+    }
+    h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: 20px; }
+    h2 { font-size: 0.9rem; font-weight: 600; color: #a0a0c0; margin-bottom: 10px; }
+    section {
+      background: #16213e;
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin-bottom: 14px;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    td, th { padding: 5px 8px; text-align: left; vertical-align: top; }
+    th { color: #a0a0c0; font-weight: 500; width: 160px; }
+    td { color: #d0d0e0; word-break: break-all; }
+    .ok   { color: #4caf50; font-weight: 600; }
+    .fail { color: #e94560; font-weight: 600; }
+    .tag  { font-size: 0.72rem; background: #1a3a1a; color: #4caf50; border-radius: 10px; padding: 1px 7px; margin-left: 6px; }
+    .tag.monitor { background: #1e2a4a; color: #6a9fd8; }
+    .tag.default { background: #2a2a1a; color: #c8b84a; }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    button {
+      padding: 7px 16px;
+      border-radius: 7px;
+      border: none;
+      background: #e94560;
+      color: #fff;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: #c73652; }
+    button:disabled { background: #444; cursor: not-allowed; }
+    button.secondary { background: #2a4080; }
+    button.secondary:hover { background: #1e3060; }
+    pre#logs-view {
+      background: #0a0a1a;
+      border-radius: 7px;
+      padding: 10px;
+      max-height: 220px;
+      overflow-y: auto;
+      font-size: 0.78rem;
+      line-height: 1.5;
+      color: #b0c0b0;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    #mic-test-result {
+      margin-top: 8px;
+      font-size: 0.8rem;
+      color: #a0a0c0;
+      min-height: 1.2em;
+    }
+    #loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+    #content { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Диагностика</h1>
+  <div id="loading">Загрузка данных…</div>
+  <div id="content">
+
+    <!-- 1. Окружение -->
+    <section>
+      <h2>Окружение</h2>
+      <table id="env-table"></table>
+    </section>
+
+    <!-- 2. Пути -->
+    <section>
+      <h2>Пути</h2>
+      <table id="paths-table"></table>
+    </section>
+
+    <!-- 3. Аудио-устройства -->
+    <section>
+      <h2>Аудио-устройства</h2>
+      <table>
+        <tr>
+          <th style="width:auto;padding-bottom:6px;">Входные (input)</th>
+          <th style="padding-bottom:6px;">Выходные (output)</th>
+        </tr>
+        <tr>
+          <td><div id="input-devices"></div></td>
+          <td><div id="output-devices"></div></td>
+        </tr>
+      </table>
+      <div class="btn-row">
+        <button id="btn-mic-test">Тест микрофона (3 с)</button>
+      </div>
+      <div id="mic-test-result"></div>
+    </section>
+
+    <!-- 4. Зависимости -->
+    <section>
+      <h2>Зависимости</h2>
+      <table>
+        <tr>
+          <th>ffmpeg</th>
+          <td id="ffmpeg-status">…</td>
+        </tr>
+        <tr>
+          <th>Anthropic API Key</th>
+          <td id="api-key-status">…</td>
+        </tr>
+      </table>
+    </section>
+
+    <!-- 5. Логи -->
+    <section>
+      <h2>Логи приложения</h2>
+      <pre id="logs-view"></pre>
+      <div class="btn-row">
+        <button id="btn-refresh-logs" class="secondary">Обновить</button>
+        <button id="btn-copy-logs" class="secondary">Скопировать</button>
+      </div>
+    </section>
+
+    <!-- 6. Снапшот -->
+    <section>
+      <h2>Снапшот</h2>
+      <p style="color:#888;margin-bottom:10px;">Экспорт всех диагностических данных без API-ключа.</p>
+      <button id="btn-export">Экспорт diagnostics.json</button>
+    </section>
+
+  </div>
+
+  <script type="module" src="./debug-window.js"></script>
+</body>
+</html>

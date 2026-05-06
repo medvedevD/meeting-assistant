@@ -22,3 +22,8 @@ ARCHITECTURE.md
 
 # Internal docs (not ready for repo)
 docs/
+
+# UI build artifacts
+ui/dist/
+ui/node_modules/
+ui/src-tauri/target/

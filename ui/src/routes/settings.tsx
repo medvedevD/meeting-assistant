@@ -1,0 +1,7 @@
+export default function SettingsPage() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <p className="text-[var(--muted-foreground)] text-sm">Настройки — скоро</p>
+    </div>
+  );
+}
