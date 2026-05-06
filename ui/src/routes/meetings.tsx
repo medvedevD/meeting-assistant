@@ -1,7 +1,11 @@
+import { useState } from "react";
 import { Outlet } from "react-router-dom";
 import { MeetingsList } from "@/components/meetings/MeetingsList";
+import { TranscribeFileDialog } from "@/components/meetings/TranscribeFileDialog";
 
 export default function MeetingsPage() {
+  const [transcribeOpen, setTranscribeOpen] = useState(false);
+
   return (
     <div className="flex h-full">
       {/* Left: list */}
@@ -11,13 +15,16 @@ export default function MeetingsPage() {
             Встречи
           </h2>
         </div>
-        <MeetingsList />
+        <MeetingsList onTranscribeFile={() => setTranscribeOpen(true)} />
       </div>
 
       {/* Right: detail */}
       <div className="flex-1 overflow-hidden">
         <Outlet />
       </div>
+
+      {/* Transcribe file dialog */}
+      <TranscribeFileDialog open={transcribeOpen} onOpenChange={setTranscribeOpen} />
     </div>
   );
 }

@@ -1,13 +1,18 @@
 import { useState } from "react";
 import { NavLink } from "react-router-dom";
-import { Search, Loader2 } from "lucide-react";
+import { Search, Loader2, FilePlus } from "lucide-react";
 import { useMeetings } from "@/hooks/useMeetings";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatDateShort } from "@/lib/format";
 
-export function MeetingsList() {
+interface MeetingsListProps {
+  onTranscribeFile: () => void;
+}
+
+export function MeetingsList({ onTranscribeFile }: MeetingsListProps) {
   const { data: meetings, isLoading, isError } = useMeetings();
   const [search, setSearch] = useState("");
 
@@ -69,6 +74,19 @@ export function MeetingsList() {
             </p>
           </NavLink>
         ))}
+      </div>
+
+      {/* Footer action */}
+      <div className="border-t border-[var(--border)] p-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start gap-2 text-xs text-[var(--muted-foreground)]"
+          onClick={onTranscribeFile}
+        >
+          <FilePlus className="h-3.5 w-3.5" />
+          + Транскрибировать файл
+        </Button>
       </div>
     </div>
   );
