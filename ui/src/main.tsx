@@ -17,9 +17,8 @@ function GlobalHotkeys() {
       if (e.ctrlKey && e.shiftKey && e.key === "D") {
         e.preventDefault();
         try {
-          const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-          const win = await WebviewWindow.getByLabel("debug");
-          if (win) { await win.show(); await win.setFocus(); }
+          const { showDebugWindow } = await import("@/api/debug");
+          await showDebugWindow();
         } catch {}
       }
     }

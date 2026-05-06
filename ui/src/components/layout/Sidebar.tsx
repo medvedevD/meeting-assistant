@@ -3,6 +3,7 @@ import { Mic, ListChecks, Settings, Bug } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { showDebugWindow } from "@/api/debug";
 
 const navItems = [
   { to: "/recording", icon: Mic, label: "Запись" },
@@ -12,12 +13,7 @@ const navItems = [
 
 async function openDebugWindow() {
   try {
-    const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    const win = await WebviewWindow.getByLabel("debug");
-    if (win) {
-      await win.show();
-      await win.setFocus();
-    }
+    await showDebugWindow();
   } catch (e) {
     console.error("Failed to open debug window", e);
   }
