@@ -12,6 +12,8 @@ use crate::router::AppState;
 #[derive(Deserialize)]
 pub struct TranscribeRequest {
     pub path: String,
+    /// If provided, saves the transcript text to this meeting record in the DB.
+    pub meeting_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -36,6 +38,13 @@ pub async fn handle(
     let transcript = transcribe_audio_file(Arc::clone(&state.transcriber), &path)
         .await
         .map_err(|e| (StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
+
+    if let Some(ref id) = req.meeting_id {
+        state.meeting_repo
+            .save_transcript(id, &transcript.text)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
 
     Ok(Json(TranscribeResponse {
         text: transcript.text,

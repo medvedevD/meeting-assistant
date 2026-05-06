@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::State;
 use meeting_core::{
-    ports::{AudioCapture, MeetingRepo, Transcriber},
+    ports::{AudioCapture, CaptureSource, MeetingRepo, Transcriber},
     usecases::{list_meetings, start_recording, stop_recording, transcribe_audio_file},
 };
 use meeting_adapters::{CpalAudioCapture, Db, SqliteMeetingRepo, WhisperTranscriber};
@@ -51,13 +51,22 @@ async fn transcribe_file(
 #[tauri::command]
 async fn recording_start(
     name: Option<String>,
+    source: Option<String>,
+    echo_cancel: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<RecordingDto, String> {
+    let capture_source = match source.as_deref() {
+        Some("system") => CaptureSource::System,
+        Some("mixed")  => CaptureSource::Mixed,
+        _              => CaptureSource::Mic,
+    };
     let meeting = start_recording(
         Arc::clone(&state.audio_capture),
         Arc::clone(&state.meeting_repo),
         &state.recordings_dir,
         name,
+        capture_source,
+        echo_cancel.unwrap_or(false),
     )
     .await
     .map_err(|e| e.to_string())?;

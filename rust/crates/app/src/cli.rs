@@ -2,9 +2,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use meeting_core::usecases::{
-    generate_protocol, get_job_status, list_meetings,
-    start_recording, stop_recording, submit_transcription_job, transcribe_audio_file,
+use meeting_core::{
+    ports::CaptureSource,
+    usecases::{
+        generate_protocol, get_job_status, list_meetings,
+        start_recording, stop_recording, submit_transcription_job, transcribe_audio_file,
+    },
 };
 use crate::container::{
     Container, default_db_path, default_model_path, default_prompts_dir, default_recordings_dir,
@@ -61,11 +64,17 @@ enum Command {
         #[arg(long, short = 'n')]
         name: Option<String>,
     },
-    /// Start recording from the default microphone. Prints the meeting ID.
+    /// Start recording. Prints the meeting ID.
     RecordStart {
         /// Human-readable meeting name.
         #[arg(long, short = 'n')]
         name: Option<String>,
+        /// Audio source: mic (default), system, or mixed.
+        #[arg(long, short = 's', default_value = "mic")]
+        source: String,
+        /// Enable acoustic echo cancellation (mixed source only, opt-in).
+        #[arg(long)]
+        echo_cancel: bool,
     },
     /// Stop an active recording session.
     RecordStop {
@@ -137,16 +146,23 @@ impl Cli {
                 print!("{}", protocol.markdown);
             }
 
-            Command::RecordStart { name } => {
+            Command::RecordStart { name, source, echo_cancel } => {
+                let capture_source = match source.as_str() {
+                    "system" => CaptureSource::System,
+                    "mixed"  => CaptureSource::Mixed,
+                    _        => CaptureSource::Mic,
+                };
                 let meeting = start_recording(
                     Arc::clone(&container.audio_capture),
                     Arc::clone(&container.meeting_repo),
                     &container.recordings_dir,
                     name,
+                    capture_source,
+                    echo_cancel,
                 )
                 .await?;
                 println!("{}", meeting.id);
-                eprintln!("Recording started. Press Ctrl+C or run `record-stop {}` to stop.", meeting.id);
+                eprintln!("Recording started ({source}). Press Ctrl+C or run `record-stop {}` to stop.", meeting.id);
             }
 
             Command::RecordStop { id } => {

@@ -5,12 +5,16 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use meeting_core::usecases::{start_recording, stop_recording};
+use meeting_core::{ports::CaptureSource, usecases::{start_recording, stop_recording}};
 use crate::router::AppState;
 
 #[derive(Deserialize)]
 pub struct StartRequest {
     pub name: Option<String>,
+    #[serde(default)]
+    pub source: CaptureSource,
+    #[serde(default)]
+    pub echo_cancel: bool,
 }
 
 #[derive(Serialize)]
@@ -30,6 +34,8 @@ pub async fn start(
         Arc::clone(&state.meeting_repo),
         &state.recordings_dir,
         req.name,
+        req.source,
+        req.echo_cancel,
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -83,7 +89,7 @@ mod tests {
     use tower::ServiceExt;
     use meeting_core::{
         fakes::{FakeAudioCapture, FakeLlmProvider, FakeMeetingRepo, FakeJobRepo, FakeTemplateLoader, FakeTranscriber},
-        ports::AudioCapture,
+        ports::{AudioCapture, CaptureSource},
     };
     use crate::router::{AppState, create_router};
 
@@ -107,6 +113,19 @@ mod tests {
         serde_json::from_slice(&bytes).unwrap()
     }
 
+    async fn post_start(app: axum::Router, body: serde_json::Value) -> axum::response::Response {
+        app.oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/recordings")
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
     // ── start ────────────────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -115,18 +134,7 @@ mod tests {
         let repo = FakeMeetingRepo::new();
         let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
 
-        let body = serde_json::json!({ "name": "Планёрка" });
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/recordings")
-                    .header("content-type", "application/json")
-                    .body(Body::from(body.to_string()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = post_start(app, serde_json::json!({ "name": "Планёрка" })).await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
         let json = body_json(response).await;
@@ -140,19 +148,7 @@ mod tests {
         let repo = FakeMeetingRepo::new();
         let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
 
-        let body = serde_json::json!({ "name": "1-на-1" });
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/recordings")
-                    .header("content-type", "application/json")
-                    .body(Body::from(body.to_string()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
+        let response = post_start(app, serde_json::json!({ "name": "1-на-1" })).await;
         let json = body_json(response).await;
         let id = json["id"].as_str().unwrap().to_string();
         assert!(capture.is_active(&id));
@@ -164,22 +160,71 @@ mod tests {
         let repo = FakeMeetingRepo::new();
         let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
 
-        let body = serde_json::json!({});
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/recordings")
-                    .header("content-type", "application/json")
-                    .body(Body::from(body.to_string()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let response = post_start(app, serde_json::json!({})).await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
         let json = body_json(response).await;
         assert!(json["name"].as_str().map(|s| !s.is_empty()).unwrap_or(false));
+    }
+
+    #[tokio::test]
+    async fn start_with_source_system_passes_system_to_adapter() {
+        let capture = FakeAudioCapture::new();
+        let repo = FakeMeetingRepo::new();
+        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+
+        let response = post_start(app, serde_json::json!({ "source": "system" })).await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(capture.last_source(), Some(CaptureSource::System));
+    }
+
+    #[tokio::test]
+    async fn start_with_source_mixed_passes_mixed_to_adapter() {
+        let capture = FakeAudioCapture::new();
+        let repo = FakeMeetingRepo::new();
+        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+
+        let response = post_start(app, serde_json::json!({ "source": "mixed" })).await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(capture.last_source(), Some(CaptureSource::Mixed));
+    }
+
+    #[tokio::test]
+    async fn start_without_source_defaults_to_mic() {
+        let capture = FakeAudioCapture::new();
+        let repo = FakeMeetingRepo::new();
+        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+
+        let response = post_start(app, serde_json::json!({})).await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(capture.last_source(), Some(CaptureSource::Mic));
+    }
+
+    #[tokio::test]
+    async fn start_with_echo_cancel_true_passes_true_to_adapter() {
+        let capture = FakeAudioCapture::new();
+        let repo = FakeMeetingRepo::new();
+        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+
+        let response = post_start(app, serde_json::json!({ "source": "mixed", "echo_cancel": true })).await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(capture.last_echo_cancel(), Some(true));
+    }
+
+    #[tokio::test]
+    async fn start_without_echo_cancel_defaults_to_false() {
+        let capture = FakeAudioCapture::new();
+        let repo = FakeMeetingRepo::new();
+        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+
+        let response = post_start(app, serde_json::json!({ "source": "mixed" })).await;
+
+        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(capture.last_echo_cancel(), Some(false));
     }
 
     // ── stop ─────────────────────────────────────────────────────────────────
@@ -190,24 +235,10 @@ mod tests {
         let repo = FakeMeetingRepo::new();
         let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
 
-        // Start first
-        let start_body = serde_json::json!({ "name": "Дейлик" });
-        let start_resp = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/v1/recordings")
-                    .header("content-type", "application/json")
-                    .body(Body::from(start_body.to_string()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
+        let start_resp = post_start(app.clone(), serde_json::json!({ "name": "Дейлик" })).await;
         let start_json = body_json(start_resp).await;
         let id = start_json["id"].as_str().unwrap().to_string();
 
-        // Stop
         let stop_resp = app
             .oneshot(
                 Request::builder()

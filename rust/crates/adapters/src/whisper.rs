@@ -75,6 +75,8 @@ fn run_whisper(ctx: &WhisperContext, audio_path: &PathBuf) -> Result<Transcript,
     })
 }
 
+const WHISPER_SAMPLE_RATE: u32 = 16000;
+
 fn load_wav_as_mono_f32(path: &Path) -> anyhow::Result<Vec<f32>> {
     let mut reader = hound::WavReader::open(path)?;
     let spec = reader.spec();
@@ -92,12 +94,49 @@ fn load_wav_as_mono_f32(path: &Path) -> anyhow::Result<Vec<f32>> {
             .map_err(|e| anyhow::anyhow!("stereo→mono failed: {e}"))?
     };
 
-    if spec.sample_rate != 16000 {
-        tracing::warn!(
-            sample_rate = spec.sample_rate,
-            "audio is not 16kHz; whisper accuracy may be reduced"
-        );
+    if spec.sample_rate == WHISPER_SAMPLE_RATE {
+        return Ok(mono);
     }
 
-    Ok(mono)
+    tracing::info!(
+        from = spec.sample_rate,
+        to = WHISPER_SAMPLE_RATE,
+        "resampling audio"
+    );
+    resample(mono, spec.sample_rate, WHISPER_SAMPLE_RATE)
+}
+
+fn resample(samples: Vec<f32>, from_rate: u32, to_rate: u32) -> anyhow::Result<Vec<f32>> {
+    use rubato::{FftFixedIn, Resampler};
+
+    const CHUNK: usize = 1024;
+
+    let mut resampler = FftFixedIn::<f32>::new(
+        from_rate as usize,
+        to_rate as usize,
+        CHUNK,
+        2,
+        1,
+    )?;
+
+    let ratio = to_rate as f64 / from_rate as f64;
+    let mut output = Vec::with_capacity((samples.len() as f64 * ratio) as usize + CHUNK);
+    let mut pos = 0;
+
+    while pos + CHUNK <= samples.len() {
+        let waves_in = vec![samples[pos..pos + CHUNK].to_vec()];
+        let waves_out = resampler.process(&waves_in, None)?;
+        output.extend_from_slice(&waves_out[0]);
+        pos += CHUNK;
+    }
+
+    if pos < samples.len() {
+        let mut tail = samples[pos..].to_vec();
+        tail.resize(CHUNK, 0.0);
+        let waves_in = vec![tail];
+        let waves_out = resampler.process_partial(Some(&waves_in), None)?;
+        output.extend_from_slice(&waves_out[0]);
+    }
+
+    Ok(output)
 }

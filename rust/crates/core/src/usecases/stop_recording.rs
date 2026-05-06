@@ -29,7 +29,7 @@ mod tests {
     use crate::{
         entities::Meeting,
         fakes::{FakeAudioCapture, FakeMeetingRepo},
-        ports::MeetingRepo,
+        ports::{CaptureSource, MeetingRepo},
     };
 
     async fn seeded_repo(name: &str) -> (Arc<FakeMeetingRepo>, Meeting) {
@@ -46,7 +46,7 @@ mod tests {
 
         // Simulate an active session
         capture
-            .start_session(&meeting.id, std::path::Path::new("/tmp/r.wav"))
+            .start_session(&meeting.id, std::path::Path::new("/tmp/r.wav"), CaptureSource::Mic, false)
             .await
             .unwrap();
 
@@ -86,7 +86,7 @@ mod tests {
 
         // manually activate a session that has no DB record
         capture
-            .start_session(id, std::path::Path::new("/tmp/x.wav"))
+            .start_session(id, std::path::Path::new("/tmp/x.wav"), CaptureSource::Mic, false)
             .await
             .unwrap();
 

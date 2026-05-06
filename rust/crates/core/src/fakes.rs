@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use crate::{
     CoreError,
     entities::{Job, JobStatus, Meeting, Transcript, Segment},
-    ports::{AudioCapture, JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber},
+    ports::{AudioCapture, CaptureSource, JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber},
 };
 
 // ── FakeTranscriber ──────────────────────────────────────────────────────────
@@ -207,7 +207,8 @@ impl TemplateLoader for FakeTemplateLoader {
 #[derive(Default)]
 pub struct FakeAudioCapture {
     active: Mutex<HashSet<String>>,
-    pub started: Mutex<Vec<String>>,
+    /// Each entry is `(session_id, source, echo_cancel)` in call order.
+    pub started: Mutex<Vec<(String, CaptureSource, bool)>>,
     pub stopped: Mutex<Vec<String>>,
 }
 
@@ -215,13 +216,29 @@ impl FakeAudioCapture {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }
+
+    /// Returns the `CaptureSource` for the most-recently started session, if any.
+    pub fn last_source(&self) -> Option<CaptureSource> {
+        self.started.lock().unwrap().last().map(|(_, s, _)| *s)
+    }
+
+    /// Returns the `echo_cancel` flag for the most-recently started session, if any.
+    pub fn last_echo_cancel(&self) -> Option<bool> {
+        self.started.lock().unwrap().last().map(|(_, _, e)| *e)
+    }
 }
 
 #[async_trait]
 impl AudioCapture for FakeAudioCapture {
-    async fn start_session(&self, session_id: &str, _output_path: &Path) -> Result<(), CoreError> {
+    async fn start_session(
+        &self,
+        session_id: &str,
+        _output_path: &Path,
+        source: CaptureSource,
+        echo_cancel: bool,
+    ) -> Result<(), CoreError> {
         self.active.lock().unwrap().insert(session_id.to_string());
-        self.started.lock().unwrap().push(session_id.to_string());
+        self.started.lock().unwrap().push((session_id.to_string(), source, echo_cancel));
         Ok(())
     }
 
