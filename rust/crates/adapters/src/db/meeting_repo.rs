@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use async_trait::async_trait;
 use rusqlite::OptionalExtension;
@@ -37,7 +37,7 @@ impl MeetingRepo for SqliteMeetingRepo {
         tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().unwrap();
             conn.query_row(
-                "SELECT id, name, audio_path, transcript_text, created_at FROM meetings WHERE id=?1",
+                "SELECT id, name, audio_path, transcript_text, protocol_text, created_at FROM meetings WHERE id=?1",
                 [&id],
                 |row| {
                     Ok(Meeting {
@@ -45,7 +45,36 @@ impl MeetingRepo for SqliteMeetingRepo {
                         name: row.get(1)?,
                         audio_path: PathBuf::from(row.get::<_, String>(2)?),
                         transcript_text: row.get(3)?,
-                        created_at: row.get(4)?,
+                        protocol_text: row.get(4)?,
+                        created_at: row.get(5)?,
+                    })
+                },
+            )
+            .optional()
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+        .map_err(|e| CoreError::Storage(e.to_string()))
+    }
+
+    async fn find_by_audio_path(&self, path: &Path) -> Result<Option<Meeting>, CoreError> {
+        let db = Arc::clone(&self.0);
+        let path_str = path.display().to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = db.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT id, name, audio_path, transcript_text, protocol_text, created_at \
+                 FROM meetings WHERE audio_path=?1 ORDER BY created_at DESC LIMIT 1",
+                [&path_str],
+                |row| {
+                    Ok(Meeting {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        audio_path: PathBuf::from(row.get::<_, String>(2)?),
+                        transcript_text: row.get(3)?,
+                        protocol_text: row.get(4)?,
+                        created_at: row.get(5)?,
                     })
                 },
             )
@@ -75,6 +104,25 @@ impl MeetingRepo for SqliteMeetingRepo {
         Ok(())
     }
 
+    async fn save_protocol(&self, id: &str, text: &str) -> Result<(), CoreError> {
+        let db = Arc::clone(&self.0);
+        let id = id.to_string();
+        let text = text.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE meetings SET protocol_text=?1 WHERE id=?2",
+                rusqlite::params![text, id],
+            )
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+        .map_err(|e| CoreError::Storage(e.to_string()))?;
+
+        Ok(())
+    }
+
     async fn list_all(&self) -> Result<Vec<Meeting>, CoreError> {
         let db = Arc::clone(&self.0);
 
@@ -82,7 +130,12 @@ impl MeetingRepo for SqliteMeetingRepo {
             let conn = db.conn.lock().unwrap();
             let mut stmt = conn
                 .prepare(
-                    "SELECT id, name, audio_path, transcript_text, created_at \
+                    // Select presence flags only — avoids loading MB of text on every list call.
+                    // transcript_text/protocol_text will be Some("") when present, None otherwise.
+                    "SELECT id, name, audio_path, \
+                       CASE WHEN transcript_text IS NOT NULL THEN '' ELSE NULL END, \
+                       CASE WHEN protocol_text IS NOT NULL THEN '' ELSE NULL END, \
+                       created_at \
                      FROM meetings ORDER BY created_at DESC",
                 )
                 .map_err(|e| CoreError::Storage(e.to_string()))?;
@@ -94,7 +147,8 @@ impl MeetingRepo for SqliteMeetingRepo {
                         name: row.get(1)?,
                         audio_path: PathBuf::from(row.get::<_, String>(2)?),
                         transcript_text: row.get(3)?,
-                        created_at: row.get(4)?,
+                        protocol_text: row.get(4)?,
+                        created_at: row.get(5)?,
                     })
                 })
                 .map_err(|e| CoreError::Storage(e.to_string()))?

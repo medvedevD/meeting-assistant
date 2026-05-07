@@ -12,6 +12,7 @@ use rusqlite::Connection;
 // Each entry is (version, sql). Applied in order; already-applied versions are skipped.
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../../../../migrations/001_initial.sql")),
+    (2, include_str!("../../../../migrations/002_protocol.sql")),
 ];
 
 pub struct Db {

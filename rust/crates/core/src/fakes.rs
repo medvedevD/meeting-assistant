@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use crate::{
@@ -55,10 +55,27 @@ impl MeetingRepo for FakeMeetingRepo {
         Ok(self.store.lock().unwrap().iter().find(|m| m.id == id).cloned())
     }
 
+    async fn find_by_audio_path(&self, path: &Path) -> Result<Option<Meeting>, CoreError> {
+        Ok(self.store.lock().unwrap().iter()
+            .filter(|m| m.audio_path == PathBuf::from(path))
+            .last()
+            .cloned())
+    }
+
     async fn save_transcript(&self, id: &str, text: &str) -> Result<(), CoreError> {
         let mut store = self.store.lock().unwrap();
         if let Some(m) = store.iter_mut().find(|m| m.id == id) {
             m.transcript_text = Some(text.to_string());
+            Ok(())
+        } else {
+            Err(CoreError::NotFound(id.to_string()))
+        }
+    }
+
+    async fn save_protocol(&self, id: &str, text: &str) -> Result<(), CoreError> {
+        let mut store = self.store.lock().unwrap();
+        if let Some(m) = store.iter_mut().find(|m| m.id == id) {
+            m.protocol_text = Some(text.to_string());
             Ok(())
         } else {
             Err(CoreError::NotFound(id.to_string()))
