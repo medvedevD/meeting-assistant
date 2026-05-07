@@ -9,6 +9,7 @@ export interface MeetingDto {
   name: string;
   audio_path: string;
   has_transcript: boolean;
+  has_protocol: boolean;
   created_at: number; // unix timestamp (i64)
 }
 

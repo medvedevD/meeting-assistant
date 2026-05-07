@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { toast } from "sonner";
 import { Loader2, FolderOpen, CheckCircle, XCircle } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -28,6 +28,7 @@ export function TranscribeFileDialog({ open, onOpenChange }: TranscribeFileDialo
   const [filePath, setFilePath] = useState("");
   const [meetingName, setMeetingName] = useState("");
   const [jobState, setJobState] = useState<JobState>({ phase: "idle" });
+  const pollCancelRef = useRef(false);
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -60,25 +61,37 @@ export function TranscribeFileDialog({ open, onOpenChange }: TranscribeFileDialo
       });
 
       setJobState({ phase: "running", jobId: job.id, status: job.status });
+      pollCancelRef.current = false;
 
       // Poll until done or failed
       const poll = async () => {
-        const current = await jobStatus(job.id);
-        if (!current) return;
+        if (pollCancelRef.current) return;
+        try {
+          const current = await jobStatus(job.id);
+          if (pollCancelRef.current) return;
+          if (!current) {
+            setJobState({ phase: "failed", error: "Задача не найдена" });
+            return;
+          }
 
-        if (current.status === "done") {
-          setJobState({ phase: "done" });
-          toast.success("Транскрибация завершена");
-          await qc.invalidateQueries({ queryKey: queryKeys.meetings });
-          setTimeout(() => {
-            onOpenChange(false);
-            resetForm();
-          }, 1200);
-        } else if (current.status === "failed") {
-          setJobState({ phase: "failed", error: current.last_error ?? "неизвестная ошибка" });
-        } else {
-          setJobState({ phase: "running", jobId: job.id, status: current.status });
-          setTimeout(poll, 1500);
+          if (current.status === "done") {
+            setJobState({ phase: "done" });
+            toast.success("Транскрибация завершена");
+            await qc.invalidateQueries({ queryKey: queryKeys.meetings });
+            setTimeout(() => {
+              onOpenChange(false);
+              resetForm();
+            }, 1200);
+          } else if (current.status === "failed") {
+            setJobState({ phase: "failed", error: current.last_error ?? "неизвестная ошибка" });
+          } else {
+            setJobState({ phase: "running", jobId: job.id, status: current.status });
+            setTimeout(poll, 1500);
+          }
+        } catch (e) {
+          if (pollCancelRef.current) return;
+          const msg = e instanceof Error ? e.message : String(e);
+          setJobState({ phase: "failed", error: `Ошибка опроса: ${msg}` });
         }
       };
 
@@ -97,8 +110,14 @@ export function TranscribeFileDialog({ open, onOpenChange }: TranscribeFileDialo
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
+  useEffect(() => {
+    if (!open) {
+      pollCancelRef.current = true;
+    }
+  }, [open]);
+
   function handleClose() {
-    if (jobState.phase === "running") return; // don't allow close while running
+    pollCancelRef.current = true;
     onOpenChange(false);
     resetForm();
   }
@@ -179,7 +198,7 @@ export function TranscribeFileDialog({ open, onOpenChange }: TranscribeFileDialo
 
         {/* Actions */}
         <div className="flex justify-end gap-2 pt-1">
-          <Button variant="outline" size="sm" onClick={handleClose} disabled={isRunning}>
+          <Button variant="outline" size="sm" onClick={handleClose}>
             Отмена
           </Button>
           <Button

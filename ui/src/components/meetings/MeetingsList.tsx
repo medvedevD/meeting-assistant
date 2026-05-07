@@ -63,15 +63,20 @@ export function MeetingsList({ onTranscribeFile }: MeetingsListProps) {
               )
             }
           >
-            <div className="flex items-start justify-between gap-2">
-              <span className="truncate text-sm font-medium leading-tight">{m.name}</span>
-              <Badge variant={m.has_transcript ? "success" : "muted"} className="shrink-0 mt-0.5">
-                {m.has_transcript ? "транскрипт" : "нет"}
-              </Badge>
+            <p className="truncate text-sm font-medium leading-tight">{m.name}</p>
+            <div className="mt-0.5 flex items-center justify-between gap-2">
+              <span className="text-xs text-[var(--muted-foreground)]">
+                {formatDateShort(m.created_at)}
+              </span>
+              <div className="flex shrink-0 gap-1">
+                <Badge variant={m.has_transcript ? "success" : "muted"}>
+                  {m.has_transcript ? "Т ✓" : "Т —"}
+                </Badge>
+                <Badge variant={m.has_protocol ? "success" : "muted"}>
+                  {m.has_protocol ? "П ✓" : "П —"}
+                </Badge>
+              </div>
             </div>
-            <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
-              {formatDateShort(m.created_at)}
-            </p>
           </NavLink>
         ))}
       </div>

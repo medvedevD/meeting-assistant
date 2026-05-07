@@ -29,7 +29,7 @@ export function Tabs({
   };
   return (
     <TabsCtx.Provider value={{ active, setActive }}>
-      <div className={cn("flex flex-col", className)}>{children}</div>
+      <div className={cn("flex min-h-0 flex-col", className)}>{children}</div>
     </TabsCtx.Provider>
   );
 }
@@ -83,6 +83,12 @@ export function TabsContent({
   className?: string;
 }) {
   const { active } = useContext(TabsCtx);
-  if (active !== value) return null;
-  return <div className={cn("flex-1 overflow-y-auto", className)}>{children}</div>;
+  return (
+    <div
+      hidden={active !== value}
+      className={cn("min-h-0 flex-1 overflow-y-auto", className)}
+    >
+      {children}
+    </div>
+  );
 }

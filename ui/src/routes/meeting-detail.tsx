@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { FolderOpen, Loader2, FileText } from "lucide-react";
@@ -35,15 +35,15 @@ export default function MeetingDetailPage() {
     }
   }
 
-  // Notify when job finishes
-  if (jobDone && jobId) {
-    toast.success("Транскрибация завершена");
-    setJobId(null);
-  }
-  if (jobFailed && jobId) {
-    toast.error(`Ошибка транскрибации: ${job?.last_error ?? "неизвестно"}`);
-    setJobId(null);
-  }
+  useEffect(() => {
+    if (jobDone && jobId) {
+      toast.success("Транскрибация завершена");
+      setJobId(null);
+    } else if (jobFailed && jobId) {
+      toast.error(`Ошибка транскрибации: ${job?.last_error ?? "неизвестно"}`);
+      setJobId(null);
+    }
+  }, [jobDone, jobFailed, jobId, job?.last_error]);
 
   function openFolder() {
     if (!meeting) return;
@@ -75,6 +75,9 @@ export default function MeetingDetailPage() {
           <div className="flex shrink-0 items-center gap-2">
             <Badge variant={meeting.has_transcript ? "success" : "muted"}>
               {meeting.has_transcript ? "транскрипт ✓" : "нет транскрипта"}
+            </Badge>
+            <Badge variant={meeting.has_protocol ? "success" : "muted"}>
+              {meeting.has_protocol ? "протокол ✓" : "нет протокола"}
             </Badge>
             <Button variant="outline" size="sm" onClick={openFolder}>
               <FolderOpen className="h-3.5 w-3.5" />

@@ -9,6 +9,7 @@ export function useMeetings() {
   return useQuery({
     queryKey: queryKeys.meetings,
     queryFn: listMeetings,
+    staleTime: 30_000,
   });
 }
 

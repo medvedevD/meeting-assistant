@@ -9,7 +9,12 @@ export function templatesList(): Promise<string[]> {
 /** mirrors: protocol_generate(meeting_id, template_name?) → ProtocolDto */
 export function generateProtocol(args: GenerateProtocolArgs): Promise<ProtocolDto> {
   return invokeCmd("protocol_generate", {
-    meeting_id: args.meeting_id,
-    template_name: args.template_name,
+    meetingId: args.meeting_id,
+    templateName: args.template_name,
   });
+}
+
+/** mirrors: protocol_load(meeting_id) → Option<ProtocolDto> */
+export function loadProtocol(meetingId: string): Promise<ProtocolDto | null> {
+  return invokeCmd("protocol_load", { meetingId });
 }

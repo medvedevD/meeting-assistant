@@ -4,8 +4,7 @@ import { toast } from "sonner";
 import { Loader2, Download } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { templatesList } from "@/api/protocols";
-import { generateProtocol } from "@/api/protocols";
+import { templatesList, generateProtocol, loadProtocol } from "@/api/protocols";
 import { queryKeys } from "@/hooks/queryKeys";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
@@ -21,11 +20,20 @@ export function ProtocolPanel({ meetingId, meetingName }: ProtocolPanelProps) {
   const { data: templates = [], isLoading: templatesLoading } = useQuery({
     queryKey: queryKeys.templates,
     queryFn: templatesList,
+    staleTime: Infinity,
+  });
+
+  const { data: savedProtocol, isLoading: protocolLoading } = useQuery({
+    queryKey: queryKeys.protocol(meetingId),
+    queryFn: () => loadProtocol(meetingId),
+    staleTime: Infinity,
   });
 
   const [templateName, setTemplateName] = useState<string>("");
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+
+  const displayMarkdown = markdown ?? savedProtocol?.markdown ?? null;
 
   async function handleGenerate() {
     setGenerating(true);
@@ -75,19 +83,27 @@ export function ProtocolPanel({ meetingId, meetingName }: ProtocolPanelProps) {
         </div>
         <Button size="sm" onClick={handleGenerate} disabled={generating}>
           {generating && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-          Сгенерировать
+          {displayMarkdown ? "Перегенерировать" : "Сгенерировать"}
         </Button>
       </div>
 
       {/* Result */}
-      {markdown && (
+      {protocolLoading && !displayMarkdown && (
+        <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Загрузка протокола…
+        </div>
+      )}
+      {displayMarkdown && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-[var(--muted-foreground)]">Результат</span>
+            <span className="text-xs font-medium text-[var(--muted-foreground)]">
+              {markdown ? "Новый протокол" : "Сохранённый протокол"}
+            </span>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => downloadMarkdown(markdown, meetingName)}
+              onClick={() => downloadMarkdown(displayMarkdown, meetingName)}
             >
               <Download className="h-3.5 w-3.5" />
               Скачать .md
@@ -95,7 +111,7 @@ export function ProtocolPanel({ meetingId, meetingName }: ProtocolPanelProps) {
           </div>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
             <div className="prose prose-sm dark:prose-invert max-w-none text-sm">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayMarkdown}</ReactMarkdown>
             </div>
           </div>
         </div>

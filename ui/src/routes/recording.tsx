@@ -130,7 +130,7 @@ export default function RecordingPage() {
             >
               {/* Pulse ring while recording */}
               {isRecording && (
-                <span className="absolute inset-0 animate-ping rounded-full bg-red-500 opacity-20" />
+                <span className="pointer-events-none absolute inset-0 animate-ping rounded-full bg-red-500 opacity-20" />
               )}
               {isRecording ? (
                 <Square className="h-9 w-9" />

@@ -6,7 +6,7 @@ export function startRecording(args: StartRecordingArgs = {}): Promise<Recording
   return invokeCmd("recording_start", {
     name: args.name,
     source: args.source,
-    echo_cancel: args.echo_cancel,
+    echoCancel: args.echo_cancel,
   });
 }
 

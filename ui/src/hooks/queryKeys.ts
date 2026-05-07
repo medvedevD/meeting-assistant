@@ -4,5 +4,6 @@ export const queryKeys = {
   settings: ["settings"] as const,
   job: (id: string) => ["jobs", id] as const,
   templates: ["templates"] as const,
+  protocol: (meetingId: string) => ["protocol", meetingId] as const,
   diagnostics: ["diagnostics"] as const,
 } as const;
