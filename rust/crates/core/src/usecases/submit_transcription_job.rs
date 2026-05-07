@@ -8,10 +8,16 @@ pub async fn submit_transcription_job(
     audio_path: PathBuf,
     name: String,
 ) -> Result<Job, CoreError> {
-    let meeting = Meeting::new(name, audio_path);
-    meeting_repo.save(&meeting).await?;
+    let meeting_id = match meeting_repo.find_by_audio_path(&audio_path).await? {
+        Some(existing) => existing.id,
+        None => {
+            let meeting = Meeting::new(name, audio_path);
+            meeting_repo.save(&meeting).await?;
+            meeting.id
+        }
+    };
 
-    let job = Job::new_transcribe(meeting.id.clone());
+    let job = Job::new_transcribe(meeting_id);
     job_repo.enqueue(&job).await?;
 
     Ok(job)
@@ -46,5 +52,33 @@ mod tests {
 
         let stored_job = jr.find_by_id(&job.id).await.unwrap().unwrap();
         assert_eq!(stored_job.meeting_id, job.meeting_id);
+    }
+
+    #[tokio::test]
+    async fn reuses_existing_meeting_for_same_audio_path() {
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let path = PathBuf::from("/audio/meeting.wav");
+
+        let job1 = submit_transcription_job(
+            Arc::clone(&mr) as Arc<dyn MeetingRepo>,
+            Arc::clone(&jr) as Arc<dyn JobRepo>,
+            path.clone(),
+            "Первый раз".to_string(),
+        )
+        .await
+        .unwrap();
+
+        let job2 = submit_transcription_job(
+            Arc::clone(&mr) as Arc<dyn MeetingRepo>,
+            Arc::clone(&jr) as Arc<dyn JobRepo>,
+            path.clone(),
+            "Второй раз".to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(job1.meeting_id, job2.meeting_id);
+        assert_eq!(mr.list_all().await.unwrap().len(), 1);
     }
 }
