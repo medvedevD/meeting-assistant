@@ -1,3 +1,4 @@
+use std::time::Duration;
 use async_trait::async_trait;
 use meeting_core::{CoreError, ports::LlmProvider};
 use reqwest::Client;
@@ -17,12 +18,17 @@ impl AnthropicProvider {
     }
 
     pub fn with_base_url(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(300))
+            .build()
+            .expect("failed to build HTTP client");
         Self {
             api_key: api_key.into(),
             model: "claude-sonnet-4-6".to_string(),
             max_tokens: 8192,
             base_url: base_url.into(),
-            client: Client::new(),
+            client,
         }
     }
 
