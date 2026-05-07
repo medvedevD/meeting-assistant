@@ -82,6 +82,7 @@ pub struct MeetingDto {
     pub name: String,
     pub audio_path: String,
     pub has_transcript: bool,
+    pub has_protocol: bool,
     pub created_at: i64,
 }
 
@@ -272,6 +273,7 @@ async fn meetings_list(
         .into_iter()
         .map(|m| MeetingDto {
             has_transcript: m.transcript_text.is_some(),
+            has_protocol:   m.protocol_text.is_some(),
             id:         m.id,
             name:       m.name,
             audio_path: m.audio_path.display().to_string(),
@@ -304,7 +306,24 @@ async fn protocol_generate(
     .await
     .map_err(|e| e.to_string())?;
 
+    state.meeting_repo
+        .save_protocol(&meeting_id, &protocol.markdown)
+        .await
+        .map_err(|e| e.to_string())?;
+
     Ok(ProtocolDto { markdown: protocol.markdown })
+}
+
+#[tauri::command]
+async fn protocol_load(
+    meeting_id: String,
+    state: State<'_, AppState>,
+) -> Result<Option<ProtocolDto>, String> {
+    let meeting = state.meeting_repo
+        .find_by_id(&meeting_id).await
+        .map_err(|e| e.to_string())?;
+
+    Ok(meeting.and_then(|m| m.protocol_text.map(|md| ProtocolDto { markdown: md })))
 }
 
 #[tauri::command]
@@ -410,37 +429,43 @@ async fn settings_set(
 async fn diagnostics(
     state: State<'_, AppState>,
 ) -> Result<DiagnosticsDto, String> {
-    use cpal::traits::{DeviceTrait, HostTrait};
+    struct AudioInfo {
+        cpal_host: String,
+        input_devices: Vec<DeviceInfoDto>,
+        output_devices: Vec<DeviceInfoDto>,
+    }
 
-    let host = cpal::default_host();
-    let cpal_host = host.id().name().to_string();
-
-    let default_in_name = host.default_input_device()
-        .and_then(|d| d.name().ok());
-    let default_out_name = host.default_output_device()
-        .and_then(|d| d.name().ok());
-
-    let input_devices = host.input_devices()
-        .map(|iter| {
-            iter.filter_map(|d| d.name().ok())
-                .map(|name| {
-                    let is_default = default_in_name.as_deref() == Some(&name);
-                    DeviceInfoDto { name, is_default }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let output_devices = host.output_devices()
-        .map(|iter| {
-            iter.filter_map(|d| d.name().ok())
-                .map(|name| {
-                    let is_default = default_out_name.as_deref() == Some(&name);
-                    DeviceInfoDto { name, is_default }
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    // CPAL device enumeration blocks on Linux (PipeWire queries) — must not run on async thread.
+    let audio = tokio::task::spawn_blocking(|| {
+        use cpal::traits::{DeviceTrait, HostTrait};
+        let host = cpal::default_host();
+        let cpal_host = host.id().name().to_string();
+        let default_in_name = host.default_input_device().and_then(|d| d.name().ok());
+        let default_out_name = host.default_output_device().and_then(|d| d.name().ok());
+        let input_devices = host.input_devices()
+            .map(|iter| {
+                iter.filter_map(|d| d.name().ok())
+                    .map(|name| {
+                        let is_default = default_in_name.as_deref() == Some(&name);
+                        DeviceInfoDto { name, is_default }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let output_devices = host.output_devices()
+            .map(|iter| {
+                iter.filter_map(|d| d.name().ok())
+                    .map(|name| {
+                        let is_default = default_out_name.as_deref() == Some(&name);
+                        DeviceInfoDto { name, is_default }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        AudioInfo { cpal_host, input_devices, output_devices }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
     let ffmpeg_ok = tokio::process::Command::new("ffmpeg")
         .arg("-version")
@@ -460,9 +485,9 @@ async fn diagnostics(
         os:   std::env::consts::OS,
         arch: std::env::consts::ARCH,
         app_version: env!("CARGO_PKG_VERSION"),
-        cpal_host,
-        input_devices,
-        output_devices,
+        cpal_host: audio.cpal_host,
+        input_devices: audio.input_devices,
+        output_devices: audio.output_devices,
         paths: DiagnosticsPathsDto {
             model:      path_info(&state.model_path),
             db:         path_info(&state.db_path),
@@ -638,8 +663,15 @@ pub fn run() {
         })
         .manage(state)
         .on_window_event(|window, event| {
-            if matches!(event, tauri::WindowEvent::Destroyed) && window.label() == "main" {
-                std::process::exit(0);
+            match event {
+                tauri::WindowEvent::Destroyed if window.label() == "main" => {
+                    std::process::exit(0);
+                }
+                tauri::WindowEvent::CloseRequested { api, .. } if window.label() == "debug" => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -648,6 +680,7 @@ pub fn run() {
             recording_stop,
             meetings_list,
             protocol_generate,
+            protocol_load,
             templates_list,
             job_submit,
             job_status,
