@@ -1,6 +1,9 @@
 mod whisper;
 pub use whisper::WhisperTranscriber;
 
+pub mod settings_store;
+pub use settings_store::JsonSettingsStore;
+
 pub mod db;
 pub use db::{Db, SqliteMeetingRepo, SqliteJobRepo};
 
