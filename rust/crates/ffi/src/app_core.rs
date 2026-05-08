@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use parking_lot::Mutex;
 
@@ -9,7 +9,7 @@ use meeting_adapters::{
     AnthropicProvider, CpalAudioCapture, Db, FileTemplateLoader,
     JsonSettingsStore, SqliteJobRepo, SqliteMeetingRepo, WhisperTranscriber,
 };
-use crate::types::AppConfig;
+use crate::types::{AppConfig, AppError, FfiResult};
 
 // ── Ring log buffer ───────────────────────────────────────────────────────────
 
@@ -69,15 +69,24 @@ pub struct AppCore {
 
 // ── WorkerHandle ──────────────────────────────────────────────────────────────
 
-/// Handle returned by `start_worker`. Call `stop()` to abort the background worker.
+/// Handle returned by `start_worker`.
+///
+/// Prefer `stop_graceful()` over `stop()` — it lets the worker finish its
+/// current job before exiting, and only falls back to an immediate abort if the
+/// given timeout is exceeded.
 #[derive(uniffi::Object)]
 pub struct WorkerHandle {
+    /// Signals the worker loop to exit cleanly after its current task.
+    shutdown_tx: parking_lot::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    /// Owned join handle — taken when we await completion.
+    join_handle: parking_lot::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Fallback for immediate abort.
     abort_handle: tokio::task::AbortHandle,
 }
 
 #[uniffi::export]
 impl WorkerHandle {
-    /// Abort the background worker task. Idempotent — safe to call multiple times.
+    /// Immediate, forceful abort. The worker may be mid-job — prefer `stop_graceful`.
     pub fn stop(&self) {
         self.abort_handle.abort();
     }
@@ -86,6 +95,81 @@ impl WorkerHandle {
     pub fn is_finished(&self) -> bool {
         self.abort_handle.is_finished()
     }
+}
+
+#[uniffi::export(async_runtime = "tokio")]
+impl WorkerHandle {
+    /// Signal the worker to stop after its current job, then wait up to
+    /// `timeout_ms` milliseconds. Falls back to `stop()` if the timeout expires.
+    pub async fn stop_graceful(&self, timeout_ms: u64) {
+        // Take values out of mutexes before any await point.
+        let tx     = self.shutdown_tx.lock().take();
+        let handle = self.join_handle.lock().take();
+
+        if let Some(tx) = tx {
+            let _ = tx.send(());
+        }
+        if let Some(h) = handle {
+            let dur = tokio::time::Duration::from_millis(timeout_ms);
+            if tokio::time::timeout(dur, h).await.is_err() {
+                tracing::warn!("worker did not finish within {timeout_ms}ms — aborting");
+                self.abort_handle.abort();
+            }
+        }
+    }
+}
+
+// ── Singleton lockfile ────────────────────────────────────────────────────────
+
+/// Holds the open lockfile for the lifetime of the process.
+/// `OnceLock` ensures the file is created at most once per process.
+static SINGLETON_LOCK_FILE: OnceLock<std::fs::File> = OnceLock::new();
+
+/// Attempt to acquire a single-instance lock for the application.
+///
+/// Implementation: PID file in `$XDG_DATA_HOME/meeting-assistant/meeting-assistant.lock`.
+/// On Linux, liveness is verified via `/proc/<pid>`. On other platforms the check is
+/// best-effort (stale file is always overwritten).
+///
+/// Returns `Err(AppError::General)` if another live instance already holds the lock.
+#[uniffi::export]
+pub fn try_acquire_singleton() -> FfiResult<()> {
+    if SINGLETON_LOCK_FILE.get().is_some() {
+        // Already acquired in this process.
+        return Ok(());
+    }
+
+    let lock_path = xdg_data_dir().join("meeting-assistant/meeting-assistant.lock");
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent).map_err(AppError::general)?;
+    }
+
+    // Check if an existing PID file points to a live process.
+    if let Ok(content) = std::fs::read_to_string(&lock_path) {
+        if let Ok(pid) = content.trim().parse::<u32>() {
+            let is_alive = {
+                #[cfg(target_os = "linux")]
+                { std::path::Path::new(&format!("/proc/{pid}")).exists() }
+                #[cfg(not(target_os = "linux"))]
+                { false }  // On non-Linux, assume stale.
+            };
+            if is_alive {
+                return Err(AppError::General(
+                    "Another instance of Meeting Assistant is already running.".into(),
+                ));
+            }
+        }
+    }
+
+    let pid = std::process::id();
+    std::fs::write(&lock_path, pid.to_string()).map_err(AppError::general)?;
+
+    // Open the file and store it in the OnceLock to keep it alive for the process lifetime.
+    // On process exit the file is NOT deleted — the next start checks /proc instead.
+    let file = std::fs::File::open(&lock_path).map_err(AppError::general)?;
+    let _ = SINGLETON_LOCK_FILE.set(file); // Ignore if already set by a concurrent call.
+
+    Ok(())
 }
 
 // ── Public FFI functions ──────────────────────────────────────────────────────
@@ -180,16 +264,22 @@ pub fn init_core(config: AppConfig) -> Arc<AppCore> {
 }
 
 /// Start the background worker that processes transcription jobs from the DB queue.
-/// Returns a `WorkerHandle` whose `stop()` method aborts the task.
+/// Returns a `WorkerHandle`. Call `stop_graceful()` on shutdown for clean teardown.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn start_worker(core: Arc<AppCore>) -> Arc<WorkerHandle> {
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let worker = meeting_adapters::Worker::new(
         Arc::clone(&core.job_repo),
         Arc::clone(&core.meeting_repo),
         Arc::clone(&core.transcriber),
     );
-    let join_handle = tokio::spawn(worker.run());
-    Arc::new(WorkerHandle { abort_handle: join_handle.abort_handle() })
+    let join_handle = tokio::spawn(worker.run(shutdown_rx));
+    let abort_handle = join_handle.abort_handle();
+    Arc::new(WorkerHandle {
+        shutdown_tx: parking_lot::Mutex::new(Some(shutdown_tx)),
+        join_handle:  parking_lot::Mutex::new(Some(join_handle)),
+        abort_handle,
+    })
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

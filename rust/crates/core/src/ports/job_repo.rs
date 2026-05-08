@@ -25,4 +25,10 @@ pub trait JobRepo: Send + Sync {
         attempts: u32,
         now_ts: i64,
     ) -> Result<(), CoreError>;
+
+    /// Reset any jobs stuck in `running` state back to `pending`.
+    ///
+    /// Called once at worker startup to recover jobs that were interrupted by
+    /// a previous process crash (e.g. `kill -9`). Returns the number of recovered jobs.
+    async fn recover_running_jobs(&self, now_ts: i64) -> Result<u64, CoreError>;
 }

@@ -38,14 +38,19 @@ impl Container {
         Ok(Self { transcriber, meeting_repo, job_repo, llm, templates, audio_capture, recordings_dir })
     }
 
-    /// Spawn the background worker and return its join handle.
-    pub fn spawn_worker(&self) -> tokio::task::JoinHandle<()> {
+    /// Spawn the background worker. Returns the join handle and a sender to request
+    /// graceful shutdown (worker finishes current job then exits).
+    pub fn spawn_worker(
+        &self,
+    ) -> (tokio::task::JoinHandle<()>, tokio::sync::oneshot::Sender<()>) {
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let worker = Worker::new(
             Arc::clone(&self.job_repo),
             Arc::clone(&self.meeting_repo),
             Arc::clone(&self.transcriber),
         );
-        tokio::spawn(worker.run())
+        let handle = tokio::spawn(worker.run(shutdown_rx));
+        (handle, shutdown_tx)
     }
 }
 

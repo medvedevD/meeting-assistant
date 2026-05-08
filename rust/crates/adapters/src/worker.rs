@@ -24,9 +24,27 @@ impl Worker {
         Self { job_repo, meeting_repo, transcriber }
     }
 
-    pub async fn run(self) {
+    pub async fn run(self, mut shutdown: tokio::sync::oneshot::Receiver<()>) {
         info!("worker started");
+
+        // Recover any jobs that were `running` when the previous process was killed.
+        let now = now_unix();
+        match self.job_repo.recover_running_jobs(now).await {
+            Ok(0) => {}
+            Ok(n) => info!(count = n, "recovered interrupted jobs from previous run"),
+            Err(e) => error!("recover_running_jobs failed: {e}"),
+        }
+
         loop {
+            // Check for graceful-shutdown signal before claiming the next job.
+            match shutdown.try_recv() {
+                Ok(()) | Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                    info!("worker shutting down gracefully");
+                    break;
+                }
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+            }
+
             let now = now_unix();
             match self.job_repo.claim_pending(now).await {
                 Ok(Some(job)) => {
@@ -42,6 +60,7 @@ impl Worker {
                 }
             }
         }
+        info!("worker stopped");
     }
 
     async fn execute(&self, job: meeting_core::entities::Job) {

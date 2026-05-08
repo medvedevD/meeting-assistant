@@ -759,6 +759,10 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -818,10 +822,14 @@ internal interface UniffiLib : Library {
     ): Byte
     fun uniffi_meeting_assistant_ffi_fn_method_workerhandle_stop(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_meeting_assistant_ffi_fn_method_workerhandle_stop_graceful(`ptr`: Pointer,`timeoutMs`: Long,
+    ): Long
     fun uniffi_meeting_assistant_ffi_fn_func_init_core(`config`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Pointer
     fun uniffi_meeting_assistant_ffi_fn_func_start_worker(`core`: Pointer,
     ): Long
+    fun uniffi_meeting_assistant_ffi_fn_func_try_acquire_singleton(uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun ffi_meeting_assistant_ffi_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_meeting_assistant_ffi_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -938,6 +946,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_meeting_assistant_ffi_checksum_func_start_worker(
     ): Short
+    fun uniffi_meeting_assistant_ffi_checksum_func_try_acquire_singleton(
+    ): Short
     fun uniffi_meeting_assistant_ffi_checksum_method_appcore_diagnostics(
     ): Short
     fun uniffi_meeting_assistant_ffi_checksum_method_appcore_diagnostics_logs(
@@ -970,6 +980,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_meeting_assistant_ffi_checksum_method_workerhandle_stop(
     ): Short
+    fun uniffi_meeting_assistant_ffi_checksum_method_workerhandle_stop_graceful(
+    ): Short
     fun ffi_meeting_assistant_ffi_uniffi_contract_version(
     ): Int
     
@@ -990,7 +1002,10 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_meeting_assistant_ffi_checksum_func_init_core() != 60343.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_meeting_assistant_ffi_checksum_func_start_worker() != 61240.toShort()) {
+    if (lib.uniffi_meeting_assistant_ffi_checksum_func_start_worker() != 26804.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_meeting_assistant_ffi_checksum_func_try_acquire_singleton() != 63541.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_meeting_assistant_ffi_checksum_method_appcore_diagnostics() != 10388.toShort()) {
@@ -1038,7 +1053,10 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_meeting_assistant_ffi_checksum_method_workerhandle_is_finished() != 12359.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_meeting_assistant_ffi_checksum_method_workerhandle_stop() != 31229.toShort()) {
+    if (lib.uniffi_meeting_assistant_ffi_checksum_method_workerhandle_stop() != 58199.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_meeting_assistant_ffi_checksum_method_workerhandle_stop_graceful() != 40007.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -1991,7 +2009,11 @@ public object FfiConverterTypeAppCore: FfiConverter<AppCore, Pointer> {
 
 
 /**
- * Handle returned by `start_worker`. Call `stop()` to abort the background worker.
+ * Handle returned by `start_worker`.
+ *
+ * Prefer `stop_graceful()` over `stop()` — it lets the worker finish its
+ * current job before exiting, and only falls back to an immediate abort if the
+ * given timeout is exceeded.
  */
 public interface WorkerHandleInterface {
     
@@ -2001,15 +2023,25 @@ public interface WorkerHandleInterface {
     fun `isFinished`(): kotlin.Boolean
     
     /**
-     * Abort the background worker task. Idempotent — safe to call multiple times.
+     * Immediate, forceful abort. The worker may be mid-job — prefer `stop_graceful`.
      */
     fun `stop`()
+    
+    /**
+     * Signal the worker to stop after its current job, then wait up to
+     * `timeout_ms` milliseconds. Falls back to `stop()` if the timeout expires.
+     */
+    suspend fun `stopGraceful`(`timeoutMs`: kotlin.ULong)
     
     companion object
 }
 
 /**
- * Handle returned by `start_worker`. Call `stop()` to abort the background worker.
+ * Handle returned by `start_worker`.
+ *
+ * Prefer `stop_graceful()` over `stop()` — it lets the worker finish its
+ * current job before exiting, and only falls back to an immediate abort if the
+ * given timeout is exceeded.
  */
 open class WorkerHandle: Disposable, AutoCloseable, WorkerHandleInterface {
 
@@ -2109,7 +2141,7 @@ open class WorkerHandle: Disposable, AutoCloseable, WorkerHandleInterface {
 
     
     /**
-     * Abort the background worker task. Idempotent — safe to call multiple times.
+     * Immediate, forceful abort. The worker may be mid-job — prefer `stop_graceful`.
      */override fun `stop`()
         = 
     callWithPointer {
@@ -2120,6 +2152,31 @@ open class WorkerHandle: Disposable, AutoCloseable, WorkerHandleInterface {
     }
     
     
+
+    
+    /**
+     * Signal the worker to stop after its current job, then wait up to
+     * `timeout_ms` milliseconds. Falls back to `stop()` if the timeout expires.
+     */
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `stopGraceful`(`timeoutMs`: kotlin.ULong) {
+        return uniffiRustCallAsync(
+        callWithPointer { thisPtr ->
+            UniffiLib.INSTANCE.uniffi_meeting_assistant_ffi_fn_method_workerhandle_stop_graceful(
+                thisPtr,
+                FfiConverterULong.lower(`timeoutMs`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_meeting_assistant_ffi_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.INSTANCE.ffi_meeting_assistant_ffi_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.INSTANCE.ffi_meeting_assistant_ffi_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+        
+        // Error FFI converter
+        UniffiNullRustCallStatusErrorHandler,
+    )
+    }
 
     
 
@@ -2995,7 +3052,7 @@ public object FfiConverterSequenceTypeMeetingDto: FfiConverterRustBuffer<List<Me
 
         /**
          * Start the background worker that processes transcription jobs from the DB queue.
-         * Returns a `WorkerHandle` whose `stop()` method aborts the task.
+         * Returns a `WorkerHandle`. Call `stop_graceful()` on shutdown for clean teardown.
          */
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
      suspend fun `startWorker`(`core`: AppCore) : WorkerHandle {
@@ -3010,5 +3067,23 @@ public object FfiConverterSequenceTypeMeetingDto: FfiConverterRustBuffer<List<Me
         UniffiNullRustCallStatusErrorHandler,
     )
     }
+
+        /**
+         * Attempt to acquire a single-instance lock for the application.
+         *
+         * Implementation: PID file in `$XDG_DATA_HOME/meeting-assistant/meeting-assistant.lock`.
+         * On Linux, liveness is verified via `/proc/<pid>`. On other platforms the check is
+         * best-effort (stale file is always overwritten).
+         *
+         * Returns `Err(AppError::General)` if another live instance already holds the lock.
+         */
+    @Throws(AppException::class) fun `tryAcquireSingleton`()
+        = 
+    uniffiRustCallWithError(AppException) { _status ->
+    UniffiLib.INSTANCE.uniffi_meeting_assistant_ffi_fn_func_try_acquire_singleton(
+        _status)
+}
+    
+    
 
 

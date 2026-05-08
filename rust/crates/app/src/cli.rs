@@ -188,7 +188,7 @@ impl Cli {
             }
 
             Command::Serve { port } => {
-                let _worker = container.spawn_worker();
+                let (_worker, _shutdown) = container.spawn_worker();
 
                 let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
                 let listener = tokio::net::TcpListener::bind(addr).await?;

@@ -169,6 +169,19 @@ impl JobRepo for FakeJobRepo {
         }
         Ok(())
     }
+
+    async fn recover_running_jobs(&self, now_ts: i64) -> Result<u64, CoreError> {
+        let mut store = self.store.lock().unwrap();
+        let mut count = 0u64;
+        for j in store.iter_mut().filter(|j| j.status == JobStatus::Running) {
+            j.status = JobStatus::Pending;
+            j.attempts += 1;
+            j.last_error = Some("interrupted by process restart".into());
+            j.updated_at = now_ts;
+            count += 1;
+        }
+        Ok(count)
+    }
 }
 
 // ── FakeLlmProvider ──────────────────────────────────────────────────────────

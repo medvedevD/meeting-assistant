@@ -18,15 +18,33 @@ import repository.UniffiSettingsRepository
 import ui.AppContent
 import ui.navigation.RootComponent
 import uniffi.meeting_assistant_ffi.AppConfig
+import uniffi.meeting_assistant_ffi.AppException
 import uniffi.meeting_assistant_ffi.initCore
 import uniffi.meeting_assistant_ffi.startWorker
+import uniffi.meeting_assistant_ffi.tryAcquireSingleton
 import java.io.File
+import javax.swing.JOptionPane
+
+private const val WORKER_SHUTDOWN_TIMEOUT_MS = 5_000L
 
 fun main() {
     val rustTargetDir = System.getProperty("rust.target.dir")
         ?: error("Pass -Drust.target.dir=<path> to locate libmeeting_assistant_ffi.so")
     val soPath = File(rustTargetDir, "libmeeting_assistant_ffi.so").absolutePath
     System.setProperty("uniffi.component.meeting_assistant_ffi.libraryOverride", soPath)
+
+    // Single-instance check before loading the Whisper model.
+    try {
+        tryAcquireSingleton()
+    } catch (e: AppException.General) {
+        JOptionPane.showMessageDialog(
+            null,
+            "Meeting Assistant is already running.\n\nClose the existing window and try again.",
+            "Already Running",
+            JOptionPane.WARNING_MESSAGE,
+        )
+        return
+    }
 
     // Init AppCore on IO thread (loads Whisper model from disk).
     val core = runBlocking {
@@ -77,7 +95,8 @@ fun main() {
                     y = (pos as? WindowPosition.Absolute)?.y?.value?.toInt(),
                 )
                 lifecycle.stop()
-                workerHandle.stop()
+                // Let the worker finish its current job; abort after timeout.
+                runBlocking { workerHandle.stopGraceful(WORKER_SHUTDOWN_TIMEOUT_MS.toULong()) }
                 exitApplication()
             },
             title = "Meeting Assistant",

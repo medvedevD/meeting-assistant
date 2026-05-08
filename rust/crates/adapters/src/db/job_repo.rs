@@ -180,6 +180,26 @@ impl JobRepo for SqliteJobRepo {
 
         Ok(())
     }
+
+    async fn recover_running_jobs(&self, now_ts: i64) -> Result<u64, CoreError> {
+        let db = Arc::clone(&self.0);
+
+        tokio::task::spawn_blocking(move || {
+            let conn = db.conn.lock().unwrap();
+            // Reset stuck `running` jobs back to `pending`, incrementing the attempt counter
+            // so repeated crashes eventually exhaust retries instead of looping forever.
+            let n = conn.execute(
+                "UPDATE jobs SET status='pending', attempts=attempts+1,
+                 last_error='interrupted by process restart', updated_at=?1
+                 WHERE status='running'",
+                rusqlite::params![now_ts],
+            )?;
+            Ok::<_, rusqlite::Error>(n as u64)
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+        .map_err(|e| CoreError::Storage(e.to_string()))
+    }
 }
 
 #[cfg(test)]
