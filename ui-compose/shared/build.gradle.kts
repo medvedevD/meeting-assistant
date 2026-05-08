@@ -13,6 +13,10 @@ kotlin {
                 implementation(compose.runtime)
                 implementation(compose.foundation)
                 implementation(compose.material3)
+                implementation(compose.materialIconsExtended)
+                implementation(libs.decompose)
+                implementation(libs.decompose.extensions.compose)
+                implementation(libs.kotlinx.coroutines.core)
             }
         }
         val desktopMain by getting {
@@ -20,13 +24,14 @@ kotlin {
                 implementation(compose.desktop.currentOs)
                 implementation(libs.jna)
                 implementation(libs.jna.platform)
+                implementation(libs.kotlinx.coroutines.swing)
             }
         }
         val desktopTest by getting {
             dependencies {
                 implementation(kotlin("test-junit5"))
                 implementation("org.junit.jupiter:junit-jupiter:5.10.2")
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+                implementation(libs.kotlinx.coroutines.core)
                 implementation(libs.jna)
                 implementation(libs.jna.platform)
             }
@@ -36,7 +41,6 @@ kotlin {
 
 tasks.named<Test>("desktopTest") {
     useJUnitPlatform()
-    // Pass the Rust target dir so the test can load the native library.
     systemProperty(
         "rust.target.dir",
         System.getProperty("rust.target.dir")
