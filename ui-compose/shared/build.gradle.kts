@@ -17,6 +17,7 @@ kotlin {
                 implementation(libs.decompose)
                 implementation(libs.decompose.extensions.compose)
                 implementation(libs.kotlinx.coroutines.core)
+                implementation(libs.markdown.renderer.m3)
             }
         }
         val desktopMain by getting {

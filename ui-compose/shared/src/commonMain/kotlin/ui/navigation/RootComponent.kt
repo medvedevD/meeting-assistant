@@ -9,10 +9,12 @@ import repository.MeetingRepository
 import repository.RecordingRepository
 import repository.SettingsRepository
 import viewmodel.MeetingListViewModel
+import viewmodel.RecordingViewModel
 
 sealed interface Screen {
     data object MeetingList : Screen
     data class MeetingDetail(val meetingId: String) : Screen
+    data class GenerateProtocol(val meetingId: String) : Screen
     data object NewRecording : Screen
     data object Settings : Screen
     data object Diagnostics : Screen
@@ -29,9 +31,12 @@ class RootComponent(
     private val _screen = MutableValue<Screen>(Screen.MeetingList)
     val screen: Value<Screen> get() = _screen
 
-    // Survives recomposition; onDestroy() cancels its coroutine scope.
-    val meetingListViewModel: MeetingListViewModel = instanceKeeper.getOrCreate {
+    // Survive recomposition; onDestroy() cancels their coroutine scopes.
+    val meetingListViewModel: MeetingListViewModel = instanceKeeper.getOrCreate("meeting-list") {
         MeetingListViewModel(meetings)
+    }
+    val recordingViewModel: RecordingViewModel = instanceKeeper.getOrCreate("recording") {
+        RecordingViewModel(recording)
     }
 
     fun navigate(screen: Screen) {
@@ -39,6 +44,7 @@ class RootComponent(
     }
 
     fun onMeetingSelected(id: String) = navigate(Screen.MeetingDetail(id))
+    fun onGenerateProtocol(meetingId: String) = navigate(Screen.GenerateProtocol(meetingId))
     fun onNewRecordingRequested() = navigate(Screen.NewRecording)
     fun onSettingsRequested() = navigate(Screen.Settings)
     fun onDiagnosticsRequested() = navigate(Screen.Diagnostics)

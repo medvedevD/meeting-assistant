@@ -18,6 +18,7 @@ import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import domain.Meeting
 import ui.navigation.RootComponent
 import ui.navigation.Screen
+import ui.util.formatDate
 import viewmodel.MeetingListState
 
 @Composable
@@ -159,6 +160,11 @@ private fun MeetingListItem(
                 color = if (selected) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
+            )
+            Text(
+                formatDate(meeting.createdAt),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 if (meeting.hasTranscript) StatusChip("Транскрипт")
