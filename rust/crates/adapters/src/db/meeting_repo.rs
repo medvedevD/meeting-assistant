@@ -7,6 +7,24 @@ use super::Db;
 
 pub struct SqliteMeetingRepo(pub Arc<Db>);
 
+fn row_to_meeting(row: &rusqlite::Row) -> rusqlite::Result<Meeting> {
+    let audio_path = PathBuf::from(row.get::<_, String>(2)?);
+    let meeting_dir = audio_path.parent()
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    Ok(Meeting {
+        id:              row.get(0)?,
+        name:            row.get(1)?,
+        audio_path,
+        meeting_dir,
+        transcript_text: row.get(3)?,
+        protocol_text:   row.get(4)?,
+        transcript_path: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
+        protocol_path:   row.get::<_, Option<String>>(6)?.map(PathBuf::from),
+        created_at:      row.get(7)?,
+    })
+}
+
 #[async_trait]
 impl MeetingRepo for SqliteMeetingRepo {
     async fn save(&self, meeting: &Meeting) -> Result<(), CoreError> {
@@ -37,18 +55,11 @@ impl MeetingRepo for SqliteMeetingRepo {
         tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().unwrap();
             conn.query_row(
-                "SELECT id, name, audio_path, transcript_text, protocol_text, created_at FROM meetings WHERE id=?1",
+                "SELECT id, name, audio_path, transcript_text, protocol_text, \
+                        transcript_path, protocol_path, created_at \
+                   FROM meetings WHERE id=?1",
                 [&id],
-                |row| {
-                    Ok(Meeting {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        audio_path: PathBuf::from(row.get::<_, String>(2)?),
-                        transcript_text: row.get(3)?,
-                        protocol_text: row.get(4)?,
-                        created_at: row.get(5)?,
-                    })
-                },
+                row_to_meeting,
             )
             .optional()
         })
@@ -64,19 +75,11 @@ impl MeetingRepo for SqliteMeetingRepo {
         tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().unwrap();
             conn.query_row(
-                "SELECT id, name, audio_path, transcript_text, protocol_text, created_at \
-                 FROM meetings WHERE audio_path=?1 ORDER BY created_at DESC LIMIT 1",
+                "SELECT id, name, audio_path, transcript_text, protocol_text, \
+                        transcript_path, protocol_path, created_at \
+                   FROM meetings WHERE audio_path=?1 ORDER BY created_at DESC LIMIT 1",
                 [&path_str],
-                |row| {
-                    Ok(Meeting {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        audio_path: PathBuf::from(row.get::<_, String>(2)?),
-                        transcript_text: row.get(3)?,
-                        protocol_text: row.get(4)?,
-                        created_at: row.get(5)?,
-                    })
-                },
+                row_to_meeting,
             )
             .optional()
         })
@@ -123,6 +126,65 @@ impl MeetingRepo for SqliteMeetingRepo {
         Ok(())
     }
 
+    async fn save_transcript_file(&self, id: &str, text: &str, path: &Path) -> Result<(), CoreError> {
+        let db = Arc::clone(&self.0);
+        let id = id.to_string();
+        let text = text.to_string();
+        let path_str = path.display().to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE meetings SET transcript_text=?1, transcript_path=?2 WHERE id=?3",
+                rusqlite::params![text, path_str, id],
+            )
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+        .map_err(|e| CoreError::Storage(e.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn save_protocol_file(&self, id: &str, text: &str, path: &Path) -> Result<(), CoreError> {
+        let db = Arc::clone(&self.0);
+        let id = id.to_string();
+        let text = text.to_string();
+        let path_str = path.display().to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE meetings SET protocol_text=?1, protocol_path=?2 WHERE id=?3",
+                rusqlite::params![text, path_str, id],
+            )
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+        .map_err(|e| CoreError::Storage(e.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn update_name(&self, id: &str, name: &str) -> Result<(), CoreError> {
+        let db = Arc::clone(&self.0);
+        let id = id.to_string();
+        let name = name.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE meetings SET name=?1 WHERE id=?2",
+                rusqlite::params![name, id],
+            )
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+        .map_err(|e| CoreError::Storage(e.to_string()))?;
+
+        Ok(())
+    }
+
     async fn list_all(&self) -> Result<Vec<Meeting>, CoreError> {
         let db = Arc::clone(&self.0);
 
@@ -135,22 +197,13 @@ impl MeetingRepo for SqliteMeetingRepo {
                     "SELECT id, name, audio_path, \
                        CASE WHEN transcript_text IS NOT NULL THEN '' ELSE NULL END, \
                        CASE WHEN protocol_text IS NOT NULL THEN '' ELSE NULL END, \
-                       created_at \
+                       transcript_path, protocol_path, created_at \
                      FROM meetings ORDER BY created_at DESC",
                 )
                 .map_err(|e| CoreError::Storage(e.to_string()))?;
 
             let rows = stmt
-                .query_map([], |row| {
-                    Ok(Meeting {
-                        id: row.get(0)?,
-                        name: row.get(1)?,
-                        audio_path: PathBuf::from(row.get::<_, String>(2)?),
-                        transcript_text: row.get(3)?,
-                        protocol_text: row.get(4)?,
-                        created_at: row.get(5)?,
-                    })
-                })
+                .query_map([], row_to_meeting)
                 .map_err(|e| CoreError::Storage(e.to_string()))?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| CoreError::Storage(e.to_string()))?;
@@ -202,6 +255,43 @@ mod tests {
 
         let found = repo.find_by_id(&m.id).await.unwrap().unwrap();
         assert_eq!(found.transcript_text.as_deref(), Some("Привет мир"));
+    }
+
+    #[tokio::test]
+    async fn save_transcript_file_persists_text_and_path() {
+        let repo = make_repo();
+        let m = Meeting::new("Встреча".to_string(), PathBuf::from("/audio/x.wav"));
+        repo.save(&m).await.unwrap();
+        let path = PathBuf::from("/meetings/2026-05-10_14-30_abc/transcript.md");
+        repo.save_transcript_file(&m.id, "Привет мир", &path).await.unwrap();
+
+        let found = repo.find_by_id(&m.id).await.unwrap().unwrap();
+        assert_eq!(found.transcript_text.as_deref(), Some("Привет мир"));
+        assert_eq!(found.transcript_path, Some(path));
+    }
+
+    #[tokio::test]
+    async fn save_protocol_file_persists_text_and_path() {
+        let repo = make_repo();
+        let m = Meeting::new("Встреча".to_string(), PathBuf::from("/audio/x.wav"));
+        repo.save(&m).await.unwrap();
+        let path = PathBuf::from("/meetings/2026-05-10_14-30_abc/protocol.md");
+        repo.save_protocol_file(&m.id, "# Протокол", &path).await.unwrap();
+
+        let found = repo.find_by_id(&m.id).await.unwrap().unwrap();
+        assert_eq!(found.protocol_text.as_deref(), Some("# Протокол"));
+        assert_eq!(found.protocol_path, Some(path));
+    }
+
+    #[tokio::test]
+    async fn update_name_persists() {
+        let repo = make_repo();
+        let m = Meeting::new("Старое имя".to_string(), PathBuf::from("/audio/y.wav"));
+        repo.save(&m).await.unwrap();
+        repo.update_name(&m.id, "Новое имя").await.unwrap();
+
+        let found = repo.find_by_id(&m.id).await.unwrap().unwrap();
+        assert_eq!(found.name, "Новое имя");
     }
 
     #[tokio::test]

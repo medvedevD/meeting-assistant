@@ -93,11 +93,21 @@ fn default_mic(host: &cpal::Host) -> Result<cpal::Device, String> {
         .ok_or_else(|| "no default input device available".to_string())
 }
 
-/// Ask PulseAudio/PipeWire for the first available monitor source name.
+/// Ask PulseAudio/PipeWire for the monitor source of the current default sink.
 ///
-/// Runs `pactl list sources short` and applies `find_monitor_device` to the result.
+/// First queries `pactl get-default-sink`, then looks for `<sink>.monitor` in
+/// `pactl list sources short`. Falls back to the first `.monitor` source if no
+/// match is found (e.g. when the default sink has no explicit monitor entry).
 #[cfg(target_os = "linux")]
 fn find_pulseaudio_monitor() -> Result<String, String> {
+    let default_sink = std::process::Command::new("pactl")
+        .args(["get-default-sink"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
     let out = std::process::Command::new("pactl")
         .args(["list", "sources", "short"])
         .output()
@@ -109,6 +119,15 @@ fn find_pulseaudio_monitor() -> Result<String, String> {
         .filter_map(|l| l.split_whitespace().nth(1))
         .collect();
 
+    // Prefer the monitor of the default sink.
+    if let Some(sink) = &default_sink {
+        let preferred = format!("{sink}.monitor");
+        if let Some(name) = names.iter().find(|&&n| n == preferred) {
+            return Ok((*name).to_string());
+        }
+    }
+
+    // Fallback: first .monitor source in the list.
     let idx = find_monitor_device(&names)
         .ok_or_else(|| format!("no monitor source found via pactl (sources: {})", names.join(", ")))?;
 

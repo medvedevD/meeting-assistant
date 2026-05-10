@@ -3,7 +3,7 @@ use tokio::time::{Duration, sleep};
 use tracing::{error, info, warn};
 use meeting_core::{
     entities::meeting::now_unix,
-    ports::{JobRepo, MeetingRepo, Transcriber},
+    ports::{JobRepo, MeetingFileStore, MeetingRepo, Transcriber},
 };
 
 const MAX_ATTEMPTS: u32 = 5;
@@ -13,6 +13,7 @@ pub struct Worker {
     job_repo: Arc<dyn JobRepo>,
     meeting_repo: Arc<dyn MeetingRepo>,
     transcriber: Arc<dyn Transcriber>,
+    file_store: Arc<dyn MeetingFileStore>,
 }
 
 impl Worker {
@@ -20,8 +21,9 @@ impl Worker {
         job_repo: Arc<dyn JobRepo>,
         meeting_repo: Arc<dyn MeetingRepo>,
         transcriber: Arc<dyn Transcriber>,
+        file_store: Arc<dyn MeetingFileStore>,
     ) -> Self {
-        Self { job_repo, meeting_repo, transcriber }
+        Self { job_repo, meeting_repo, transcriber, file_store }
     }
 
     pub async fn run(self, mut shutdown: tokio::sync::oneshot::Receiver<()>) {
@@ -83,8 +85,21 @@ impl Worker {
         match self.transcriber.transcribe(&meeting.audio_path).await {
             Ok(transcript) => {
                 let now = now_unix();
-                if let Err(e) = self.meeting_repo.save_transcript(&meeting.id, &transcript.text).await {
-                    warn!(job_id = %job.id, "save_transcript failed: {e}");
+                match self.file_store.write_transcript(&meeting.meeting_dir, &transcript.text).await {
+                    Ok(path) => {
+                        if let Err(e) = self.meeting_repo
+                            .save_transcript_file(&meeting.id, &transcript.text, &path)
+                            .await
+                        {
+                            warn!(job_id = %job.id, "save_transcript_file failed: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        warn!(job_id = %job.id, "write transcript.md failed: {e}");
+                        if let Err(e) = self.meeting_repo.save_transcript(&meeting.id, &transcript.text).await {
+                            warn!(job_id = %job.id, "save_transcript fallback failed: {e}");
+                        }
+                    }
                 }
                 if let Err(e) = self.job_repo.mark_done(&job.id, now).await {
                     error!(job_id = %job.id, "mark_done failed: {e}");

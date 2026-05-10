@@ -1,6 +1,9 @@
 mod whisper;
 pub use whisper::WhisperTranscriber;
 
+mod fs_meeting_file_store;
+pub use fs_meeting_file_store::FsMeetingFileStore;
+
 pub mod settings_store;
 pub use settings_store::JsonSettingsStore;
 

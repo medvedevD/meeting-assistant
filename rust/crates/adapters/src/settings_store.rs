@@ -17,7 +17,8 @@ pub struct PersistedSettings {
 pub struct PersistedPaths {
     pub model: Option<String>,
     pub db: Option<String>,
-    pub recordings: Option<String>,
+    #[serde(alias = "recordings")]
+    pub meetings_dir: Option<String>,
     pub prompts: Option<String>,
 }
 
@@ -102,10 +103,10 @@ impl JsonSettingsStore {
             json.get(key)?.as_str().filter(|s| !s.is_empty()).map(str::to_owned)
         };
         let mut settings = PersistedSettings::default();
-        settings.paths.model      = str_val("paths.model");
-        settings.paths.db         = str_val("paths.db");
-        settings.paths.recordings = str_val("paths.recordings");
-        settings.paths.prompts    = str_val("paths.prompts");
+        settings.paths.model        = str_val("paths.model");
+        settings.paths.db           = str_val("paths.db");
+        settings.paths.meetings_dir = str_val("paths.recordings");
+        settings.paths.prompts      = str_val("paths.prompts");
         settings.anthropic_api_key = str_val("anthropic_api_key");
         settings.recording.source =
             str_val("recording.source").unwrap_or_else(|| "mic".into());
