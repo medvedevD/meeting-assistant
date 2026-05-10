@@ -1005,7 +1005,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_meeting_assistant_ffi_checksum_func_start_worker() != 26804.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_meeting_assistant_ffi_checksum_func_try_acquire_singleton() != 63541.toShort()) {
+    if (lib.uniffi_meeting_assistant_ffi_checksum_func_try_acquire_singleton() != 29345.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_meeting_assistant_ffi_checksum_method_appcore_diagnostics() != 10388.toShort()) {
@@ -3071,9 +3071,10 @@ public object FfiConverterSequenceTypeMeetingDto: FfiConverterRustBuffer<List<Me
         /**
          * Attempt to acquire a single-instance lock for the application.
          *
-         * Implementation: PID file in `$XDG_DATA_HOME/meeting-assistant/meeting-assistant.lock`.
-         * On Linux, liveness is verified via `/proc/<pid>`. On other platforms the check is
-         * best-effort (stale file is always overwritten).
+         * Uses an exclusive advisory flock on
+         * `$XDG_DATA_HOME/meeting-assistant/meeting-assistant.lock`.
+         * The lock is held for the lifetime of the process — the OS releases it on exit,
+         * even after kill -9, so stale lockfiles are never a problem.
          *
          * Returns `Err(AppError::General)` if another live instance already holds the lock.
          */

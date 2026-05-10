@@ -22,12 +22,22 @@ for arg in "$@"; do
     esac
 done
 
+BINDINGS_KT="$UI_DIR/shared/src/desktopMain/kotlin/uniffi/meeting_assistant_ffi/meeting_assistant_ffi.kt"
+
 if [[ $SKIP_BUILD -eq 0 ]]; then
     RELEASE_FLAG=""
     [[ "$PROFILE" == "release" ]] && RELEASE_FLAG="--release"
-    echo "→ Building Rust FFI ($PROFILE)..."
-    cargo build -p ffi $RELEASE_FLAG --manifest-path "$RUST_DIR/Cargo.toml"
-    echo "✓ Rust FFI built"
+    echo "→ Building Rust workspace ($PROFILE)..."
+    cargo build $RELEASE_FLAG --manifest-path "$RUST_DIR/Cargo.toml"
+    echo "✓ Rust built"
+
+    echo "→ Regenerating Kotlin bindings..."
+    cargo run --manifest-path "$RUST_DIR/Cargo.toml" --bin uniffi-bindgen -- \
+        generate --library "$RUST_DIR/target/$PROFILE/libmeeting_assistant_ffi.so" \
+        --language kotlin --out-dir /tmp/uniffi-bindings-$$ 2>/dev/null
+    cp /tmp/uniffi-bindings-$$/uniffi/meeting_assistant_ffi/meeting_assistant_ffi.kt "$BINDINGS_KT"
+    rm -rf /tmp/uniffi-bindings-$$
+    echo "✓ Bindings updated"
 fi
 
 SO="$RUST_DIR/target/$PROFILE/libmeeting_assistant_ffi.so"
