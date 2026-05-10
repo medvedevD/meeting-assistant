@@ -9,10 +9,10 @@ impl AppCore {
         let s = self.settings.load();
         Ok(SettingsDto {
             paths: SettingsPathsDto {
-                model:      s.paths.model.or_else(|| Some(self.model_path.display().to_string())),
-                db:         s.paths.db.or_else(|| Some(self.db_path.display().to_string())),
-                recordings: s.paths.recordings.or_else(|| Some(self.recordings_dir.display().to_string())),
-                prompts:    s.paths.prompts.or_else(|| Some(self.prompts_dir.display().to_string())),
+                model:        s.paths.model.or_else(|| Some(self.model_path.display().to_string())),
+                db:           s.paths.db.or_else(|| Some(self.db_path.display().to_string())),
+                meetings_dir: s.paths.meetings_dir.or_else(|| Some(self.meetings_dir.display().to_string())),
+                prompts:      s.paths.prompts.or_else(|| Some(self.prompts_dir.display().to_string())),
             },
             // Never expose the stored key back to the UI.
             anthropic_api_key: None,
@@ -28,10 +28,10 @@ impl AppCore {
         let mut s = self.settings.load();
 
         s.paths = PersistedPaths {
-            model:      non_empty(dto.paths.model),
-            db:         non_empty(dto.paths.db),
-            recordings: non_empty(dto.paths.recordings),
-            prompts:    non_empty(dto.paths.prompts),
+            model:        non_empty(dto.paths.model),
+            db:           non_empty(dto.paths.db),
+            meetings_dir: non_empty(dto.paths.meetings_dir),
+            prompts:      non_empty(dto.paths.prompts),
         };
 
         // None = "don't touch". Some("") = "clear". Some(key) = "update".

@@ -57,11 +57,27 @@ impl AppCore {
         .await
         .map_err(AppError::general)?;
 
+        let path = self.file_store
+            .write_protocol(&meeting.meeting_dir, &protocol.markdown)
+            .await
+            .map_err(AppError::general)?;
+
         self.meeting_repo
-            .save_protocol(&meeting_id, &protocol.markdown)
+            .save_protocol_file(&meeting_id, &protocol.markdown, &path)
             .await
             .map_err(AppError::general)?;
 
         Ok(ProtocolDto { markdown: protocol.markdown })
+    }
+
+    pub async fn meeting_rename(
+        self: Arc<Self>,
+        meeting_id: String,
+        new_name: String,
+    ) -> FfiResult<()> {
+        self.meeting_repo
+            .update_name(&meeting_id, &new_name)
+            .await
+            .map_err(AppError::general)
     }
 }

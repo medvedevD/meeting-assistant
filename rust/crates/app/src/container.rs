@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use meeting_core::ports::{AudioCapture, JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber};
 use meeting_adapters::{
-    AnthropicProvider, CpalAudioCapture, Db, FileTemplateLoader,
+    AnthropicProvider, CpalAudioCapture, Db, FileTemplateLoader, FsMeetingFileStore,
     SqliteJobRepo, SqliteMeetingRepo, WhisperTranscriber, Worker,
 };
 
@@ -48,6 +48,7 @@ impl Container {
             Arc::clone(&self.job_repo),
             Arc::clone(&self.meeting_repo),
             Arc::clone(&self.transcriber),
+            Arc::new(FsMeetingFileStore),
         );
         let handle = tokio::spawn(worker.run(shutdown_rx));
         (handle, shutdown_tx)

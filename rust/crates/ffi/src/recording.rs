@@ -20,7 +20,7 @@ impl AppCore {
         let meeting = start_recording(
             Arc::clone(&self.audio_capture),
             Arc::clone(&self.meeting_repo),
-            &self.recordings_dir,
+            &self.meetings_dir,
             name,
             capture_source,
             echo_cancel.unwrap_or(false),

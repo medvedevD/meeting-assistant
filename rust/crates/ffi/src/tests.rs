@@ -66,7 +66,7 @@ mod dto_roundtrip {
             paths: SettingsPathsDto {
                 model: Some("/models/ggml-medium.bin".into()),
                 db: Some("/db/index.db".into()),
-                recordings: Some("/recs".into()),
+                meetings_dir: Some("/meetings".into()),
                 prompts: Some("/prompts".into()),
             },
             anthropic_api_key: Some("sk-ant-test".into()),
@@ -84,7 +84,7 @@ mod dto_roundtrip {
             paths: SettingsPathsDto {
                 model: None,
                 db: None,
-                recordings: None,
+                meetings_dir: None,
                 prompts: None,
             },
             anthropic_api_key: None,
@@ -127,7 +127,7 @@ mod dto_roundtrip {
             paths: DiagnosticsPathsDto {
                 model: pi.clone(),
                 db: pi.clone(),
-                recordings: pi.clone(),
+                meetings_dir: pi.clone(),
                 prompts: pi,
             },
             has_anthropic_key: false,

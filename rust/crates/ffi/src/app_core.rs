@@ -5,12 +5,14 @@ use std::sync::OnceLock;
 
 use parking_lot::Mutex;
 
-use meeting_core::ports::{AudioCapture, JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber};
+use meeting_core::ports::{AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber};
 use meeting_adapters::{
-    AnthropicProvider, CpalAudioCapture, Db, FileTemplateLoader,
+    AnthropicProvider, CpalAudioCapture, Db, FileTemplateLoader, FsMeetingFileStore,
     JsonSettingsStore, SqliteJobRepo, SqliteMeetingRepo, WhisperTranscriber,
 };
 use crate::types::{AppConfig, AppError, FfiResult};
+
+const APP_DIRNAME: &str = "meeting-assistant";
 
 // ── Ring log buffer ───────────────────────────────────────────────────────────
 
@@ -54,18 +56,19 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RingMakeWriter {
 /// Central application object. Created once by Kotlin, passed to all FFI calls.
 #[derive(uniffi::Object)]
 pub struct AppCore {
-    pub(crate) transcriber:    Arc<dyn Transcriber>,
-    pub(crate) meeting_repo:   Arc<dyn MeetingRepo>,
-    pub(crate) audio_capture:  Arc<dyn AudioCapture>,
-    pub(crate) job_repo:       Arc<dyn JobRepo>,
-    pub(crate) llm:            Arc<dyn LlmProvider>,
-    pub(crate) templates:      Arc<dyn TemplateLoader>,
-    pub(crate) settings:       Arc<JsonSettingsStore>,
-    pub(crate) recordings_dir: PathBuf,
-    pub(crate) model_path:     PathBuf,
-    pub(crate) db_path:        PathBuf,
-    pub(crate) prompts_dir:    PathBuf,
-    pub(crate) log_buffer:     LogBuffer,
+    pub(crate) transcriber:   Arc<dyn Transcriber>,
+    pub(crate) meeting_repo:  Arc<dyn MeetingRepo>,
+    pub(crate) audio_capture: Arc<dyn AudioCapture>,
+    pub(crate) job_repo:      Arc<dyn JobRepo>,
+    pub(crate) llm:           Arc<dyn LlmProvider>,
+    pub(crate) templates:     Arc<dyn TemplateLoader>,
+    pub(crate) settings:      Arc<JsonSettingsStore>,
+    pub(crate) file_store:    Arc<dyn MeetingFileStore>,
+    pub(crate) meetings_dir:  PathBuf,
+    pub(crate) model_path:    PathBuf,
+    pub(crate) db_path:       PathBuf,
+    pub(crate) prompts_dir:   PathBuf,
+    pub(crate) log_buffer:    LogBuffer,
 }
 
 // ── WorkerHandle ──────────────────────────────────────────────────────────────
@@ -213,11 +216,11 @@ pub fn init_core(config: AppConfig) -> Arc<AppCore> {
         "MEETING_ASSISTANT_DB",
         || xdg_data_dir().join("meeting-assistant/rust-index.db"),
     );
-    let recordings_dir = resolve_path(
-        config.recordings_dir.as_deref(),
-        s.paths.recordings.as_deref(),
-        "MEETING_ASSISTANT_RECORDINGS",
-        || xdg_cache_dir().join("meeting-assistant/recordings"),
+    let meetings_dir = resolve_path(
+        config.meetings_dir.as_deref(),
+        s.paths.meetings_dir.as_deref(),
+        "MEETING_ASSISTANT_MEETINGS_DIR",
+        || xdg_documents_dir().join(APP_DIRNAME),
     );
     let prompts_dir = resolve_path(
         config.prompts_dir.as_deref(),
@@ -235,9 +238,10 @@ pub fn init_core(config: AppConfig) -> Arc<AppCore> {
     let meeting_repo: Arc<dyn MeetingRepo> = Arc::new(SqliteMeetingRepo(Arc::clone(&db)));
     let job_repo: Arc<dyn JobRepo>          = Arc::new(SqliteJobRepo(Arc::clone(&db)));
 
-    let llm: Arc<dyn LlmProvider>          = Arc::new(AnthropicProvider::new(api_key.unwrap_or_default()));
+    let llm: Arc<dyn LlmProvider>           = Arc::new(AnthropicProvider::new(api_key.unwrap_or_default()));
     let templates: Arc<dyn TemplateLoader>  = Arc::new(FileTemplateLoader::new(&prompts_dir));
     let audio_capture: Arc<dyn AudioCapture> = Arc::new(CpalAudioCapture::new());
+    let file_store: Arc<dyn MeetingFileStore> = Arc::new(FsMeetingFileStore);
 
     Arc::new(AppCore {
         transcriber,
@@ -247,7 +251,8 @@ pub fn init_core(config: AppConfig) -> Arc<AppCore> {
         llm,
         templates,
         settings,
-        recordings_dir,
+        file_store,
+        meetings_dir,
         model_path,
         db_path,
         prompts_dir,
@@ -264,6 +269,7 @@ pub async fn start_worker(core: Arc<AppCore>) -> Arc<WorkerHandle> {
         Arc::clone(&core.job_repo),
         Arc::clone(&core.meeting_repo),
         Arc::clone(&core.transcriber),
+        Arc::clone(&core.file_store),
     );
     let join_handle = tokio::spawn(worker.run(shutdown_rx));
     let abort_handle = join_handle.abort_handle();
@@ -291,19 +297,24 @@ fn resolve_path(
         .unwrap_or_else(default)
 }
 
+fn xdg_documents_dir() -> PathBuf {
+    std::process::Command::new("xdg-user-dir")
+        .arg("DOCUMENTS")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| PathBuf::from(s.trim()))
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join("Documents")
+        })
+}
+
 fn xdg_data_dir() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")
-        })
-}
-
-fn xdg_cache_dir() -> PathBuf {
-    std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".cache")
         })
 }
 

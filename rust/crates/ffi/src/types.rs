@@ -24,10 +24,10 @@ pub type FfiResult<T> = Result<T, AppError>;
 /// fall back to `settings.json` on disk, then environment variables, then defaults.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct AppConfig {
-    pub model_path:     Option<String>,
-    pub db_path:        Option<String>,
-    pub recordings_dir: Option<String>,
-    pub prompts_dir:    Option<String>,
+    pub model_path:   Option<String>,
+    pub db_path:      Option<String>,
+    pub meetings_dir: Option<String>,
+    pub prompts_dir:  Option<String>,
     /// If `Some`, overrides the stored API key for this session (written to neither disk nor env
     /// by `init_core` itself — caller decides). Pass `None` to use the stored/env key.
     pub anthropic_api_key: Option<String>,
@@ -72,10 +72,10 @@ pub struct JobDto {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
 pub struct SettingsPathsDto {
-    pub model: Option<String>,
-    pub db: Option<String>,
-    pub recordings: Option<String>,
-    pub prompts: Option<String>,
+    pub model:        Option<String>,
+    pub db:           Option<String>,
+    pub meetings_dir: Option<String>,
+    pub prompts:      Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
@@ -113,10 +113,10 @@ pub struct DeviceInfoDto {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
 pub struct DiagnosticsPathsDto {
-    pub model: PathInfoDto,
-    pub db: PathInfoDto,
-    pub recordings: PathInfoDto,
-    pub prompts: PathInfoDto,
+    pub model:        PathInfoDto,
+    pub db:           PathInfoDto,
+    pub meetings_dir: PathInfoDto,
+    pub prompts:      PathInfoDto,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
