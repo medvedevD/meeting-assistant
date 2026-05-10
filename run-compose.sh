@@ -32,11 +32,12 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
     echo "✓ Rust built"
 
     echo "→ Regenerating Kotlin bindings..."
-    cargo run --manifest-path "$RUST_DIR/Cargo.toml" --bin uniffi-bindgen -- \
-        generate --library "$RUST_DIR/target/$PROFILE/libmeeting_assistant_ffi.so" \
-        --language kotlin --out-dir /tmp/uniffi-bindings-$$ 2>/dev/null
-    cp /tmp/uniffi-bindings-$$/uniffi/meeting_assistant_ffi/meeting_assistant_ffi.kt "$BINDINGS_KT"
-    rm -rf /tmp/uniffi-bindings-$$
+    TMPDIR="/tmp/uniffi-bindings-$$"
+    (cd "$RUST_DIR" && cargo run --bin uniffi-bindgen -- \
+        generate --library "target/$PROFILE/libmeeting_assistant_ffi.so" \
+        --language kotlin --out-dir "$TMPDIR" 2>&1 | grep -v "ktlint")
+    cp "$TMPDIR/uniffi/meeting_assistant_ffi/meeting_assistant_ffi.kt" "$BINDINGS_KT"
+    rm -rf "$TMPDIR"
     echo "✓ Bindings updated"
 fi
 
