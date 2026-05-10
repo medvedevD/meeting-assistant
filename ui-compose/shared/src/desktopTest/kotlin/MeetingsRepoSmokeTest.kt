@@ -41,7 +41,7 @@ class MeetingsRepoSmokeTest {
             val config = AppConfig(
                 modelPath = modelPath,
                 dbPath = null,
-                recordingsDir = null,
+                meetingsDir = null,
                 promptsDir = null,
                 anthropicApiKey = null,
             )

@@ -3,7 +3,7 @@ package domain
 data class SettingsPaths(
     val model: String?,
     val db: String?,
-    val recordings: String?,
+    val meetingsDir: String?,
     val prompts: String?,
 )
 

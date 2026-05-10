@@ -17,7 +17,7 @@ class UniffiDiagnosticsRepository(private val core: AppCore) : DiagnosticsReposi
             paths = DiagnosticsPaths(
                 model = dto.paths.model.let { PathInfo(it.path, it.exists, it.writable, it.sizeBytes) },
                 db = dto.paths.db.let { PathInfo(it.path, it.exists, it.writable, it.sizeBytes) },
-                recordings = dto.paths.recordings.let { PathInfo(it.path, it.exists, it.writable, it.sizeBytes) },
+                meetingsDir = dto.paths.meetingsDir.let { PathInfo(it.path, it.exists, it.writable, it.sizeBytes) },
                 prompts = dto.paths.prompts.let { PathInfo(it.path, it.exists, it.writable, it.sizeBytes) },
             ),
             hasAnthropicKey = dto.hasAnthropicKey,

@@ -15,7 +15,7 @@ data class DeviceInfo(
 data class DiagnosticsPaths(
     val model: PathInfo,
     val db: PathInfo,
-    val recordings: PathInfo,
+    val meetingsDir: PathInfo,
     val prompts: PathInfo,
 )
 

@@ -16,7 +16,7 @@ class UniffiSettingsRepository(private val core: AppCore) : SettingsRepository {
             paths = SettingsPaths(
                 model = dto.paths.model,
                 db = dto.paths.db,
-                recordings = dto.paths.recordings,
+                meetingsDir = dto.paths.meetingsDir,
                 prompts = dto.paths.prompts,
             ),
             anthropicApiKey = dto.anthropicApiKey,
@@ -34,7 +34,7 @@ class UniffiSettingsRepository(private val core: AppCore) : SettingsRepository {
                 paths = SettingsPathsDto(
                     model = settings.paths.model,
                     db = settings.paths.db,
-                    recordings = settings.paths.recordings,
+                    meetingsDir = settings.paths.meetingsDir,
                     prompts = settings.paths.prompts,
                 ),
                 anthropicApiKey = settings.anthropicApiKey,

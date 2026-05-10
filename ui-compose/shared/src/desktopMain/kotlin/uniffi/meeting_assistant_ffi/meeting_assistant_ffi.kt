@@ -763,6 +763,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -793,6 +795,8 @@ internal interface UniffiLib : Library {
     fun uniffi_meeting_assistant_ffi_fn_method_appcore_job_status(`ptr`: Pointer,`id`: RustBuffer.ByValue,
     ): Long
     fun uniffi_meeting_assistant_ffi_fn_method_appcore_job_submit(`ptr`: Pointer,`path`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,
+    ): Long
+    fun uniffi_meeting_assistant_ffi_fn_method_appcore_meeting_rename(`ptr`: Pointer,`meetingId`: RustBuffer.ByValue,`newName`: RustBuffer.ByValue,
     ): Long
     fun uniffi_meeting_assistant_ffi_fn_method_appcore_meetings_list(`ptr`: Pointer,
     ): Long
@@ -956,6 +960,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_meeting_assistant_ffi_checksum_method_appcore_job_submit(
     ): Short
+    fun uniffi_meeting_assistant_ffi_checksum_method_appcore_meeting_rename(
+    ): Short
     fun uniffi_meeting_assistant_ffi_checksum_method_appcore_meetings_list(
     ): Short
     fun uniffi_meeting_assistant_ffi_checksum_method_appcore_open_path(
@@ -1018,6 +1024,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_meeting_assistant_ffi_checksum_method_appcore_job_submit() != 55749.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_meeting_assistant_ffi_checksum_method_appcore_meeting_rename() != 46454.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_meeting_assistant_ffi_checksum_method_appcore_meetings_list() != 50452.toShort()) {
@@ -1470,6 +1479,8 @@ public interface AppCoreInterface {
     
     suspend fun `jobSubmit`(`path`: kotlin.String, `name`: kotlin.String?): JobDto
     
+    suspend fun `meetingRename`(`meetingId`: kotlin.String, `newName`: kotlin.String)
+    
     suspend fun `meetingsList`(): List<MeetingDto>
     
     suspend fun `openPath`(`path`: kotlin.String)
@@ -1656,6 +1667,28 @@ open class AppCore: Disposable, AutoCloseable, AppCoreInterface {
         { future -> UniffiLib.INSTANCE.ffi_meeting_assistant_ffi_rust_future_free_rust_buffer(future) },
         // lift function
         { FfiConverterTypeJobDto.lift(it) },
+        // Error FFI converter
+        AppException.ErrorHandler,
+    )
+    }
+
+    
+    @Throws(AppException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `meetingRename`(`meetingId`: kotlin.String, `newName`: kotlin.String) {
+        return uniffiRustCallAsync(
+        callWithPointer { thisPtr ->
+            UniffiLib.INSTANCE.uniffi_meeting_assistant_ffi_fn_method_appcore_meeting_rename(
+                thisPtr,
+                FfiConverterString.lower(`meetingId`),FfiConverterString.lower(`newName`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_meeting_assistant_ffi_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.INSTANCE.ffi_meeting_assistant_ffi_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.INSTANCE.ffi_meeting_assistant_ffi_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+        
         // Error FFI converter
         AppException.ErrorHandler,
     )
@@ -2223,7 +2256,7 @@ public object FfiConverterTypeWorkerHandle: FfiConverter<WorkerHandle, Pointer> 
 data class AppConfig (
     var `modelPath`: kotlin.String?, 
     var `dbPath`: kotlin.String?, 
-    var `recordingsDir`: kotlin.String?, 
+    var `meetingsDir`: kotlin.String?, 
     var `promptsDir`: kotlin.String?, 
     /**
      * If `Some`, overrides the stored API key for this session (written to neither disk nor env
@@ -2252,7 +2285,7 @@ public object FfiConverterTypeAppConfig: FfiConverterRustBuffer<AppConfig> {
     override fun allocationSize(value: AppConfig) = (
             FfiConverterOptionalString.allocationSize(value.`modelPath`) +
             FfiConverterOptionalString.allocationSize(value.`dbPath`) +
-            FfiConverterOptionalString.allocationSize(value.`recordingsDir`) +
+            FfiConverterOptionalString.allocationSize(value.`meetingsDir`) +
             FfiConverterOptionalString.allocationSize(value.`promptsDir`) +
             FfiConverterOptionalString.allocationSize(value.`anthropicApiKey`)
     )
@@ -2260,7 +2293,7 @@ public object FfiConverterTypeAppConfig: FfiConverterRustBuffer<AppConfig> {
     override fun write(value: AppConfig, buf: ByteBuffer) {
             FfiConverterOptionalString.write(value.`modelPath`, buf)
             FfiConverterOptionalString.write(value.`dbPath`, buf)
-            FfiConverterOptionalString.write(value.`recordingsDir`, buf)
+            FfiConverterOptionalString.write(value.`meetingsDir`, buf)
             FfiConverterOptionalString.write(value.`promptsDir`, buf)
             FfiConverterOptionalString.write(value.`anthropicApiKey`, buf)
     }
@@ -2367,7 +2400,7 @@ public object FfiConverterTypeDiagnosticsDto: FfiConverterRustBuffer<Diagnostics
 data class DiagnosticsPathsDto (
     var `model`: PathInfoDto, 
     var `db`: PathInfoDto, 
-    var `recordings`: PathInfoDto, 
+    var `meetingsDir`: PathInfoDto, 
     var `prompts`: PathInfoDto
 ) {
     
@@ -2390,14 +2423,14 @@ public object FfiConverterTypeDiagnosticsPathsDto: FfiConverterRustBuffer<Diagno
     override fun allocationSize(value: DiagnosticsPathsDto) = (
             FfiConverterTypePathInfoDto.allocationSize(value.`model`) +
             FfiConverterTypePathInfoDto.allocationSize(value.`db`) +
-            FfiConverterTypePathInfoDto.allocationSize(value.`recordings`) +
+            FfiConverterTypePathInfoDto.allocationSize(value.`meetingsDir`) +
             FfiConverterTypePathInfoDto.allocationSize(value.`prompts`)
     )
 
     override fun write(value: DiagnosticsPathsDto, buf: ByteBuffer) {
             FfiConverterTypePathInfoDto.write(value.`model`, buf)
             FfiConverterTypePathInfoDto.write(value.`db`, buf)
-            FfiConverterTypePathInfoDto.write(value.`recordings`, buf)
+            FfiConverterTypePathInfoDto.write(value.`meetingsDir`, buf)
             FfiConverterTypePathInfoDto.write(value.`prompts`, buf)
     }
 }
@@ -2680,7 +2713,7 @@ public object FfiConverterTypeSettingsDto: FfiConverterRustBuffer<SettingsDto> {
 data class SettingsPathsDto (
     var `model`: kotlin.String?, 
     var `db`: kotlin.String?, 
-    var `recordings`: kotlin.String?, 
+    var `meetingsDir`: kotlin.String?, 
     var `prompts`: kotlin.String?
 ) {
     
@@ -2703,14 +2736,14 @@ public object FfiConverterTypeSettingsPathsDto: FfiConverterRustBuffer<SettingsP
     override fun allocationSize(value: SettingsPathsDto) = (
             FfiConverterOptionalString.allocationSize(value.`model`) +
             FfiConverterOptionalString.allocationSize(value.`db`) +
-            FfiConverterOptionalString.allocationSize(value.`recordings`) +
+            FfiConverterOptionalString.allocationSize(value.`meetingsDir`) +
             FfiConverterOptionalString.allocationSize(value.`prompts`)
     )
 
     override fun write(value: SettingsPathsDto, buf: ByteBuffer) {
             FfiConverterOptionalString.write(value.`model`, buf)
             FfiConverterOptionalString.write(value.`db`, buf)
-            FfiConverterOptionalString.write(value.`recordings`, buf)
+            FfiConverterOptionalString.write(value.`meetingsDir`, buf)
             FfiConverterOptionalString.write(value.`prompts`, buf)
     }
 }

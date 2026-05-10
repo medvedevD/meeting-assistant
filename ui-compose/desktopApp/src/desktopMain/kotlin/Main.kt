@@ -52,7 +52,7 @@ fun main() {
             initCore(AppConfig(
                 modelPath = null,
                 dbPath = null,
-                recordingsDir = null,
+                meetingsDir = null,
                 promptsDir = null,
                 anthropicApiKey = null,
             ))

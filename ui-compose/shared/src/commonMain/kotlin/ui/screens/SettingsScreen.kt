@@ -107,7 +107,7 @@ private fun SettingsForm(
     // Paths
     var modelPath by remember(settings) { mutableStateOf(settings.paths.model ?: "") }
     var dbPath by remember(settings) { mutableStateOf(settings.paths.db ?: "") }
-    var recordingsDir by remember(settings) { mutableStateOf(settings.paths.recordings ?: "") }
+    var meetingsDir by remember(settings) { mutableStateOf(settings.paths.meetingsDir ?: "") }
     var promptsDir by remember(settings) { mutableStateOf(settings.paths.prompts ?: "") }
 
     // Recording
@@ -121,7 +121,7 @@ private fun SettingsForm(
     // Validation
     fun String.isValidPath() = isBlank() || startsWith("/") || startsWith("~")
     val pathsValid = modelPath.isValidPath() && dbPath.isValidPath()
-        && recordingsDir.isValidPath() && promptsDir.isValidPath()
+        && meetingsDir.isValidPath() && promptsDir.isValidPath()
     val apiKeyValid = !apiKeyChanged || apiKey.isBlank() || apiKey.startsWith("sk-ant-")
 
     Column(
@@ -227,7 +227,7 @@ private fun SettingsForm(
         Spacer(Modifier.height(8.dp))
         SectionHeader("Хранилище")
 
-        PathField(value = recordingsDir, onValueChange = { recordingsDir = it }, label = "Папка записей")
+        PathField(value = meetingsDir, onValueChange = { meetingsDir = it }, label = "Папка встреч")
         PathField(value = dbPath, onValueChange = { dbPath = it }, label = "База данных (SQLite)")
 
         Spacer(Modifier.height(8.dp))
@@ -251,7 +251,7 @@ private fun SettingsForm(
                         paths = SettingsPaths(
                             model = modelPath.ifBlank { null },
                             db = dbPath.ifBlank { null },
-                            recordings = recordingsDir.ifBlank { null },
+                            meetingsDir = meetingsDir.ifBlank { null },
                             prompts = promptsDir.ifBlank { null },
                         ),
                         anthropicApiKey = updatedApiKey,

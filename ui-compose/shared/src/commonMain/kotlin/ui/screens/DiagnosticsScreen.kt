@@ -126,7 +126,7 @@ private fun DiagnosticsTab(info: DiagnosticsInfo, onOpenPath: (String) -> Unit) 
         DiagSectionTitle("Пути")
         PathRow("Модель", info.paths.model, onOpenPath)
         PathRow("База данных", info.paths.db, onOpenPath)
-        PathRow("Записи", info.paths.recordings, onOpenPath)
+        PathRow("Встречи", info.paths.meetingsDir, onOpenPath)
         PathRow("Промпты", info.paths.prompts, onOpenPath)
     }
 }
