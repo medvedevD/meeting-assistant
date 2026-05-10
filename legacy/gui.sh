@@ -2,11 +2,12 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_PY="$SCRIPT_DIR/.venv/bin/python3"
-VENV_RQ="$SCRIPT_DIR/.venv/bin/rq"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+VENV_PY="$REPO_ROOT/.venv/bin/python3"
+VENV_RQ="$REPO_ROOT/.venv/bin/rq"
 
 if [[ ! -x "$VENV_PY" ]]; then
-    echo "Ошибка: .venv не найдено. Запусти ./scripts/setup.sh"
+    echo "Ошибка: .venv не найдено. Запусти ./scripts/setup.sh из корня репозитория"
     exit 1
 fi
 
