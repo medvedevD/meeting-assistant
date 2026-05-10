@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
+use std::sync::OnceLock;
 
 use parking_lot::Mutex;
 
@@ -122,20 +123,22 @@ impl WorkerHandle {
 // ── Singleton lockfile ────────────────────────────────────────────────────────
 
 /// Holds the open lockfile for the lifetime of the process.
-/// `OnceLock` ensures the file is created at most once per process.
+/// The OS releases the flock automatically when the process exits (including kill -9).
 static SINGLETON_LOCK_FILE: OnceLock<std::fs::File> = OnceLock::new();
 
 /// Attempt to acquire a single-instance lock for the application.
 ///
-/// Implementation: PID file in `$XDG_DATA_HOME/meeting-assistant/meeting-assistant.lock`.
-/// On Linux, liveness is verified via `/proc/<pid>`. On other platforms the check is
-/// best-effort (stale file is always overwritten).
+/// Uses an exclusive advisory flock on
+/// `$XDG_DATA_HOME/meeting-assistant/meeting-assistant.lock`.
+/// The lock is held for the lifetime of the process — the OS releases it on exit,
+/// even after kill -9, so stale lockfiles are never a problem.
 ///
 /// Returns `Err(AppError::General)` if another live instance already holds the lock.
 #[uniffi::export]
 pub fn try_acquire_singleton() -> FfiResult<()> {
+    use fs2::FileExt;
+
     if SINGLETON_LOCK_FILE.get().is_some() {
-        // Already acquired in this process.
         return Ok(());
     }
 
@@ -144,32 +147,21 @@ pub fn try_acquire_singleton() -> FfiResult<()> {
         std::fs::create_dir_all(parent).map_err(AppError::general)?;
     }
 
-    // Check if an existing PID file points to a live process.
-    if let Ok(content) = std::fs::read_to_string(&lock_path) {
-        if let Ok(pid) = content.trim().parse::<u32>() {
-            let is_alive = {
-                #[cfg(target_os = "linux")]
-                { std::path::Path::new(&format!("/proc/{pid}")).exists() }
-                #[cfg(not(target_os = "linux"))]
-                { false }  // On non-Linux, assume stale.
-            };
-            if is_alive {
-                return Err(AppError::General(
-                    "Another instance of Meeting Assistant is already running.".into(),
-                ));
-            }
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(&lock_path)
+        .map_err(AppError::general)?;
+
+    match file.try_lock_exclusive() {
+        Ok(()) => {
+            let _ = SINGLETON_LOCK_FILE.set(file);
+            Ok(())
         }
+        Err(_) => Err(AppError::General(
+            "Another instance of Meeting Assistant is already running.".into(),
+        )),
     }
-
-    let pid = std::process::id();
-    std::fs::write(&lock_path, pid.to_string()).map_err(AppError::general)?;
-
-    // Open the file and store it in the OnceLock to keep it alive for the process lifetime.
-    // On process exit the file is NOT deleted — the next start checks /proc instead.
-    let file = std::fs::File::open(&lock_path).map_err(AppError::general)?;
-    let _ = SINGLETON_LOCK_FILE.set(file); // Ignore if already set by a concurrent call.
-
-    Ok(())
 }
 
 // ── Public FFI functions ──────────────────────────────────────────────────────
