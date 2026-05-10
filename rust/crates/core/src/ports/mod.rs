@@ -15,3 +15,6 @@ pub use template_loader::TemplateLoader;
 
 mod audio_capture;
 pub use audio_capture::{AudioCapture, CaptureSource};
+
+mod meeting_file_store;
+pub use meeting_file_store::MeetingFileStore;

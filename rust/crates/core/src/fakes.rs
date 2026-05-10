@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use crate::{
     CoreError,
     entities::{Job, JobStatus, Meeting, Transcript, Segment},
-    ports::{AudioCapture, CaptureSource, JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber},
+    ports::{AudioCapture, CaptureSource, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber},
 };
 
 // ── FakeTranscriber ──────────────────────────────────────────────────────────
@@ -82,8 +82,68 @@ impl MeetingRepo for FakeMeetingRepo {
         }
     }
 
+    async fn save_transcript_file(&self, id: &str, text: &str, path: &Path) -> Result<(), CoreError> {
+        let mut store = self.store.lock().unwrap();
+        if let Some(m) = store.iter_mut().find(|m| m.id == id) {
+            m.transcript_text = Some(text.to_string());
+            m.transcript_path = Some(path.to_path_buf());
+            Ok(())
+        } else {
+            Err(CoreError::NotFound(id.to_string()))
+        }
+    }
+
+    async fn save_protocol_file(&self, id: &str, text: &str, path: &Path) -> Result<(), CoreError> {
+        let mut store = self.store.lock().unwrap();
+        if let Some(m) = store.iter_mut().find(|m| m.id == id) {
+            m.protocol_text = Some(text.to_string());
+            m.protocol_path = Some(path.to_path_buf());
+            Ok(())
+        } else {
+            Err(CoreError::NotFound(id.to_string()))
+        }
+    }
+
+    async fn update_name(&self, id: &str, name: &str) -> Result<(), CoreError> {
+        let mut store = self.store.lock().unwrap();
+        if let Some(m) = store.iter_mut().find(|m| m.id == id) {
+            m.name = name.to_string();
+            Ok(())
+        } else {
+            Err(CoreError::NotFound(id.to_string()))
+        }
+    }
+
     async fn list_all(&self) -> Result<Vec<Meeting>, CoreError> {
         Ok(self.store.lock().unwrap().clone())
+    }
+}
+
+// ── FakeMeetingFileStore ─────────────────────────────────────────────────────
+
+#[derive(Default)]
+pub struct FakeMeetingFileStore {
+    pub written: Mutex<Vec<(PathBuf, String)>>,
+}
+
+impl FakeMeetingFileStore {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+}
+
+#[async_trait]
+impl MeetingFileStore for FakeMeetingFileStore {
+    async fn write_transcript(&self, dir: &Path, text: &str) -> Result<PathBuf, CoreError> {
+        let path = dir.join("transcript.md");
+        self.written.lock().unwrap().push((path.clone(), text.to_string()));
+        Ok(path)
+    }
+
+    async fn write_protocol(&self, dir: &Path, text: &str) -> Result<PathBuf, CoreError> {
+        let path = dir.join("protocol.md");
+        self.written.lock().unwrap().push((path.clone(), text.to_string()));
+        Ok(path)
     }
 }
 

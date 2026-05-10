@@ -14,20 +14,36 @@ use crate::{
 pub async fn start_recording(
     capture: Arc<dyn AudioCapture>,
     meeting_repo: Arc<dyn MeetingRepo>,
-    recordings_dir: &Path,
+    meetings_dir: &Path,
     name: Option<String>,
     source: CaptureSource,
     echo_cancel: bool,
 ) -> Result<Meeting, CoreError> {
-    let meeting_name = name.unwrap_or_else(|| chrono_name(now_unix()));
+    let ts = now_unix();
+    let meeting_name = name.unwrap_or_else(|| chrono_name(ts));
     let meeting = Meeting::new(meeting_name, PathBuf::new());
-    let audio_path = recordings_dir.join(&meeting.id).join("recording.wav");
 
-    let meeting = Meeting { audio_path: audio_path.clone(), ..meeting };
+    let slug = slug_from_meeting(ts, &meeting.id[..8]);
+    let meeting_dir = meetings_dir.join(&slug);
+
+    // Create meeting directory immediately so the file is accessible on disk.
+    std::fs::create_dir_all(&meeting_dir)
+        .map_err(|e| CoreError::Storage(format!("cannot create meeting dir {}: {e}", meeting_dir.display())))?;
+
+    let audio_path = meeting_dir.join("recording.wav");
+    let meeting = Meeting { meeting_dir, audio_path: audio_path.clone(), ..meeting };
 
     capture.start_session(&meeting.id, &audio_path, source, echo_cancel).await?;
     meeting_repo.save(&meeting).await?;
     Ok(meeting)
+}
+
+fn slug_from_meeting(ts: i64, uuid_prefix: &str) -> String {
+    let mins  = ts / 60 % 60;
+    let hours = ts / 3600 % 24;
+    let days  = ts / 86400;
+    let (y, m, d) = epoch_to_ymd(days);
+    format!("{y:04}-{m:02}-{d:02}_{hours:02}-{mins:02}_{uuid_prefix}")
 }
 
 fn chrono_name(ts: i64) -> String {
@@ -35,7 +51,7 @@ fn chrono_name(ts: i64) -> String {
     let hours = ts / 3600 % 24;
     let days = ts / 86400;
     let (y, m, d) = epoch_to_ymd(days);
-    format!("Meeting {y:04}-{m:02}-{d:02}T{hours:02}:{mins:02}")
+    format!("{y:04}-{m:02}-{d:02} {hours:02}:{mins:02}")
 }
 
 fn epoch_to_ymd(days: i64) -> (i64, i64, i64) {
@@ -59,8 +75,8 @@ mod tests {
     use std::path::PathBuf;
     use crate::fakes::{FakeAudioCapture, FakeMeetingRepo};
 
-    fn recordings_dir() -> PathBuf {
-        PathBuf::from("/tmp/recordings")
+    fn meetings_dir() -> PathBuf {
+        PathBuf::from("/tmp/meetings")
     }
 
     async fn start(
@@ -72,7 +88,7 @@ mod tests {
         start_recording(
             Arc::clone(&capture) as Arc<dyn AudioCapture>,
             Arc::clone(&repo) as Arc<dyn MeetingRepo>,
-            &recordings_dir(),
+            &meetings_dir(),
             name.map(str::to_string),
             source,
             false,
@@ -89,8 +105,18 @@ mod tests {
         let meeting = start(Arc::clone(&capture), Arc::clone(&repo), Some("Планёрка"), CaptureSource::Mic).await;
 
         assert_eq!(meeting.name, "Планёрка");
-        let expected = recordings_dir().join(&meeting.id).join("recording.wav");
-        assert_eq!(meeting.audio_path, expected);
+        assert_eq!(meeting.audio_path, meeting.meeting_dir.join("recording.wav"));
+        assert!(meeting.audio_path.starts_with(&meetings_dir()));
+    }
+
+    #[tokio::test]
+    async fn meeting_dir_is_inside_meetings_dir() {
+        let capture = FakeAudioCapture::new();
+        let repo = FakeMeetingRepo::new();
+
+        let meeting = start(Arc::clone(&capture), Arc::clone(&repo), None, CaptureSource::Mic).await;
+
+        assert!(meeting.meeting_dir.starts_with(&meetings_dir()));
     }
 
     #[tokio::test]
@@ -154,7 +180,6 @@ mod tests {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
 
-        // CaptureSource::default() == Mic
         start(Arc::clone(&capture), Arc::clone(&repo), None, CaptureSource::default()).await;
 
         assert_eq!(capture.last_source(), Some(CaptureSource::Mic));
@@ -170,7 +195,7 @@ mod tests {
         start_recording(
             Arc::clone(&capture) as Arc<dyn AudioCapture>,
             Arc::clone(&repo) as Arc<dyn MeetingRepo>,
-            &recordings_dir(),
+            &meetings_dir(),
             None,
             CaptureSource::Mixed,
             true,
@@ -189,7 +214,7 @@ mod tests {
         start_recording(
             Arc::clone(&capture) as Arc<dyn AudioCapture>,
             Arc::clone(&repo) as Arc<dyn MeetingRepo>,
-            &recordings_dir(),
+            &meetings_dir(),
             None,
             CaptureSource::Mixed,
             false,
@@ -198,5 +223,15 @@ mod tests {
         .unwrap();
 
         assert_eq!(capture.last_echo_cancel(), Some(false));
+    }
+
+    // ── slug format ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn slug_format_is_correct() {
+        // 2026-05-10 14:30 UTC
+        let ts = 1778423400i64;
+        let slug = slug_from_meeting(ts, "a1b2c3d4");
+        assert_eq!(slug, "2026-05-10_14-30_a1b2c3d4");
     }
 }
