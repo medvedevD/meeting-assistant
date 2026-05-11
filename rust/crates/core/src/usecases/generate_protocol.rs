@@ -1,15 +1,20 @@
 use std::sync::Arc;
 use crate::{CoreError, entities::Protocol, ports::{LlmProvider, TemplateLoader}};
 
-/// Build instructions from a template: remove the `{transcript}` placeholder
-/// (transcript is sent separately for caching) and substitute `{meeting_name}`.
-fn build_instructions(template: &str, meeting_name: Option<&str>) -> String {
-    let without_transcript = template.replace("{transcript}", "");
+fn build_message(template: &str, transcript: &str, meeting_name: Option<&str>) -> String {
+    let with_transcript = template.replace("{transcript}", transcript);
     match meeting_name {
-        Some(name) => without_transcript.replace("{meeting_name}", name),
-        None => without_transcript,
+        Some(name) => with_transcript.replace("{meeting_name}", name),
+        None => with_transcript,
     }
 }
+
+const DEFAULT_PROMPT: &str = "\
+Составь краткий структурированный протокол встречи на русском языке на основе следующей транскрипции. \
+Выдели ключевые темы, решения и дальнейшие действия (action items).
+
+Транскрипция:
+{transcript}";
 
 pub async fn generate_protocol(
     llm: Arc<dyn LlmProvider>,
@@ -18,19 +23,16 @@ pub async fn generate_protocol(
     template_name: Option<&str>,
     meeting_name: Option<&str>,
 ) -> Result<Protocol, CoreError> {
-    let instructions = match template_name {
-        None => None,
+    let message = match template_name {
+        None => build_message(DEFAULT_PROMPT, transcript, meeting_name),
         Some(name) => match templates.load(name).await? {
             None => return Err(CoreError::Template(format!("template '{name}' not found"))),
-            Some(tmpl) => {
-                let built = build_instructions(&tmpl, meeting_name);
-                if built.trim().is_empty() { None } else { Some(built) }
-            }
+            Some(tmpl) => build_message(&tmpl, transcript, meeting_name),
         },
     };
 
     let markdown = llm
-        .generate(transcript, instructions.as_deref())
+        .generate(&message, None)
         .await?;
 
     Ok(Protocol::new(markdown))
@@ -107,26 +109,39 @@ mod tests {
     }
 
     #[test]
-    fn build_instructions_removes_transcript_placeholder() {
+    fn build_message_substitutes_transcript() {
         let tmpl = "Intro.\n{transcript}\nOutro.";
-        let result = build_instructions(tmpl, None);
+        let result = build_message(tmpl, "transcript text", None);
         assert!(!result.contains("{transcript}"));
+        assert!(result.contains("transcript text"));
         assert!(result.contains("Intro."));
         assert!(result.contains("Outro."));
     }
 
     #[test]
-    fn build_instructions_substitutes_meeting_name() {
+    fn build_message_substitutes_meeting_name() {
         let tmpl = "Встреча: {meeting_name}\n{transcript}";
-        let result = build_instructions(tmpl, Some("1-на-1"));
+        let result = build_message(tmpl, "text", Some("1-на-1"));
         assert!(result.contains("1-на-1"));
         assert!(!result.contains("{meeting_name}"));
     }
 
     #[test]
-    fn build_instructions_empty_after_removing_placeholder_only() {
+    fn build_message_only_transcript_placeholder_returns_transcript() {
         let tmpl = "{transcript}";
-        let result = build_instructions(tmpl, None);
-        assert!(result.trim().is_empty());
+        let result = build_message(tmpl, "hello", None);
+        assert_eq!(result, "hello");
+    }
+
+    #[tokio::test]
+    async fn no_template_succeeds_with_default_prompt() {
+        let llm = FakeLlmProvider::new("# Протокол\n\nОК.");
+        let templates = FakeTemplateLoader::empty();
+
+        let result = generate_protocol(llm, templates, "текст встречи", None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(result.markdown, "# Протокол\n\nОК.");
     }
 }
