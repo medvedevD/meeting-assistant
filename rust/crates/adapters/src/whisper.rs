@@ -12,8 +12,13 @@ impl WhisperTranscriber {
     pub fn new(model_path: &Path) -> anyhow::Result<Self> {
         let path = model_path.to_str()
             .ok_or_else(|| anyhow::anyhow!("model path is not valid UTF-8"))?;
+        let t = std::time::Instant::now();
         let ctx = WhisperContext::new_with_params(path, WhisperContextParameters::default())
             .map_err(|e| anyhow::anyhow!("failed to load whisper model from {path}: {e}"))?;
+        let model_name = model_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(path);
+        bench_log(&format!("model_loaded  model={model_name} load_ms={}", t.elapsed().as_millis()));
         Ok(Self { ctx: Arc::new(ctx) })
     }
 }
@@ -30,8 +35,13 @@ impl Transcriber for WhisperTranscriber {
 }
 
 fn run_whisper(ctx: &WhisperContext, audio_path: &PathBuf) -> Result<Transcript, CoreError> {
+    let t_total = std::time::Instant::now();
+
+    let t = std::time::Instant::now();
     let samples = load_wav_as_mono_f32(audio_path)
         .map_err(|e| CoreError::Transcription(e.to_string()))?;
+    let audio_duration_s = samples.len() as f64 / WHISPER_SAMPLE_RATE as f64;
+    bench_log(&format!("audio_loaded  duration_s={audio_duration_s:.1} load_ms={}", t.elapsed().as_millis()));
 
     let mut state = ctx.create_state()
         .map_err(|e| CoreError::Transcription(e.to_string()))?;
@@ -46,8 +56,12 @@ fn run_whisper(ctx: &WhisperContext, audio_path: &PathBuf) -> Result<Transcript,
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
 
+    let t = std::time::Instant::now();
     state.full(params, &samples)
         .map_err(|e| CoreError::Transcription(e.to_string()))?;
+    let infer_ms = t.elapsed().as_millis();
+    let rtf = infer_ms as f64 / 1000.0 / audio_duration_s;
+    bench_log(&format!("inference_done  infer_ms={infer_ms} rtf={rtf:.2}"));
 
     let num_segments = state.full_n_segments()
         .map_err(|e| CoreError::Transcription(e.to_string()))?;
@@ -68,6 +82,8 @@ fn run_whisper(ctx: &WhisperContext, audio_path: &PathBuf) -> Result<Transcript,
         segments.push(Segment { start_ms, end_ms, text: text.trim().to_string() });
     }
 
+    bench_log(&format!("transcription_complete  total_ms={}", t_total.elapsed().as_millis()));
+
     Ok(Transcript {
         text: full_text.trim().to_string(),
         segments,
@@ -81,11 +97,18 @@ fn load_wav_as_mono_f32(path: &Path) -> anyhow::Result<Vec<f32>> {
     let mut reader = hound::WavReader::open(path)?;
     let spec = reader.spec();
 
-    let samples_i16: Vec<i16> = reader.samples::<i16>().collect::<Result<_, _>>()?;
-
-    let mut samples_f32 = vec![0f32; samples_i16.len()];
-    whisper_rs::convert_integer_to_float_audio(&samples_i16, &mut samples_f32)
-        .map_err(|e| anyhow::anyhow!("audio conversion failed: {e}"))?;
+    let samples_f32: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => {
+            reader.samples::<f32>().collect::<Result<_, _>>()?
+        }
+        hound::SampleFormat::Int => {
+            let samples_i16: Vec<i16> = reader.samples::<i16>().collect::<Result<_, _>>()?;
+            let mut out = vec![0f32; samples_i16.len()];
+            whisper_rs::convert_integer_to_float_audio(&samples_i16, &mut out)
+                .map_err(|e| anyhow::anyhow!("audio conversion failed: {e}"))?;
+            out
+        }
+    };
 
     let mono = if spec.channels == 1 {
         samples_f32
@@ -104,6 +127,20 @@ fn load_wav_as_mono_f32(path: &Path) -> anyhow::Result<Vec<f32>> {
         "resampling audio"
     );
     resample(mono, spec.sample_rate, WHISPER_SAMPLE_RATE)
+}
+
+fn bench_log(msg: &str) {
+    use std::io::Write;
+    let base = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let path = std::path::Path::new(&base)
+        .join(".local/share/meeting-assistant/transcription.log");
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "[{ts}] {msg}");
+    }
 }
 
 fn resample(samples: Vec<f32>, from_rate: u32, to_rate: u32) -> anyhow::Result<Vec<f32>> {
