@@ -1005,7 +1005,7 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
-    if (lib.uniffi_meeting_assistant_ffi_checksum_func_init_core() != 60343.toShort()) {
+    if (lib.uniffi_meeting_assistant_ffi_checksum_func_init_core() != 64413.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_meeting_assistant_ffi_checksum_func_start_worker() != 26804.toShort()) {
@@ -3072,7 +3072,7 @@ public object FfiConverterSequenceTypeMeetingDto: FfiConverterRustBuffer<List<Me
          * 3. Environment variable (`MEETING_ASSISTANT_MODEL`, etc.)
          * 4. XDG default
          *
-         * **Blocking**: loads the Whisper model from disk. Call from a background thread / `Dispatchers.IO`.
+         * Initialises the application core. The Whisper model is loaded lazily on first transcription.
          */ fun `initCore`(`config`: AppConfig): AppCore {
             return FfiConverterTypeAppCore.lift(
     uniffiRustCall() { _status ->

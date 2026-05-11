@@ -8,7 +8,7 @@ use parking_lot::Mutex;
 use meeting_core::ports::{AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber};
 use meeting_adapters::{
     AnthropicProvider, CpalAudioCapture, Db, FileTemplateLoader, FsMeetingFileStore,
-    JsonSettingsStore, SqliteJobRepo, SqliteMeetingRepo, WhisperTranscriber,
+    JsonSettingsStore, LazyWhisperTranscriber, SqliteJobRepo, SqliteMeetingRepo,
 };
 use crate::types::{AppConfig, AppError, FfiResult};
 
@@ -177,7 +177,7 @@ pub fn try_acquire_singleton() -> FfiResult<()> {
 ///   3. Environment variable (`MEETING_ASSISTANT_MODEL`, etc.)
 ///   4. XDG default
 ///
-/// **Blocking**: loads the Whisper model from disk. Call from a background thread / `Dispatchers.IO`.
+/// Initialises the application core. The Whisper model is loaded lazily on first transcription.
 #[uniffi::export]
 pub fn init_core(config: AppConfig) -> Arc<AppCore> {
     let log_buffer: LogBuffer = Arc::new(Mutex::new(VecDeque::with_capacity(500)));
@@ -229,10 +229,7 @@ pub fn init_core(config: AppConfig) -> Arc<AppCore> {
         default_prompts_dir,
     );
 
-    let transcriber: Arc<dyn Transcriber> = Arc::new(
-        WhisperTranscriber::new(&model_path)
-            .expect("failed to load Whisper model — set MEETING_ASSISTANT_MODEL"),
-    );
+    let transcriber: Arc<dyn Transcriber> = Arc::new(LazyWhisperTranscriber::new(model_path.clone()));
 
     let db = Db::open(&db_path).expect("failed to open database");
     let meeting_repo: Arc<dyn MeetingRepo> = Arc::new(SqliteMeetingRepo(Arc::clone(&db)));

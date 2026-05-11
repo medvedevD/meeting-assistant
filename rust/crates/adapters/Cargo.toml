@@ -22,5 +22,5 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 wiremock = { workspace = true }
-tokio = { workspace = true }
+tokio = { version = "1", features = ["full", "test-util"] }
 tempfile = "3"

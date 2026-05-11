@@ -1,5 +1,5 @@
 mod whisper;
-pub use whisper::WhisperTranscriber;
+pub use whisper::{LazyWhisperTranscriber, WhisperTranscriber};
 
 mod fs_meeting_file_store;
 pub use fs_meeting_file_store::FsMeetingFileStore;

@@ -143,6 +143,365 @@ fn bench_log(msg: &str) {
     }
 }
 
+// ── LazyWhisperTranscriber ───────────────────────────────────────────────────
+
+#[async_trait]
+pub(crate) trait WhisperRunner: Send + Sync {
+    async fn run(&self, audio_path: &Path) -> Result<Transcript, CoreError>;
+}
+
+pub(crate) type RunnerFactory =
+    Arc<dyn Fn(&Path) -> Result<Arc<dyn WhisperRunner>, CoreError> + Send + Sync>;
+
+pub(crate) struct LazyState {
+    pub(crate) runner: Option<Arc<dyn WhisperRunner>>,
+    pub(crate) active_count: usize,
+    pub(crate) unload_handle: Option<tokio::task::AbortHandle>,
+}
+
+impl Default for LazyState {
+    fn default() -> Self {
+        Self { runner: None, active_count: 0, unload_handle: None }
+    }
+}
+
+pub struct LazyWhisperTranscriber {
+    model_path: PathBuf,
+    factory: RunnerFactory,
+    pub(crate) state: Arc<tokio::sync::Mutex<LazyState>>,
+}
+
+struct RealWhisperRunner {
+    ctx: Arc<WhisperContext>,
+}
+
+#[async_trait]
+impl WhisperRunner for RealWhisperRunner {
+    async fn run(&self, audio_path: &Path) -> Result<Transcript, CoreError> {
+        let ctx = Arc::clone(&self.ctx);
+        let path = audio_path.to_path_buf();
+        tokio::task::spawn_blocking(move || run_whisper(&ctx, &path))
+            .await
+            .map_err(|e| CoreError::Transcription(e.to_string()))?
+    }
+}
+
+impl LazyWhisperTranscriber {
+    /// Creates a production instance. Does NOT load the model — loading is deferred to first transcription.
+    pub fn new(model_path: PathBuf) -> Self {
+        let factory: RunnerFactory = Arc::new(|path: &Path| {
+            let path_str = path.to_str()
+                .ok_or_else(|| CoreError::Transcription("model path is not valid UTF-8".into()))?;
+            let t = std::time::Instant::now();
+            let ctx = WhisperContext::new_with_params(path_str, WhisperContextParameters::default())
+                .map_err(|e| CoreError::Transcription(format!("Модель не найдена или повреждена: {e}")))?;
+            let model_name = path.file_name().and_then(|n| n.to_str()).unwrap_or(path_str);
+            bench_log(&format!("model_loaded  model={model_name} load_ms={}", t.elapsed().as_millis()));
+            Ok(Arc::new(RealWhisperRunner { ctx: Arc::new(ctx) }) as Arc<dyn WhisperRunner>)
+        });
+        Self::new_with_factory(model_path, factory)
+    }
+
+    pub(crate) fn new_with_factory(model_path: PathBuf, factory: RunnerFactory) -> Self {
+        Self {
+            model_path,
+            factory,
+            state: Arc::new(tokio::sync::Mutex::new(LazyState::default())),
+        }
+    }
+
+    #[cfg(test)]
+    async fn ctx_is_loaded(&self) -> bool {
+        self.state.lock().await.runner.is_some()
+    }
+}
+
+#[async_trait]
+impl Transcriber for LazyWhisperTranscriber {
+    async fn transcribe(&self, audio_path: &Path) -> Result<Transcript, CoreError> {
+        // --- 1. ACQUIRE ---
+        let runner: Arc<dyn WhisperRunner> = {
+            let mut state = self.state.lock().await;
+            if state.runner.is_none() {
+                tracing::info!("loading whisper model: {:?}", self.model_path);
+                // Early return on error — active_count and unload_handle are untouched
+                state.runner = Some((self.factory)(&self.model_path)?);
+            }
+            if let Some(handle) = state.unload_handle.take() {
+                handle.abort();
+            }
+            state.active_count += 1;
+            Arc::clone(state.runner.as_ref().unwrap())
+        }; // ← lock released, runner lives as Arc
+
+        // --- 2. TRANSCRIBE (без lock) ---
+        let result = runner.run(audio_path).await;
+
+        // --- 3. RELEASE ---
+        {
+            let mut state = self.state.lock().await;
+            state.active_count -= 1;
+            if state.active_count == 0 {
+                let state_clone = Arc::clone(&self.state);
+                let task = tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    state_clone.lock().await.runner = None;
+                    tracing::info!("whisper model unloaded after 30s idle");
+                });
+                state.unload_handle = Some(task.abort_handle());
+            }
+        }
+
+        result
+    }
+}
+
+impl Drop for LazyWhisperTranscriber {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.state.try_lock() {
+            if let Some(handle) = state.unload_handle.take() {
+                handle.abort();
+            }
+        }
+    }
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    // --- Fake infrastructure ---
+
+    struct FakeRunner {
+        fail_run: bool,
+    }
+
+    #[async_trait]
+    impl WhisperRunner for FakeRunner {
+        async fn run(&self, _audio_path: &Path) -> Result<Transcript, CoreError> {
+            if self.fail_run {
+                return Err(CoreError::Transcription("fake run error".into()));
+            }
+            Ok(Transcript { text: "ok".into(), segments: vec![], language: "en".into() })
+        }
+    }
+
+    fn factory_ok(load_count: Arc<AtomicUsize>) -> RunnerFactory {
+        Arc::new(move |_path| {
+            load_count.fetch_add(1, Ordering::SeqCst);
+            Ok(Arc::new(FakeRunner { fail_run: false }) as Arc<dyn WhisperRunner>)
+        })
+    }
+
+    fn factory_fail_load(load_count: Arc<AtomicUsize>) -> RunnerFactory {
+        Arc::new(move |_path| {
+            load_count.fetch_add(1, Ordering::SeqCst);
+            Err(CoreError::Transcription("model not found".into()))
+        })
+    }
+
+    fn factory_fail_run(load_count: Arc<AtomicUsize>) -> RunnerFactory {
+        Arc::new(move |_path| {
+            load_count.fetch_add(1, Ordering::SeqCst);
+            Ok(Arc::new(FakeRunner { fail_run: true }) as Arc<dyn WhisperRunner>)
+        })
+    }
+
+    fn factory_conditional(load_count: Arc<AtomicUsize>, should_fail: Arc<AtomicBool>) -> RunnerFactory {
+        Arc::new(move |_path| {
+            load_count.fetch_add(1, Ordering::SeqCst);
+            if should_fail.load(Ordering::SeqCst) {
+                return Err(CoreError::Transcription("model not found".into()));
+            }
+            Ok(Arc::new(FakeRunner { fail_run: false }) as Arc<dyn WhisperRunner>)
+        })
+    }
+
+    fn audio() -> &'static Path {
+        Path::new("/fake/audio.wav")
+    }
+
+    // TC-001: первый вызов загружает модель
+    #[tokio::test]
+    async fn tc001_first_call_loads_model() {
+        let load_count = Arc::new(AtomicUsize::new(0));
+        let t = LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/model.bin"),
+            factory_ok(load_count.clone()),
+        );
+
+        t.transcribe(audio()).await.unwrap();
+
+        assert_eq!(load_count.load(Ordering::SeqCst), 1);
+    }
+
+    // TC-002: параллельные вызовы не загружают модель повторно
+    #[tokio::test]
+    async fn tc002_concurrent_calls_load_once() {
+        let load_count = Arc::new(AtomicUsize::new(0));
+        let t = Arc::new(LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/model.bin"),
+            factory_ok(load_count.clone()),
+        ));
+
+        let t1 = Arc::clone(&t);
+        let t2 = Arc::clone(&t);
+        let (r1, r2) = tokio::join!(t1.transcribe(audio()), t2.transcribe(audio()));
+        r1.unwrap();
+        r2.unwrap();
+
+        assert_eq!(load_count.load(Ordering::SeqCst), 1);
+    }
+
+    // TC-003: несуществующий путь → Err(CoreError), не паника
+    #[tokio::test]
+    async fn tc003_failed_load_returns_core_error_not_panic() {
+        let t = LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/nonexistent.bin"),
+            factory_fail_load(Arc::new(AtomicUsize::new(0))),
+        );
+
+        let result = t.transcribe(audio()).await;
+
+        assert!(matches!(result, Err(CoreError::Transcription(_))));
+    }
+
+    // TC-004: после 30 сек простоя ctx выгружается
+    #[tokio::test(start_paused = true)]
+    async fn tc004_unloads_after_30s_idle() {
+        let t = LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/model.bin"),
+            factory_ok(Arc::new(AtomicUsize::new(0))),
+        );
+
+        t.transcribe(audio()).await.unwrap();
+        assert!(t.ctx_is_loaded().await);
+
+        // Yield once so the spawned unload task is polled and registers its sleep(30s) at T=0.
+        // Without this, the task would first be polled AFTER advance(), registering sleep at T=31
+        // with deadline T=61 — beyond our advance window.
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::task::yield_now().await;
+
+        assert!(!t.ctx_is_loaded().await);
+    }
+
+    // TC-005: вызов до 30 сек сбрасывает таймер, ctx остаётся
+    #[tokio::test(start_paused = true)]
+    async fn tc005_call_before_30s_resets_timer() {
+        let t = LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/model.bin"),
+            factory_ok(Arc::new(AtomicUsize::new(0))),
+        );
+
+        t.transcribe(audio()).await.unwrap();
+        tokio::task::yield_now().await;  // let spawned task register sleep at T=0
+        tokio::time::advance(Duration::from_secs(20)).await;
+        tokio::task::yield_now().await;
+
+        // Второй вызов сбрасывает таймер (ACQUIRE aborts old handle; RELEASE spawns new one)
+        t.transcribe(audio()).await.unwrap();
+        tokio::task::yield_now().await;  // let new unload task register sleep at T=20
+        tokio::time::advance(Duration::from_secs(20)).await;
+        tokio::task::yield_now().await;
+
+        assert!(t.ctx_is_loaded().await, "ctx должен быть загружен через 20с после последнего вызова");
+
+        tokio::time::advance(Duration::from_secs(11)).await;
+        tokio::task::yield_now().await;
+
+        assert!(!t.ctx_is_loaded().await, "ctx должен выгрузиться через 31с после последнего вызова");
+    }
+
+    // TC-006: ошибка транскрипции не ломает active_count
+    #[tokio::test]
+    async fn tc006_transcription_error_releases_active_count() {
+        let t = LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/model.bin"),
+            factory_fail_run(Arc::new(AtomicUsize::new(0))),
+        );
+
+        let result = t.transcribe(audio()).await;
+        assert!(result.is_err());
+
+        let state = t.state.lock().await;
+        assert_eq!(state.active_count, 0, "active_count должен быть 0 после ошибки");
+        assert!(state.unload_handle.is_some(), "таймер выгрузки должен быть запущен");
+    }
+
+    // TC-007: повторный вызов после failed load пробует загрузить снова
+    #[tokio::test]
+    async fn tc007_retries_load_after_failure() {
+        let load_count = Arc::new(AtomicUsize::new(0));
+        let should_fail = Arc::new(AtomicBool::new(true));
+        let t = LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/model.bin"),
+            factory_conditional(load_count.clone(), should_fail.clone()),
+        );
+
+        // Первый вызов: загрузка падает
+        assert!(t.transcribe(audio()).await.is_err());
+        assert_eq!(load_count.load(Ordering::SeqCst), 1);
+        assert!(!t.ctx_is_loaded().await, "ctx должен остаться None после ошибки загрузки");
+
+        // Второй вызов: загрузка успешна
+        should_fail.store(false, Ordering::SeqCst);
+        assert!(t.transcribe(audio()).await.is_ok());
+        assert_eq!(load_count.load(Ordering::SeqCst), 2, "должна быть повторная попытка загрузки");
+    }
+
+    // TC-008: N параллельных завершений → один unload_handle
+    #[tokio::test]
+    async fn tc008_parallel_completions_create_one_timer() {
+        let t = Arc::new(LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/model.bin"),
+            factory_ok(Arc::new(AtomicUsize::new(0))),
+        ));
+
+        let handles: Vec<_> = (0..3)
+            .map(|_| {
+                let t = Arc::clone(&t);
+                tokio::spawn(async move { t.transcribe(audio()).await.unwrap() })
+            })
+            .collect();
+        for h in handles { h.await.unwrap(); }
+
+        let state = t.state.lock().await;
+        assert_eq!(state.active_count, 0);
+        assert!(state.unload_handle.is_some(), "должен быть ровно один активный таймер");
+    }
+
+    // TC-009: Drop при pending-таймере отменяет таймер
+    #[tokio::test(start_paused = true)]
+    async fn tc009_drop_aborts_unload_timer() {
+        let t = LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/model.bin"),
+            factory_ok(Arc::new(AtomicUsize::new(0))),
+        );
+
+        t.transcribe(audio()).await.unwrap();
+        tokio::task::yield_now().await;  // let unload task register its sleep
+        drop(t);
+
+        // Продвигаем время — не должно быть паники или use-after-free
+        tokio::time::advance(Duration::from_secs(31)).await;
+        tokio::task::yield_now().await;
+    }
+
+    // TC-010: new() не делает IO
+    #[test]
+    fn tc010_new_does_not_do_io() {
+        // Конструктор не должен обращаться к диску даже с несуществующим путём
+        let _t = LazyWhisperTranscriber::new(PathBuf::from("/totally/fake/path/model.bin"));
+    }
+}
+
 fn resample(samples: Vec<f32>, from_rate: u32, to_rate: u32) -> anyhow::Result<Vec<f32>> {
     use rubato::{FftFixedIn, Resampler};
 
