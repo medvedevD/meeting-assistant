@@ -22,13 +22,13 @@ fun NewRecordingScreen(root: RootComponent) {
     val state by root.recordingViewModel.state.collectAsState()
     val scope = rememberCoroutineScope()
 
-    // Navigate away when recording is saved.
+    // Navigate away when recording is saved — go straight to protocol generation.
     LaunchedEffect(state) {
         if (state is RecordingUiState.Done) {
             val done = state as RecordingUiState.Done
             root.recordingViewModel.reset()
             root.meetingListViewModel.refresh()
-            root.onMeetingSelected(done.handle.id)
+            root.onGenerateProtocol(done.handle.id, autoStart = true)
         }
     }
 

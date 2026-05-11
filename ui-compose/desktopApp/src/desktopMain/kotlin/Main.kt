@@ -1,4 +1,5 @@
 import WindowPrefs
+import kotlin.system.exitProcess
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
@@ -98,6 +99,7 @@ fun main() {
                 // Let the worker finish its current job; abort after timeout.
                 runBlocking { workerHandle.stopGraceful(WORKER_SHUTDOWN_TIMEOUT_MS.toULong()) }
                 exitApplication()
+                exitProcess(0)
             },
             title = "Meeting Assistant",
             state = windowState,

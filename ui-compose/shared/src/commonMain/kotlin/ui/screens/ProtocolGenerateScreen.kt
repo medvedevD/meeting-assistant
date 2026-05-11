@@ -14,7 +14,7 @@ import viewmodel.GenerateState
 import viewmodel.ProtocolGenerateViewModel
 
 @Composable
-fun ProtocolGenerateScreen(meetingId: String, root: RootComponent) {
+fun ProtocolGenerateScreen(meetingId: String, autoStart: Boolean = false, root: RootComponent) {
     val vm = remember(meetingId) { ProtocolGenerateViewModel(root.meetings) }
     DisposableEffect(vm) { onDispose { vm.onDestroy() } }
 
@@ -30,6 +30,20 @@ fun ProtocolGenerateScreen(meetingId: String, root: RootComponent) {
         templates = runCatching { root.settings.templatesList() }.getOrDefault(emptyList())
         if (selectedTemplate == null) {
             selectedTemplate = templates.firstOrNull()
+        }
+    }
+
+    // Auto-start generation after recording — skip the idle screen.
+    LaunchedEffect(meeting) {
+        val m = meeting ?: return@LaunchedEffect
+        if (autoStart && state is GenerateState.Idle) {
+            vm.generate(
+                meetingId = meetingId,
+                audioPath = m.audioPath,
+                hasTranscript = m.hasTranscript,
+                templateName = selectedTemplate,
+                meetingName = m.name,
+            )
         }
     }
 

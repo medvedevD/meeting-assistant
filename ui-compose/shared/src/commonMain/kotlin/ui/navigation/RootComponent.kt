@@ -14,7 +14,7 @@ import viewmodel.RecordingViewModel
 sealed interface Screen {
     data object MeetingList : Screen
     data class MeetingDetail(val meetingId: String) : Screen
-    data class GenerateProtocol(val meetingId: String) : Screen
+    data class GenerateProtocol(val meetingId: String, val autoStart: Boolean = false) : Screen
     data object NewRecording : Screen
     data object Settings : Screen
     data object Diagnostics : Screen
@@ -44,7 +44,8 @@ class RootComponent(
     }
 
     fun onMeetingSelected(id: String) = navigate(Screen.MeetingDetail(id))
-    fun onGenerateProtocol(meetingId: String) = navigate(Screen.GenerateProtocol(meetingId))
+    fun onGenerateProtocol(meetingId: String, autoStart: Boolean = false) =
+        navigate(Screen.GenerateProtocol(meetingId, autoStart))
     fun onNewRecordingRequested() = navigate(Screen.NewRecording)
     fun onSettingsRequested() = navigate(Screen.Settings)
     fun onDiagnosticsRequested() = navigate(Screen.Diagnostics)

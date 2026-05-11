@@ -51,7 +51,7 @@ private fun ContentPane(root: RootComponent, modifier: Modifier = Modifier) {
         when (val s = screen) {
             is Screen.MeetingList -> MeetingListScreen(root = root)
             is Screen.MeetingDetail -> MeetingDetailScreen(meetingId = s.meetingId, root = root)
-            is Screen.GenerateProtocol -> ProtocolGenerateScreen(meetingId = s.meetingId, root = root)
+            is Screen.GenerateProtocol -> ProtocolGenerateScreen(meetingId = s.meetingId, autoStart = s.autoStart, root = root)
             is Screen.NewRecording -> NewRecordingScreen(root = root)
             is Screen.Settings -> SettingsScreen(root = root)
             is Screen.Diagnostics -> DiagnosticsScreen(root = root)
