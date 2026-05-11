@@ -26,9 +26,9 @@ compose.desktop {
     application {
         mainClass = "MainKt"
 
-        jvmArgs += listOf(
-            "-Drust.target.dir=${rootProject.projectDir.parentFile}/rust/target/debug"
-        )
+        val rustTargetDir = System.getProperty("rust.target.dir")
+            ?: "${rootProject.projectDir.parentFile}/rust/target/debug"
+        jvmArgs += listOf("-Drust.target.dir=$rustTargetDir")
 
         nativeDistributions {
             targetFormats(TargetFormat.Deb)

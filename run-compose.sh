@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build Rust FFI (if needed) and run the Compose Desktop UI.
 #
-# Usage: ./run-compose.sh [--release] [--skip-build]
-#   --release     Use release build of the Rust library
+# Usage: ./run-compose.sh [--debug] [--skip-build]
+#   --debug       Use debug build of the Rust library (default: release)
 #   --skip-build  Skip cargo build (use existing .so)
 
 set -euo pipefail
@@ -11,12 +11,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUST_DIR="$SCRIPT_DIR/rust"
 UI_DIR="$SCRIPT_DIR/ui-compose"
 
-PROFILE="debug"
+PROFILE="release"
 SKIP_BUILD=0
 
 for arg in "$@"; do
     case "$arg" in
-        --release)    PROFILE="release" ;;
+        --debug)      PROFILE="debug" ;;
         --skip-build) SKIP_BUILD=1 ;;
         *) echo "Unknown argument: $arg" >&2; exit 1 ;;
     esac
@@ -25,8 +25,8 @@ done
 BINDINGS_KT="$UI_DIR/shared/src/desktopMain/kotlin/uniffi/meeting_assistant_ffi/meeting_assistant_ffi.kt"
 
 if [[ $SKIP_BUILD -eq 0 ]]; then
-    RELEASE_FLAG=""
-    [[ "$PROFILE" == "release" ]] && RELEASE_FLAG="--release"
+    RELEASE_FLAG="--release"
+    [[ "$PROFILE" == "debug" ]] && RELEASE_FLAG=""
     echo "→ Building Rust workspace ($PROFILE)..."
     cargo build $RELEASE_FLAG --manifest-path "$RUST_DIR/Cargo.toml"
     echo "✓ Rust built"
