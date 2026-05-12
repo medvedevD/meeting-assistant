@@ -765,6 +765,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -799,6 +801,8 @@ internal interface UniffiLib : Library {
     fun uniffi_meeting_assistant_ffi_fn_method_appcore_meeting_rename(`ptr`: Pointer,`meetingId`: RustBuffer.ByValue,`newName`: RustBuffer.ByValue,
     ): Long
     fun uniffi_meeting_assistant_ffi_fn_method_appcore_meetings_list(`ptr`: Pointer,
+    ): Long
+    fun uniffi_meeting_assistant_ffi_fn_method_appcore_models_list(`ptr`: Pointer,
     ): Long
     fun uniffi_meeting_assistant_ffi_fn_method_appcore_open_path(`ptr`: Pointer,`path`: RustBuffer.ByValue,
     ): Long
@@ -964,6 +968,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_meeting_assistant_ffi_checksum_method_appcore_meetings_list(
     ): Short
+    fun uniffi_meeting_assistant_ffi_checksum_method_appcore_models_list(
+    ): Short
     fun uniffi_meeting_assistant_ffi_checksum_method_appcore_open_path(
     ): Short
     fun uniffi_meeting_assistant_ffi_checksum_method_appcore_protocol_generate(
@@ -1008,7 +1014,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_meeting_assistant_ffi_checksum_func_init_core() != 64413.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_meeting_assistant_ffi_checksum_func_start_worker() != 26804.toShort()) {
+    if (lib.uniffi_meeting_assistant_ffi_checksum_func_start_worker() != 63292.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_meeting_assistant_ffi_checksum_func_try_acquire_singleton() != 29345.toShort()) {
@@ -1030,6 +1036,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_meeting_assistant_ffi_checksum_method_appcore_meetings_list() != 50452.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_meeting_assistant_ffi_checksum_method_appcore_models_list() != 49587.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_meeting_assistant_ffi_checksum_method_appcore_open_path() != 43533.toShort()) {
@@ -1483,6 +1492,13 @@ public interface AppCoreInterface {
     
     suspend fun `meetingsList`(): List<MeetingDto>
     
+    /**
+     * Returns all Whisper .bin models found in the default models directory
+     * (~/.local/share/meeting-assistant/models/) plus the directory of the
+     * currently configured model, sorted by file size descending.
+     */
+    suspend fun `modelsList`(): List<ModelInfoDto>
+    
     suspend fun `openPath`(`path`: kotlin.String)
     
     suspend fun `protocolGenerate`(`meetingId`: kotlin.String, `templateName`: kotlin.String?): ProtocolDto
@@ -1710,6 +1726,32 @@ open class AppCore: Disposable, AutoCloseable, AppCoreInterface {
         { future -> UniffiLib.INSTANCE.ffi_meeting_assistant_ffi_rust_future_free_rust_buffer(future) },
         // lift function
         { FfiConverterSequenceTypeMeetingDto.lift(it) },
+        // Error FFI converter
+        AppException.ErrorHandler,
+    )
+    }
+
+    
+    /**
+     * Returns all Whisper .bin models found in the default models directory
+     * (~/.local/share/meeting-assistant/models/) plus the directory of the
+     * currently configured model, sorted by file size descending.
+     */
+    @Throws(AppException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `modelsList`() : List<ModelInfoDto> {
+        return uniffiRustCallAsync(
+        callWithPointer { thisPtr ->
+            UniffiLib.INSTANCE.uniffi_meeting_assistant_ffi_fn_method_appcore_models_list(
+                thisPtr,
+                
+            )
+        },
+        { future, callback, continuation -> UniffiLib.INSTANCE.ffi_meeting_assistant_ffi_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.INSTANCE.ffi_meeting_assistant_ffi_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.INSTANCE.ffi_meeting_assistant_ffi_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterSequenceTypeModelInfoDto.lift(it) },
         // Error FFI converter
         AppException.ErrorHandler,
     )
@@ -2529,6 +2571,46 @@ public object FfiConverterTypeMeetingDto: FfiConverterRustBuffer<MeetingDto> {
 
 
 
+data class ModelInfoDto (
+    var `path`: kotlin.String, 
+    var `name`: kotlin.String, 
+    var `description`: kotlin.String, 
+    var `sizeMb`: kotlin.UInt
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeModelInfoDto: FfiConverterRustBuffer<ModelInfoDto> {
+    override fun read(buf: ByteBuffer): ModelInfoDto {
+        return ModelInfoDto(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ModelInfoDto) = (
+            FfiConverterString.allocationSize(value.`path`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`description`) +
+            FfiConverterUInt.allocationSize(value.`sizeMb`)
+    )
+
+    override fun write(value: ModelInfoDto, buf: ByteBuffer) {
+            FfiConverterString.write(value.`path`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`description`, buf)
+            FfiConverterUInt.write(value.`sizeMb`, buf)
+    }
+}
+
+
+
 data class PathInfoDto (
     var `path`: kotlin.String, 
     var `exists`: kotlin.Boolean, 
@@ -2674,7 +2756,8 @@ data class SettingsDto (
      */
     var `anthropicApiKey`: kotlin.String?, 
     var `recording`: RecordingPrefsDto, 
-    var `defaultTemplate`: kotlin.String?
+    var `defaultTemplate`: kotlin.String?, 
+    var `transcriber`: TranscriberPrefsDto
 ) {
     
     companion object
@@ -2690,6 +2773,7 @@ public object FfiConverterTypeSettingsDto: FfiConverterRustBuffer<SettingsDto> {
             FfiConverterOptionalString.read(buf),
             FfiConverterTypeRecordingPrefsDto.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterTypeTranscriberPrefsDto.read(buf),
         )
     }
 
@@ -2697,7 +2781,8 @@ public object FfiConverterTypeSettingsDto: FfiConverterRustBuffer<SettingsDto> {
             FfiConverterTypeSettingsPathsDto.allocationSize(value.`paths`) +
             FfiConverterOptionalString.allocationSize(value.`anthropicApiKey`) +
             FfiConverterTypeRecordingPrefsDto.allocationSize(value.`recording`) +
-            FfiConverterOptionalString.allocationSize(value.`defaultTemplate`)
+            FfiConverterOptionalString.allocationSize(value.`defaultTemplate`) +
+            FfiConverterTypeTranscriberPrefsDto.allocationSize(value.`transcriber`)
     )
 
     override fun write(value: SettingsDto, buf: ByteBuffer) {
@@ -2705,6 +2790,7 @@ public object FfiConverterTypeSettingsDto: FfiConverterRustBuffer<SettingsDto> {
             FfiConverterOptionalString.write(value.`anthropicApiKey`, buf)
             FfiConverterTypeRecordingPrefsDto.write(value.`recording`, buf)
             FfiConverterOptionalString.write(value.`defaultTemplate`, buf)
+            FfiConverterTypeTranscriberPrefsDto.write(value.`transcriber`, buf)
     }
 }
 
@@ -2745,6 +2831,51 @@ public object FfiConverterTypeSettingsPathsDto: FfiConverterRustBuffer<SettingsP
             FfiConverterOptionalString.write(value.`db`, buf)
             FfiConverterOptionalString.write(value.`meetingsDir`, buf)
             FfiConverterOptionalString.write(value.`prompts`, buf)
+    }
+}
+
+
+
+data class TranscriberPrefsDto (
+    /**
+     * BCP-47 language code ("ru", "en") or "auto".
+     */
+    var `language`: kotlin.String, 
+    /**
+     * Beam size. 1 = Greedy (fastest), 2–5 = BeamSearch (higher quality).
+     */
+    var `beamSize`: kotlin.UInt, 
+    /**
+     * CPU threads for inference. 0 = auto (physical cores).
+     */
+    var `nThreads`: kotlin.UInt
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTranscriberPrefsDto: FfiConverterRustBuffer<TranscriberPrefsDto> {
+    override fun read(buf: ByteBuffer): TranscriberPrefsDto {
+        return TranscriberPrefsDto(
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TranscriberPrefsDto) = (
+            FfiConverterString.allocationSize(value.`language`) +
+            FfiConverterUInt.allocationSize(value.`beamSize`) +
+            FfiConverterUInt.allocationSize(value.`nThreads`)
+    )
+
+    override fun write(value: TranscriberPrefsDto, buf: ByteBuffer) {
+            FfiConverterString.write(value.`language`, buf)
+            FfiConverterUInt.write(value.`beamSize`, buf)
+            FfiConverterUInt.write(value.`nThreads`, buf)
     }
 }
 
@@ -3059,6 +3190,34 @@ public object FfiConverterSequenceTypeMeetingDto: FfiConverterRustBuffer<List<Me
 
 
 
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeModelInfoDto: FfiConverterRustBuffer<List<ModelInfoDto>> {
+    override fun read(buf: ByteBuffer): List<ModelInfoDto> {
+        val len = buf.getInt()
+        return List<ModelInfoDto>(len) {
+            FfiConverterTypeModelInfoDto.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ModelInfoDto>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeModelInfoDto.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ModelInfoDto>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeModelInfoDto.write(it, buf)
+        }
+    }
+}
+
+
+
+
 
 
 
@@ -3086,6 +3245,8 @@ public object FfiConverterSequenceTypeMeetingDto: FfiConverterRustBuffer<List<Me
         /**
          * Start the background worker that processes transcription jobs from the DB queue.
          * Returns a `WorkerHandle`. Call `stop_graceful()` on shutdown for clean teardown.
+         *
+         * Also triggers warm preload of the Whisper model so the first transcription has no cold start.
          */
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
      suspend fun `startWorker`(`core`: AppCore) : WorkerHandle {

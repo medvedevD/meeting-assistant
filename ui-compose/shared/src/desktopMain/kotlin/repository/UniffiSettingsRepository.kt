@@ -1,12 +1,15 @@
 package repository
 
+import domain.ModelInfo
 import domain.RecordingPrefs
 import domain.Settings
 import domain.SettingsPaths
+import domain.TranscriberPrefs
 import uniffi.meeting_assistant_ffi.AppCore
 import uniffi.meeting_assistant_ffi.RecordingPrefsDto
 import uniffi.meeting_assistant_ffi.SettingsDto
 import uniffi.meeting_assistant_ffi.SettingsPathsDto
+import uniffi.meeting_assistant_ffi.TranscriberPrefsDto
 
 class UniffiSettingsRepository(private val core: AppCore) : SettingsRepository {
 
@@ -25,6 +28,11 @@ class UniffiSettingsRepository(private val core: AppCore) : SettingsRepository {
                 echoCancel = dto.recording.echoCancel,
             ),
             defaultTemplate = dto.defaultTemplate,
+            transcriber = TranscriberPrefs(
+                language = dto.transcriber.language,
+                beamSize = dto.transcriber.beamSize.toInt(),
+                nThreads = dto.transcriber.nThreads.toInt(),
+            ),
         )
     }
 
@@ -43,10 +51,25 @@ class UniffiSettingsRepository(private val core: AppCore) : SettingsRepository {
                     echoCancel = settings.recording.echoCancel,
                 ),
                 defaultTemplate = settings.defaultTemplate,
+                transcriber = TranscriberPrefsDto(
+                    language = settings.transcriber.language,
+                    beamSize = settings.transcriber.beamSize.toUInt(),
+                    nThreads = settings.transcriber.nThreads.toUInt(),
+                ),
             )
         )
     }
 
     override suspend fun templatesList(): List<String> =
         core.templatesList()
+
+    override suspend fun modelsList(): List<ModelInfo> =
+        core.modelsList().map { dto ->
+            ModelInfo(
+                path = dto.path,
+                name = dto.name,
+                description = dto.description,
+                sizeMb = dto.sizeMb.toInt(),
+            )
+        }
 }

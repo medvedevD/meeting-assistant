@@ -16,9 +16,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import domain.ModelInfo
 import domain.RecordingPrefs
 import domain.Settings
 import domain.SettingsPaths
+import domain.TranscriberPrefs
 import kotlinx.coroutines.launch
 import ui.navigation.RootComponent
 
@@ -26,6 +28,7 @@ import ui.navigation.RootComponent
 fun SettingsScreen(root: RootComponent) {
     var settings by remember { mutableStateOf<Settings?>(null) }
     var templates by remember { mutableStateOf<List<String>>(emptyList()) }
+    var models by remember { mutableStateOf<List<ModelInfo>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -34,6 +37,7 @@ fun SettingsScreen(root: RootComponent) {
         try {
             settings = root.settings.get()
             templates = root.settings.templatesList()
+            models = root.settings.modelsList()
         } finally {
             loading = false
         }
@@ -58,6 +62,7 @@ fun SettingsScreen(root: RootComponent) {
                     SettingsForm(
                         settings = s,
                         templates = templates,
+                        models = models,
                         onSave = { updated ->
                             scope.launch {
                                 try {
@@ -97,6 +102,7 @@ private fun SettingsToolbar(onBack: () -> Unit) {
 private fun SettingsForm(
     settings: Settings,
     templates: List<String>,
+    models: List<ModelInfo>,
     onSave: (Settings) -> Unit,
 ) {
     // API
@@ -106,6 +112,13 @@ private fun SettingsForm(
 
     // Paths
     var modelPath by remember(settings) { mutableStateOf(settings.paths.model ?: "") }
+    var modelDropdownExpanded by remember { mutableStateOf(false) }
+    var showCustomModelPath by remember { mutableStateOf(false) }
+    LaunchedEffect(models) {
+        if (models.isNotEmpty() && modelPath.isNotEmpty() && models.none { it.path == modelPath }) {
+            showCustomModelPath = true
+        }
+    }
     var dbPath by remember(settings) { mutableStateOf(settings.paths.db ?: "") }
     var meetingsDir by remember(settings) { mutableStateOf(settings.paths.meetingsDir ?: "") }
     var promptsDir by remember(settings) { mutableStateOf(settings.paths.prompts ?: "") }
@@ -117,6 +130,11 @@ private fun SettingsForm(
     // Template
     var defaultTemplate by remember(settings) { mutableStateOf(settings.defaultTemplate) }
     var templateExpanded by remember { mutableStateOf(false) }
+
+    // Transcriber
+    var transcLang by remember(settings) { mutableStateOf(settings.transcriber.language) }
+    var transcBeamSize by remember(settings) { mutableStateOf(settings.transcriber.beamSize) }
+    var transcThreads by remember(settings) { mutableStateOf(settings.transcriber.nThreads) }
 
     // Validation
     fun String.isValidPath() = isBlank() || startsWith("/") || startsWith("~")
@@ -223,6 +241,88 @@ private fun SettingsForm(
             }
         }
 
+        // ── Транскрипция ─────────────────────────────────────────────────────
+        Spacer(Modifier.height(8.dp))
+        SectionHeader("Транскрипция")
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Язык",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                transcLanguages.forEachIndexed { index, (value, label) ->
+                    SegmentedButton(
+                        shape = SegmentedButtonDefaults.itemShape(index, transcLanguages.size),
+                        selected = transcLang == value,
+                        onClick = { transcLang = value },
+                    ) { Text(label) }
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "Точность распознавания",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    transcBeamSize.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Slider(
+                value = transcBeamSize.toFloat(),
+                onValueChange = { transcBeamSize = it.toInt() },
+                valueRange = 1f..5f,
+                steps = 3,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                when (transcBeamSize) {
+                    1    -> "Самый быстрый режим. Берёт первый подходящий вариант."
+                    2    -> "Сравнивает 2 варианта расшифровки, выбирает лучший."
+                    3    -> "Сравнивает 3 варианта. Баланс скорости и точности."
+                    4    -> "Сравнивает 4 варианта. Заметно медленнее, точнее."
+                    else -> "Сравнивает 5 вариантов. Максимальная точность, ~5x медленнее чем 1."
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "CPU потоки",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    if (transcThreads == 0) "Авто" else transcThreads.toString(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Slider(
+                value = transcThreads.toFloat(),
+                onValueChange = { transcThreads = it.toInt() },
+                valueRange = 0f..16f,
+                steps = 15,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
         // ── Пути ────────────────────────────────────────────────────────────
         Spacer(Modifier.height(8.dp))
         SectionHeader("Хранилище")
@@ -233,7 +333,66 @@ private fun SettingsForm(
         Spacer(Modifier.height(8.dp))
         SectionHeader("Модель")
 
-        PathField(value = modelPath, onValueChange = { modelPath = it }, label = "Путь к модели Whisper (.bin)")
+        if (models.isEmpty()) {
+            PathField(value = modelPath, onValueChange = { modelPath = it }, label = "Путь к модели Whisper (.bin)")
+        } else {
+            val selectedModel = models.find { it.path == modelPath }
+            ExposedDropdownMenuBox(
+                expanded = modelDropdownExpanded,
+                onExpandedChange = { modelDropdownExpanded = it },
+            ) {
+                OutlinedTextField(
+                    value = when {
+                        selectedModel != null -> "${selectedModel.name}  ·  ${selectedModel.sizeMb} MB"
+                        showCustomModelPath   -> "Другой путь…"
+                        else                 -> "Не выбрана"
+                    },
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Модель Whisper") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelDropdownExpanded) },
+                    modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
+                )
+                ExposedDropdownMenu(
+                    expanded = modelDropdownExpanded,
+                    onDismissRequest = { modelDropdownExpanded = false },
+                ) {
+                    models.forEach { model ->
+                        DropdownMenuItem(
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        "${model.name}  ·  ${model.sizeMb} MB",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                    Text(
+                                        model.description,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                modelPath = model.path
+                                showCustomModelPath = false
+                                modelDropdownExpanded = false
+                            },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Другой путь…", style = MaterialTheme.typography.bodyMedium) },
+                        onClick = {
+                            showCustomModelPath = true
+                            modelDropdownExpanded = false
+                        },
+                    )
+                }
+            }
+            if (showCustomModelPath) {
+                Spacer(Modifier.height(4.dp))
+                PathField(value = modelPath, onValueChange = { modelPath = it }, label = "Путь к модели Whisper (.bin)")
+            }
+        }
         PathField(value = promptsDir, onValueChange = { promptsDir = it }, label = "Папка промптов")
 
         // ── Save ────────────────────────────────────────────────────────────
@@ -257,6 +416,7 @@ private fun SettingsForm(
                         anthropicApiKey = updatedApiKey,
                         recording = RecordingPrefs(source = recSource, echoCancel = echoCancel),
                         defaultTemplate = defaultTemplate,
+                        transcriber = TranscriberPrefs(language = transcLang, beamSize = transcBeamSize, nThreads = transcThreads),
                     )
                 )
             },
@@ -298,3 +458,10 @@ private val audioSources = listOf(
     "system" to "Система",
     "mixed"  to "Оба",
 )
+
+private val transcLanguages = listOf(
+    "ru"   to "Русский",
+    "en"   to "English",
+    "auto" to "Авто",
+)
+
