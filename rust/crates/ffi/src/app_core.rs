@@ -9,6 +9,7 @@ use meeting_core::ports::{AudioCapture, JobRepo, LlmProvider, MeetingFileStore, 
 use meeting_adapters::{
     AnthropicProvider, CpalAudioCapture, Db, FileTemplateLoader, FsMeetingFileStore,
     JsonSettingsStore, LazyWhisperTranscriber, SqliteJobRepo, SqliteMeetingRepo,
+    TranscriberPrefs,
 };
 use crate::types::{AppConfig, AppError, FfiResult};
 
@@ -56,19 +57,21 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for RingMakeWriter {
 /// Central application object. Created once by Kotlin, passed to all FFI calls.
 #[derive(uniffi::Object)]
 pub struct AppCore {
-    pub(crate) transcriber:   Arc<dyn Transcriber>,
-    pub(crate) meeting_repo:  Arc<dyn MeetingRepo>,
-    pub(crate) audio_capture: Arc<dyn AudioCapture>,
-    pub(crate) job_repo:      Arc<dyn JobRepo>,
-    pub(crate) llm:           Arc<dyn LlmProvider>,
-    pub(crate) templates:     Arc<dyn TemplateLoader>,
-    pub(crate) settings:      Arc<JsonSettingsStore>,
-    pub(crate) file_store:    Arc<dyn MeetingFileStore>,
-    pub(crate) meetings_dir:  PathBuf,
-    pub(crate) model_path:    PathBuf,
-    pub(crate) db_path:       PathBuf,
-    pub(crate) prompts_dir:   PathBuf,
-    pub(crate) log_buffer:    LogBuffer,
+    pub(crate) transcriber:      Arc<dyn Transcriber>,
+    /// Direct reference to the lazy transcriber for runtime prefs updates.
+    pub(crate) lazy_transcriber: Arc<LazyWhisperTranscriber>,
+    pub(crate) meeting_repo:     Arc<dyn MeetingRepo>,
+    pub(crate) audio_capture:    Arc<dyn AudioCapture>,
+    pub(crate) job_repo:         Arc<dyn JobRepo>,
+    pub(crate) llm:              Arc<dyn LlmProvider>,
+    pub(crate) templates:        Arc<dyn TemplateLoader>,
+    pub(crate) settings:         Arc<JsonSettingsStore>,
+    pub(crate) file_store:       Arc<dyn MeetingFileStore>,
+    pub(crate) meetings_dir:     PathBuf,
+    pub(crate) model_path:       PathBuf,
+    pub(crate) db_path:          PathBuf,
+    pub(crate) prompts_dir:      PathBuf,
+    pub(crate) log_buffer:       LogBuffer,
 }
 
 // ── WorkerHandle ──────────────────────────────────────────────────────────────
@@ -229,7 +232,9 @@ pub fn init_core(config: AppConfig) -> Arc<AppCore> {
         default_prompts_dir,
     );
 
-    let transcriber: Arc<dyn Transcriber> = Arc::new(LazyWhisperTranscriber::new(model_path.clone()));
+    let prefs = TranscriberPrefs::new(s.transcriber.language.clone(), s.transcriber.beam_size, s.transcriber.n_threads);
+    let lazy_transcriber = Arc::new(LazyWhisperTranscriber::new(model_path.clone(), prefs));
+    let transcriber: Arc<dyn Transcriber> = Arc::clone(&lazy_transcriber) as Arc<dyn Transcriber>;
 
     let db = Db::open(&db_path).expect("failed to open database");
     let meeting_repo: Arc<dyn MeetingRepo> = Arc::new(SqliteMeetingRepo(Arc::clone(&db)));
@@ -242,6 +247,7 @@ pub fn init_core(config: AppConfig) -> Arc<AppCore> {
 
     Arc::new(AppCore {
         transcriber,
+        lazy_transcriber,
         meeting_repo,
         audio_capture,
         job_repo,
@@ -259,8 +265,18 @@ pub fn init_core(config: AppConfig) -> Arc<AppCore> {
 
 /// Start the background worker that processes transcription jobs from the DB queue.
 /// Returns a `WorkerHandle`. Call `stop_graceful()` on shutdown for clean teardown.
+///
+/// Also triggers warm preload of the Whisper model so the first transcription has no cold start.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn start_worker(core: Arc<AppCore>) -> Arc<WorkerHandle> {
+    // Warm preload runs concurrently with worker startup — non-blocking.
+    let lazy = Arc::clone(&core.lazy_transcriber);
+    tokio::spawn(async move {
+        if let Err(e) = lazy.ensure_loaded().await {
+            tracing::warn!("warm preload failed: {e}");
+        }
+    });
+
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let worker = meeting_adapters::Worker::new(
         Arc::clone(&core.job_repo),
@@ -307,7 +323,7 @@ fn xdg_documents_dir() -> PathBuf {
         })
 }
 
-fn xdg_data_dir() -> PathBuf {
+pub(crate) fn xdg_data_dir() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| {

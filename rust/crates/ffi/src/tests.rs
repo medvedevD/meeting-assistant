@@ -75,6 +75,11 @@ mod dto_roundtrip {
                 echo_cancel: true,
             },
             default_template: Some("standup".into()),
+            transcriber: TranscriberPrefsDto {
+                language: "ru".into(),
+                beam_size: 3,
+                n_threads: 4,
+            },
         });
     }
 
@@ -93,6 +98,11 @@ mod dto_roundtrip {
                 echo_cancel: false,
             },
             default_template: None,
+            transcriber: TranscriberPrefsDto {
+                language: "auto".into(),
+                beam_size: 5,
+                n_threads: 0,
+            },
         });
     }
 

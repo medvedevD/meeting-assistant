@@ -85,6 +85,16 @@ pub struct RecordingPrefsDto {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct TranscriberPrefsDto {
+    /// BCP-47 language code ("ru", "en") or "auto".
+    pub language: String,
+    /// Beam size. 1 = Greedy (fastest), 2–5 = BeamSearch (higher quality).
+    pub beam_size: u32,
+    /// CPU threads for inference. 0 = auto (physical cores).
+    pub n_threads: u32,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
 pub struct SettingsDto {
     pub paths: SettingsPathsDto,
     /// None = key not exposed (settings_get never returns it).
@@ -93,6 +103,7 @@ pub struct SettingsDto {
     pub anthropic_api_key: Option<String>,
     pub recording: RecordingPrefsDto,
     pub default_template: Option<String>,
+    pub transcriber: TranscriberPrefsDto,
 }
 
 // ── Diagnostics ───────────────────────────────────────────────────────────────
@@ -131,6 +142,16 @@ pub struct DiagnosticsDto {
     pub has_anthropic_key: bool,
     pub ffmpeg_ok: bool,
     pub logs: Vec<String>,
+}
+
+// ── Models ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ModelInfoDto {
+    pub path: String,
+    pub name: String,
+    pub description: String,
+    pub size_mb: u32,
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
