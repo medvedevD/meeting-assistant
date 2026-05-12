@@ -11,6 +11,28 @@ pub struct PersistedSettings {
     pub anthropic_api_key: Option<String>,
     pub recording: RecordingPrefs,
     pub default_template: Option<String>,
+    #[serde(default)]
+    pub transcriber: PersistedTranscriberPrefs,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedTranscriberPrefs {
+    /// BCP-47 language code or "auto". Default: "ru".
+    pub language: String,
+    /// Beam size for decoding. 1 = Greedy (fastest), 2–5 = BeamSearch. Default: 1.
+    #[serde(default = "default_beam_size")]
+    pub beam_size: u32,
+    /// CPU threads for inference. 0 = auto (physical cores). Default: 0.
+    #[serde(default)]
+    pub n_threads: u32,
+}
+
+fn default_beam_size() -> u32 { 1 }
+
+impl Default for PersistedTranscriberPrefs {
+    fn default() -> Self {
+        Self { language: "ru".into(), beam_size: 1, n_threads: 0 }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
