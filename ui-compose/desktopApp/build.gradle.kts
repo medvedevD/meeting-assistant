@@ -26,14 +26,105 @@ compose.desktop {
     application {
         mainClass = "MainKt"
 
+        // Dev: передаём путь к .so через JVM property (используется как fallback в Main.kt)
         val rustTargetDir = System.getProperty("rust.target.dir")
-            ?: "${rootProject.projectDir.parentFile}/rust/target/debug"
+            ?: "${rootProject.projectDir.parentFile}/rust/target/release"
         jvmArgs += listOf("-Drust.target.dir=$rustTargetDir")
 
         nativeDistributions {
-            targetFormats(TargetFormat.Deb)
+            // Native libs кладём в resources/<os>/ — Compose Desktop включает их в бандл
+            appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
+
+            targetFormats(TargetFormat.Deb, TargetFormat.Msi, TargetFormat.Dmg)
             packageName = "meeting-assistant"
-            packageVersion = "0.1.0"
+            packageVersion = System.getProperty("app.version") ?: "1.0.0"
+            description = "AI-powered meeting assistant"
+            vendor = "Meeting Assistant"
+            copyright = "© 2025 Meeting Assistant"
+
+            linux {
+                iconFile.set(project.file("src/desktopMain/resources/icon.png"))
+                packageName = "meeting-assistant"
+                debMaintainer = "codemedvedev@gmail.com"
+                menuGroup = "Productivity"
+                appCategory = "Utility"
+            }
+
+            windows {
+                iconFile.set(project.file("src/desktopMain/resources/icon.ico"))
+                menuGroup = "Meeting Assistant"
+                // НЕ МЕНЯТЬ после первого релиза — используется для upgrade detection
+                upgradeUuid = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
+                perUserInstall = true
+                shortcut = true
+            }
+
+            macOS {
+                iconFile.set(project.file("src/desktopMain/resources/icon.icns"))
+                bundleID = "com.meeting-assistant.app"
+                minimumSystemVersion = "12.0"
+                // codesign/notarization — отложено (нет Apple Developer ID)
+            }
         }
+    }
+}
+
+// Пути к native libs (передаются через -Drust.target.dir или дефолтный release)
+val nativeLibsRustDir: String = System.getProperty("rust.target.dir")
+    ?: "${project.projectDir.parentFile.parentFile}/rust/target/release"
+
+// DefaultTask вместо Copy — иначе Gradle пропускает задачу как NO-SOURCE при отсутствии файла,
+// и doFirst (с проверкой существования) никогда не вызывается.
+tasks.register("copyNativeLibLinux") {
+    val src = File(nativeLibsRustDir, "libmeeting_assistant_ffi.so")
+    val dst = project.layout.projectDirectory.dir("resources/linux")
+    doFirst {
+        require(src.exists()) {
+            "libmeeting_assistant_ffi.so not found at $src\nRun: ./build-ffi.sh"
+        }
+    }
+    doLast {
+        copy { from(src); into(dst) }
+    }
+}
+
+tasks.register("copyNativeLibWindows") {
+    val src = File(nativeLibsRustDir, "meeting_assistant_ffi.dll")
+    val dst = project.layout.projectDirectory.dir("resources/windows")
+    doFirst {
+        require(src.exists()) {
+            "meeting_assistant_ffi.dll not found at $src\nRun: cargo build --release -p ffi"
+        }
+    }
+    doLast {
+        copy { from(src); into(dst) }
+    }
+}
+
+tasks.register("copyNativeLibMacos") {
+    val src = File(nativeLibsRustDir, "libmeeting_assistant_ffi.dylib")
+    val dst = project.layout.projectDirectory.dir("resources/macos")
+    doFirst {
+        require(src.exists()) {
+            "libmeeting_assistant_ffi.dylib not found at $src\nRun: cargo build --release -p ffi"
+        }
+    }
+    doLast {
+        copy { from(src); into(dst) }
+    }
+}
+
+// ВАЖНО: внутри afterEvaluate — Compose Desktop регистрирует packaging-задачи в afterEvaluate.
+// tasks.named() вне afterEvaluate бросит UnknownTaskException.
+// tasks.findByName() безопаснее чем tasks.named() — не падает если таск не зарегистрирован на данной ОС.
+afterEvaluate {
+    listOf("packageDeb", "packageReleaseDeb").forEach { name ->
+        tasks.findByName(name)?.dependsOn("copyNativeLibLinux")
+    }
+    listOf("packageMsi", "packageReleaseMsi").forEach { name ->
+        tasks.findByName(name)?.dependsOn("copyNativeLibWindows")
+    }
+    listOf("packageDmg", "packageReleaseDmg").forEach { name ->
+        tasks.findByName(name)?.dependsOn("copyNativeLibMacos")
     }
 }
