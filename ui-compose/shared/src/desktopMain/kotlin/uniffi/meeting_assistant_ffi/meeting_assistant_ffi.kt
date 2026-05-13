@@ -661,6 +661,45 @@ internal open class UniffiForeignFutureStructVoid(
 internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
     fun callback(`callbackData`: Long,`result`: UniffiForeignFutureStructVoid.UniffiByValue,)
 }
+internal interface UniffiCallbackInterfaceModelDownloadCallbackMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`bytesDownloaded`: Long,`totalBytes`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceModelDownloadCallbackMethod1 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceModelDownloadCallbackMethod2 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`message`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+@Structure.FieldOrder("onProgress", "onComplete", "onError", "uniffiFree")
+internal open class UniffiVTableCallbackInterfaceModelDownloadCallback(
+    @JvmField internal var `onProgress`: UniffiCallbackInterfaceModelDownloadCallbackMethod0? = null,
+    @JvmField internal var `onComplete`: UniffiCallbackInterfaceModelDownloadCallbackMethod1? = null,
+    @JvmField internal var `onError`: UniffiCallbackInterfaceModelDownloadCallbackMethod2? = null,
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+) : Structure() {
+    class UniffiByValue(
+        `onProgress`: UniffiCallbackInterfaceModelDownloadCallbackMethod0? = null,
+        `onComplete`: UniffiCallbackInterfaceModelDownloadCallbackMethod1? = null,
+        `onError`: UniffiCallbackInterfaceModelDownloadCallbackMethod2? = null,
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    ): UniffiVTableCallbackInterfaceModelDownloadCallback(`onProgress`,`onComplete`,`onError`,`uniffiFree`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceModelDownloadCallback) {
+        `onProgress` = other.`onProgress`
+        `onComplete` = other.`onComplete`
+        `onError` = other.`onError`
+        `uniffiFree` = other.`uniffiFree`
+    }
+
+}
+
+
+
+
+
+
+
+
 
 
 
@@ -777,6 +816,7 @@ internal interface UniffiLib : Library {
             .also { lib: UniffiLib ->
                 uniffiCheckContractApiVersion(lib)
                 uniffiCheckApiChecksums(lib)
+                uniffiCallbackInterfaceModelDownloadCallback.register(lib)
                 }
         }
         
@@ -832,8 +872,14 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_meeting_assistant_ffi_fn_method_workerhandle_stop_graceful(`ptr`: Pointer,`timeoutMs`: Long,
     ): Long
+    fun uniffi_meeting_assistant_ffi_fn_init_callback_vtable_modeldownloadcallback(`vtable`: UniffiVTableCallbackInterfaceModelDownloadCallback,
+    ): Unit
+    fun uniffi_meeting_assistant_ffi_fn_func_download_model(`core`: Pointer,`url`: RustBuffer.ByValue,`destPath`: RustBuffer.ByValue,`callback`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_meeting_assistant_ffi_fn_func_init_core(`config`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Pointer
+    fun uniffi_meeting_assistant_ffi_fn_func_model_exists(`core`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_meeting_assistant_ffi_fn_func_start_worker(`core`: Pointer,
     ): Long
     fun uniffi_meeting_assistant_ffi_fn_func_try_acquire_singleton(uniffi_out_err: UniffiRustCallStatus, 
@@ -950,7 +996,11 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_meeting_assistant_ffi_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_meeting_assistant_ffi_checksum_func_download_model(
+    ): Short
     fun uniffi_meeting_assistant_ffi_checksum_func_init_core(
+    ): Short
+    fun uniffi_meeting_assistant_ffi_checksum_func_model_exists(
     ): Short
     fun uniffi_meeting_assistant_ffi_checksum_func_start_worker(
     ): Short
@@ -994,6 +1044,12 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_meeting_assistant_ffi_checksum_method_workerhandle_stop_graceful(
     ): Short
+    fun uniffi_meeting_assistant_ffi_checksum_method_modeldownloadcallback_on_progress(
+    ): Short
+    fun uniffi_meeting_assistant_ffi_checksum_method_modeldownloadcallback_on_complete(
+    ): Short
+    fun uniffi_meeting_assistant_ffi_checksum_method_modeldownloadcallback_on_error(
+    ): Short
     fun ffi_meeting_assistant_ffi_uniffi_contract_version(
     ): Int
     
@@ -1011,7 +1067,13 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
+    if (lib.uniffi_meeting_assistant_ffi_checksum_func_download_model() != 20476.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_meeting_assistant_ffi_checksum_func_init_core() != 64413.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_meeting_assistant_ffi_checksum_func_model_exists() != 48222.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_meeting_assistant_ffi_checksum_func_start_worker() != 63292.toShort()) {
@@ -1075,6 +1137,15 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_meeting_assistant_ffi_checksum_method_workerhandle_stop_graceful() != 40007.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_meeting_assistant_ffi_checksum_method_modeldownloadcallback_on_progress() != 40573.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_meeting_assistant_ffi_checksum_method_modeldownloadcallback_on_complete() != 32592.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_meeting_assistant_ffi_checksum_method_modeldownloadcallback_on_error() != 36704.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -2946,6 +3017,120 @@ public object FfiConverterTypeAppError : FfiConverterRustBuffer<AppException> {
 
 
 
+
+public interface ModelDownloadCallback {
+    
+    fun `onProgress`(`bytesDownloaded`: kotlin.Long, `totalBytes`: kotlin.Long)
+    
+    fun `onComplete`()
+    
+    fun `onError`(`message`: kotlin.String)
+    
+    companion object
+}
+
+// Magic number for the Rust proxy to call using the same mechanism as every other method,
+// to free the callback once it's dropped by Rust.
+internal const val IDX_CALLBACK_FREE = 0
+// Callback return codes
+internal const val UNIFFI_CALLBACK_SUCCESS = 0
+internal const val UNIFFI_CALLBACK_ERROR = 1
+internal const val UNIFFI_CALLBACK_UNEXPECTED_ERROR = 2
+
+/**
+ * @suppress
+ */
+public abstract class FfiConverterCallbackInterface<CallbackInterface: Any>: FfiConverter<CallbackInterface, Long> {
+    internal val handleMap = UniffiHandleMap<CallbackInterface>()
+
+    internal fun drop(handle: Long) {
+        handleMap.remove(handle)
+    }
+
+    override fun lift(value: Long): CallbackInterface {
+        return handleMap.get(value)
+    }
+
+    override fun read(buf: ByteBuffer) = lift(buf.getLong())
+
+    override fun lower(value: CallbackInterface) = handleMap.insert(value)
+
+    override fun allocationSize(value: CallbackInterface) = 8UL
+
+    override fun write(value: CallbackInterface, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceModelDownloadCallback {
+    internal object `onProgress`: UniffiCallbackInterfaceModelDownloadCallbackMethod0 {
+        override fun callback(`uniffiHandle`: Long,`bytesDownloaded`: Long,`totalBytes`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeModelDownloadCallback.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`onProgress`(
+                    FfiConverterLong.lift(`bytesDownloaded`),
+                    FfiConverterLong.lift(`totalBytes`),
+                )
+            }
+            val writeReturn = { _: Unit -> Unit }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+    internal object `onComplete`: UniffiCallbackInterfaceModelDownloadCallbackMethod1 {
+        override fun callback(`uniffiHandle`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeModelDownloadCallback.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`onComplete`(
+                )
+            }
+            val writeReturn = { _: Unit -> Unit }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+    internal object `onError`: UniffiCallbackInterfaceModelDownloadCallbackMethod2 {
+        override fun callback(`uniffiHandle`: Long,`message`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeModelDownloadCallback.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`onError`(
+                    FfiConverterString.lift(`message`),
+                )
+            }
+            val writeReturn = { _: Unit -> Unit }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeModelDownloadCallback.handleMap.remove(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceModelDownloadCallback.UniffiByValue(
+        `onProgress`,
+        `onComplete`,
+        `onError`,
+        uniffiFree,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_meeting_assistant_ffi_fn_init_callback_vtable_modeldownloadcallback(vtable)
+    }
+}
+
+/**
+ * The ffiConverter which transforms the Callbacks in to handles to pass to Rust.
+ *
+ * @suppress
+ */
+public object FfiConverterTypeModelDownloadCallback: FfiConverterCallbackInterface<ModelDownloadCallback>()
+
+
+
+
 /**
  * @suppress
  */
@@ -3223,6 +3408,21 @@ public object FfiConverterSequenceTypeModelInfoDto: FfiConverterRustBuffer<List<
 
 
         /**
+         * Download a model from `url` to `dest_path` (or core.model_path if None).
+         * Reports progress via `callback` on each chunk.
+         * Uses atomic write: downloads to .tmp, renames on success.
+         * Blocking — call from a background thread (Kotlin: Dispatchers.IO).
+         */
+    @Throws(AppException::class) fun `downloadModel`(`core`: AppCore, `url`: kotlin.String, `destPath`: kotlin.String?, `callback`: ModelDownloadCallback)
+        = 
+    uniffiRustCallWithError(AppException) { _status ->
+    UniffiLib.INSTANCE.uniffi_meeting_assistant_ffi_fn_func_download_model(
+        FfiConverterTypeAppCore.lower(`core`),FfiConverterString.lower(`url`),FfiConverterOptionalString.lower(`destPath`),FfiConverterTypeModelDownloadCallback.lower(`callback`),_status)
+}
+    
+    
+
+        /**
          * Initialize the application core.
          *
          * Priority order for each path/key:
@@ -3237,6 +3437,18 @@ public object FfiConverterSequenceTypeModelInfoDto: FfiConverterRustBuffer<List<
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_meeting_assistant_ffi_fn_func_init_core(
         FfiConverterTypeAppConfig.lower(`config`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Returns true if the default model file exists on disk.
+         */ fun `modelExists`(`core`: AppCore): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_meeting_assistant_ffi_fn_func_model_exists(
+        FfiConverterTypeAppCore.lower(`core`),_status)
 }
     )
     }

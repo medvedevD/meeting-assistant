@@ -1,5 +1,6 @@
 import WindowPrefs
 import kotlin.system.exitProcess
+import androidx.compose.runtime.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
@@ -18,9 +19,11 @@ import repository.UniffiRecordingRepository
 import repository.UniffiSettingsRepository
 import ui.AppContent
 import ui.navigation.RootComponent
+import ui.screens.ModelDownloadScreen
 import uniffi.meeting_assistant_ffi.AppConfig
 import uniffi.meeting_assistant_ffi.AppException
 import uniffi.meeting_assistant_ffi.initCore
+import uniffi.meeting_assistant_ffi.modelExists
 import uniffi.meeting_assistant_ffi.startWorker
 import uniffi.meeting_assistant_ffi.tryAcquireSingleton
 import java.io.File
@@ -28,13 +31,29 @@ import javax.swing.JOptionPane
 
 private const val WORKER_SHUTDOWN_TIMEOUT_MS = 5_000L
 
-fun main() {
+private fun resolveNativeLibPath(): String {
+    val osName = System.getProperty("os.name").lowercase()
+    val libName = when {
+        "linux" in osName -> "libmeeting_assistant_ffi.so"
+        "windows" in osName -> "meeting_assistant_ffi.dll"
+        "mac" in osName -> "libmeeting_assistant_ffi.dylib"
+        else -> error("Unsupported OS: $osName")
+    }
+    // Production bundle: set by Compose Desktop jpackage launcher
+    val resourcesDir = System.getProperty("compose.application.resources.dir")
+    if (resourcesDir != null) {
+        return File(resourcesDir, libName).absolutePath
+    }
+    // Development: passed via -Drust.target.dir (set in build.gradle.kts jvmArgs)
     val rustTargetDir = System.getProperty("rust.target.dir")
-        ?: error("Pass -Drust.target.dir=<path> to locate libmeeting_assistant_ffi.so")
-    val soPath = File(rustTargetDir, "libmeeting_assistant_ffi.so").absolutePath
-    System.setProperty("uniffi.component.meeting_assistant_ffi.libraryOverride", soPath)
+        ?: error("Pass -Drust.target.dir=<path> to locate $libName")
+    return File(rustTargetDir, libName).absolutePath
+}
 
-    // Single-instance check before loading the Whisper model.
+fun main() {
+    val libPath = resolveNativeLibPath()
+    System.setProperty("uniffi.component.meeting_assistant_ffi.libraryOverride", libPath)
+
     try {
         tryAcquireSingleton()
     } catch (e: AppException.General) {
@@ -47,7 +66,6 @@ fun main() {
         return
     }
 
-    // Init AppCore on IO thread (loads Whisper model from disk).
     val core = runBlocking {
         withContext(Dispatchers.IO) {
             initCore(AppConfig(
@@ -61,6 +79,7 @@ fun main() {
     }
 
     val workerHandle = runBlocking { startWorker(core) }
+    val hasModel = modelExists(core)
 
     val lifecycle = LifecycleRegistry()
 
@@ -96,7 +115,6 @@ fun main() {
                     y = (pos as? WindowPosition.Absolute)?.y?.value?.toInt(),
                 )
                 lifecycle.stop()
-                // Let the worker finish its current job; abort after timeout.
                 runBlocking { workerHandle.stopGraceful(WORKER_SHUTDOWN_TIMEOUT_MS.toULong()) }
                 exitApplication()
                 exitProcess(0)
@@ -104,7 +122,19 @@ fun main() {
             title = "Meeting Assistant",
             state = windowState,
         ) {
-            AppContent(root = root)
+            if (!hasModel) {
+                var modelDownloaded by remember { mutableStateOf(false) }
+                if (modelDownloaded) {
+                    AppContent(root = root)
+                } else {
+                    ModelDownloadScreen(
+                        core = core,
+                        onDownloadComplete = { modelDownloaded = true },
+                    )
+                }
+            } else {
+                AppContent(root = root)
+            }
         }
     }
 }
