@@ -9,6 +9,9 @@ pub mod templates;
 pub mod settings;
 pub mod diagnostics;
 
+mod model_download;
+pub use model_download::*;
+
 mod tests;
 
 // Re-export the public API surface so Kotlin bindings pick everything up.

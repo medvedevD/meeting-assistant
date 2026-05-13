@@ -18,6 +18,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing   = { workspace = true }
 tracing-subscriber = { workspace = true }
+reqwest    = { workspace = true }
+futures-util = "0.3"
 parking_lot = "0.12"
 cpal = "0.15"
 fs2 = "0.4"
