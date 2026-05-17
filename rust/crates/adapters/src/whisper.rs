@@ -148,8 +148,11 @@ fn load_wav_as_mono_f32(path: &Path) -> anyhow::Result<Vec<f32>> {
     let mono = if spec.channels == 1 {
         samples_f32
     } else {
-        whisper_rs::convert_stereo_to_mono_audio(&samples_f32)
-            .map_err(|e| anyhow::anyhow!("stereo→mono failed: {e}"))?
+        // whisper-rs 0.16: writes into a caller-provided buffer (len = input/2)
+        let mut out = vec![0f32; samples_f32.len() / 2];
+        whisper_rs::convert_stereo_to_mono_audio(&samples_f32, &mut out)
+            .map_err(|e| anyhow::anyhow!("stereo→mono failed: {e}"))?;
+        out
     };
 
     if spec.sample_rate == WHISPER_SAMPLE_RATE {
