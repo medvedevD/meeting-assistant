@@ -50,6 +50,20 @@ private fun resolveNativeLibPath(): String {
     return File(rustTargetDir, libName).absolutePath
 }
 
+/**
+ * Resolves the LLM prompt templates directory. Mirrors [resolveNativeLibPath]:
+ * the jpackage bundle exposes `resources/common/prompts` via the resources dir;
+ * dev runs receive the repo `prompts/` path via -Dmeeting.prompts.dir.
+ */
+private fun resolvePromptsDir(): String? {
+    // Production bundle: set by Compose Desktop jpackage launcher
+    System.getProperty("compose.application.resources.dir")?.let {
+        return File(it, "prompts").absolutePath
+    }
+    // Development: passed via -Dmeeting.prompts.dir (set in build.gradle.kts jvmArgs)
+    return System.getProperty("meeting.prompts.dir")
+}
+
 fun main() {
     val libPath = resolveNativeLibPath()
     System.setProperty("uniffi.component.meeting_assistant_ffi.libraryOverride", libPath)
@@ -72,7 +86,7 @@ fun main() {
                 modelPath = null,
                 dbPath = null,
                 meetingsDir = null,
-                promptsDir = null,
+                promptsDir = resolvePromptsDir(),
                 anthropicApiKey = null,
             ))
         }

@@ -31,6 +31,9 @@ compose.desktop {
             ?: "${rootProject.projectDir.parentFile}/rust/target/release"
         jvmArgs += listOf("-Drust.target.dir=$rustTargetDir")
 
+        // Dev: путь к prompts/ репозитория (в бандле берётся из resources — см. copyPrompts)
+        jvmArgs += listOf("-Dmeeting.prompts.dir=${rootProject.projectDir.parentFile}/prompts")
+
         // ProGuard обфусцирует com.sun.jna.* и uniffi-биндинги, которые JNA
         // резолвит по именам через JNI (Native.initIDs ищет `dispose` и т.п.) →
         // UnsatisfiedLinkError на старте release-сборки. Отключаем минификацию:
@@ -122,17 +125,34 @@ tasks.register("copyNativeLibMacos") {
     }
 }
 
+// Промпт-шаблоны OS-независимы → resources/common (Compose Desktop кладёт их
+// в один resources.dir, рядом с native libs). Без этого packaged-сборка падает
+// с "template error: No such file or directory" при открытии окна настроек.
+tasks.register("copyPrompts") {
+    val src = File("${rootProject.projectDir.parentFile}/prompts")
+    val dst = project.layout.projectDirectory.dir("resources/common/prompts")
+    doFirst {
+        require(src.exists() && src.isDirectory) {
+            "prompts/ not found at $src"
+        }
+    }
+    doLast {
+        project.delete(dst)                       // выкидываем устаревшие шаблоны
+        copy { from(src); into(dst) }
+    }
+}
+
 // ВАЖНО: внутри afterEvaluate — Compose Desktop регистрирует packaging-задачи в afterEvaluate.
 // tasks.named() вне afterEvaluate бросит UnknownTaskException.
 // tasks.findByName() безопаснее чем tasks.named() — не падает если таск не зарегистрирован на данной ОС.
 afterEvaluate {
     listOf("packageDeb", "packageReleaseDeb").forEach { name ->
-        tasks.findByName(name)?.dependsOn("copyNativeLibLinux")
+        tasks.findByName(name)?.dependsOn("copyNativeLibLinux", "copyPrompts")
     }
     listOf("packageMsi", "packageReleaseMsi").forEach { name ->
-        tasks.findByName(name)?.dependsOn("copyNativeLibWindows")
+        tasks.findByName(name)?.dependsOn("copyNativeLibWindows", "copyPrompts")
     }
     listOf("packageDmg", "packageReleaseDmg").forEach { name ->
-        tasks.findByName(name)?.dependsOn("copyNativeLibMacos")
+        tasks.findByName(name)?.dependsOn("copyNativeLibMacos", "copyPrompts")
     }
 }

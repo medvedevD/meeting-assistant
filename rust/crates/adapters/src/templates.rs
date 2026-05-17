@@ -28,9 +28,16 @@ impl TemplateLoader for FileTemplateLoader {
     }
 
     async fn list_names(&self) -> Result<Vec<String>, CoreError> {
-        let mut entries = tokio::fs::read_dir(&self.dir)
-            .await
-            .map_err(|e| CoreError::Template(e.to_string()))?;
+        let mut entries = match tokio::fs::read_dir(&self.dir).await {
+            Ok(entries) => entries,
+            // A missing prompts dir is a misconfiguration, not a fatal error:
+            // return no templates so the UI (e.g. the settings window) stays usable.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                tracing::warn!("prompts dir not found: {} — no templates available", self.dir.display());
+                return Ok(Vec::new());
+            }
+            Err(e) => return Err(CoreError::Template(e.to_string())),
+        };
 
         let mut names = Vec::new();
         while let Some(entry) = entries.next_entry().await.map_err(|e| CoreError::Template(e.to_string()))? {
@@ -72,6 +79,12 @@ mod tests {
         let loader = FileTemplateLoader::new(tmp.path());
         let result = loader.load("НеСуществует").await.unwrap();
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_names_returns_empty_when_dir_missing() {
+        let loader = FileTemplateLoader::new("/no/such/prompts/dir");
+        assert_eq!(loader.list_names().await.unwrap(), Vec::<String>::new());
     }
 
     #[tokio::test]
