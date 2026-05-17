@@ -101,20 +101,15 @@ fn run_whisper(ctx: &WhisperContext, audio_path: &PathBuf, prefs: &TranscriberPr
     let rtf = infer_ms as f64 / 1000.0 / audio_duration_s;
     bench_log(&format!("inference_done  infer_ms={infer_ms} rtf={rtf:.2}"));
 
-    let num_segments = state.full_n_segments()
-        .map_err(|e| CoreError::Transcription(e.to_string()))?;
-
     let mut segments = Vec::new();
     let mut full_text = String::new();
 
-    for i in 0..num_segments {
-        let text = state.full_get_segment_text(i)
+    for seg in state.as_iter() {
+        let text = seg.to_str_lossy()
             .map_err(|e| CoreError::Transcription(e.to_string()))?;
-        // whisper timestamps are in centiseconds → convert to ms
-        let start_ms = state.full_get_segment_t0(i)
-            .map_err(|e| CoreError::Transcription(e.to_string()))? as u64 * 10;
-        let end_ms = state.full_get_segment_t1(i)
-            .map_err(|e| CoreError::Transcription(e.to_string()))? as u64 * 10;
+        // whisper timestamps are in centiseconds → convert to ms (clamp negatives to 0)
+        let start_ms = seg.start_timestamp().max(0) as u64 * 10;
+        let end_ms = seg.end_timestamp().max(0) as u64 * 10;
 
         full_text.push_str(&text);
         segments.push(Segment { start_ms, end_ms, text: text.trim().to_string() });
