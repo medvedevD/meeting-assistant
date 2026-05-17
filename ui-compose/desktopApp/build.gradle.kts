@@ -31,6 +31,14 @@ compose.desktop {
             ?: "${rootProject.projectDir.parentFile}/rust/target/release"
         jvmArgs += listOf("-Drust.target.dir=$rustTargetDir")
 
+        // ProGuard обфусцирует com.sun.jna.* и uniffi-биндинги, которые JNA
+        // резолвит по именам через JNI (Native.initIDs ищет `dispose` и т.п.) →
+        // UnsatisfiedLinkError на старте release-сборки. Отключаем минификацию:
+        // экономия размера ничтожна на фоне whisper-библиотек и моделей.
+        buildTypes.release.proguard {
+            isEnabled.set(false)
+        }
+
         nativeDistributions {
             // Native libs кладём в resources/<os>/ — Compose Desktop включает их в бандл
             appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
