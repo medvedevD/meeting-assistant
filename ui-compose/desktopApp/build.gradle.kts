@@ -155,4 +155,17 @@ afterEvaluate {
     listOf("packageDmg", "packageReleaseDmg").forEach { name ->
         tasks.findByName(name)?.dependsOn("copyNativeLibMacos", "copyPrompts")
     }
+
+    // `run`/`runDistributable` resolve the native lib from the prepared resources
+    // dir (Main.kt reads compose.application.resources.dir). prepareAppResources
+    // only copies what's already in resources/<os>/, so the OS-specific native
+    // lib must be staged there first — wire it here so dev runs work, not just packaging.
+    val os = org.gradle.internal.os.OperatingSystem.current()
+    val nativeLibCopyTask = when {
+        os.isMacOsX -> "copyNativeLibMacos"
+        os.isWindows -> "copyNativeLibWindows"
+        else -> "copyNativeLibLinux"
+    }
+    tasks.findByName("prepareAppResources")
+        ?.dependsOn(nativeLibCopyTask, "copyPrompts")
 }

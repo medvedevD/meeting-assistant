@@ -22,6 +22,11 @@ for arg in "$@"; do
     esac
 done
 
+case "$(uname -s)" in
+    Darwin) LIB_EXT="dylib" ;;
+    *)      LIB_EXT="so" ;;
+esac
+
 BINDINGS_KT="$UI_DIR/shared/src/desktopMain/kotlin/uniffi/meeting_assistant_ffi/meeting_assistant_ffi.kt"
 
 if [[ $SKIP_BUILD -eq 0 ]]; then
@@ -32,16 +37,16 @@ if [[ $SKIP_BUILD -eq 0 ]]; then
     echo "✓ Rust built"
 
     echo "→ Regenerating Kotlin bindings..."
-    TMPDIR="/tmp/uniffi-bindings-$$"
+    BINDINGS_TMP="$(mktemp -d)"
     (cd "$RUST_DIR" && cargo run --bin uniffi-bindgen -- \
-        generate --library "target/$PROFILE/libmeeting_assistant_ffi.so" \
-        --language kotlin --out-dir "$TMPDIR" 2>&1 | grep -v "ktlint")
-    cp "$TMPDIR/uniffi/meeting_assistant_ffi/meeting_assistant_ffi.kt" "$BINDINGS_KT"
-    rm -rf "$TMPDIR"
+        generate --library "target/$PROFILE/libmeeting_assistant_ffi.$LIB_EXT" \
+        --language kotlin --out-dir "$BINDINGS_TMP" 2>&1 | grep -v "ktlint")
+    cp "$BINDINGS_TMP/uniffi/meeting_assistant_ffi/meeting_assistant_ffi.kt" "$BINDINGS_KT"
+    rm -rf "$BINDINGS_TMP"
     echo "✓ Bindings updated"
 fi
 
-SO="$RUST_DIR/target/$PROFILE/libmeeting_assistant_ffi.so"
+SO="$RUST_DIR/target/$PROFILE/libmeeting_assistant_ffi.$LIB_EXT"
 if [[ ! -f "$SO" ]]; then
     echo "Error: $SO not found. Run without --skip-build." >&2
     exit 1

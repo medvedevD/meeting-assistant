@@ -21,8 +21,13 @@ for arg in "$@"; do
     esac
 done
 
+case "$(uname -s)" in
+    Darwin) LIB_EXT="dylib" ;;
+    *)      LIB_EXT="so" ;;
+esac
+
 echo "→ Building Rust workspace ($PROFILE)..."
 cargo build "${CARGO_FLAGS[@]}" --manifest-path "$RUST_DIR/Cargo.toml"
 
-SO="$RUST_DIR/target/$PROFILE/libmeeting_assistant_ffi.so"
+SO="$RUST_DIR/target/$PROFILE/libmeeting_assistant_ffi.$LIB_EXT"
 echo "✓ $SO"
