@@ -2,6 +2,9 @@ name: Release
 
 on:
   push:
+    # TEMP: CI iteration on the rewrite branch — remove before merge to main.
+    branches:
+      - feat/compose-desktop-rewrite
     tags:
       - 'v*'
   workflow_dispatch:
