@@ -4,7 +4,8 @@ use anyhow::{Context, Result};
 use meeting_core::ports::{AudioCapture, JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber};
 use meeting_adapters::{
     AnthropicProvider, CpalAudioCapture, Db, FileTemplateLoader, FsMeetingFileStore,
-    SqliteJobRepo, SqliteMeetingRepo, WhisperTranscriber, Worker,
+    LazyWhisperTranscriber, SqliteJobRepo, SqliteMeetingRepo, TranscriberPrefs,
+    WhisperTranscriber, Worker,
 };
 
 pub struct Container {
@@ -36,6 +37,49 @@ impl Container {
         let audio_capture = Arc::new(CpalAudioCapture::new());
 
         Ok(Self { transcriber, meeting_repo, job_repo, llm, templates, audio_capture, recordings_dir })
+    }
+
+    /// Sidecar wiring — mirrors the `ffi/app_core.rs` adapter graph rather than
+    /// [`Container::new_desktop`]:
+    ///
+    /// - **Lazy** Whisper transcriber (model loaded on first transcription, not
+    ///   at boot) so the sidecar comes up fast and the stdout handshake is not
+    ///   blocked on a multi-hundred-MB model load.
+    /// - **Tolerant of a missing `ANTHROPIC_API_KEY`** — protocol generation
+    ///   fails later with a clear error instead of preventing the whole sidecar
+    ///   (recording, transcription, listing) from ever starting.
+    ///
+    /// `new_desktop` (used by the legacy `Serve` subcommand) is left unchanged.
+    pub fn new_sidecar(
+        model_path: &Path,
+        db_path: &Path,
+        prompts_dir: &Path,
+        recordings_dir: PathBuf,
+    ) -> Result<Self> {
+        let prefs = TranscriberPrefs::new("ru", 1, 0);
+        let transcriber: Arc<dyn Transcriber> =
+            Arc::new(LazyWhisperTranscriber::new(model_path.to_path_buf(), prefs));
+
+        let db = Db::open(db_path)?;
+        let meeting_repo = Arc::new(SqliteMeetingRepo(Arc::clone(&db)));
+        let job_repo = Arc::new(SqliteJobRepo(Arc::clone(&db)));
+
+        // Missing key is non-fatal here (unlike `new_desktop`): the sidecar must
+        // still serve recording/transcription/listing without it.
+        let api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
+        let llm = Arc::new(AnthropicProvider::new(api_key));
+        let templates = Arc::new(FileTemplateLoader::new(prompts_dir));
+        let audio_capture = Arc::new(CpalAudioCapture::new());
+
+        Ok(Self {
+            transcriber,
+            meeting_repo,
+            job_repo,
+            llm,
+            templates,
+            audio_capture,
+            recordings_dir,
+        })
     }
 
     /// Spawn the background worker. Returns the join handle and a sender to request

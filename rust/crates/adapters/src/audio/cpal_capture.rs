@@ -40,6 +40,16 @@ impl AudioCapture for CpalAudioCapture {
     ) -> Result<(), CoreError> {
         let path = output_path.to_path_buf();
         let id = session_id.to_string();
+
+        // macOS: surface a denied Screen-Recording grant at *start* time
+        // (clear, actionable, with a Settings deep link) instead of only when
+        // the user stops the recording. System/Mixed go through
+        // ScreenCaptureKit; Mic uses cpal and needs no Screen Recording right.
+        #[cfg(target_os = "macos")]
+        if matches!(source, CaptureSource::System | CaptureSource::Mixed) {
+            super::sck_capture::preflight().map_err(CoreError::Recording)?;
+        }
+
         let (stop_tx, stop_rx) = std::sync::mpsc::sync_channel(1);
 
         let thread = thread::Builder::new()
@@ -225,7 +235,13 @@ fn record_system(output_path: PathBuf, stop_rx: std::sync::mpsc::Receiver<()>) -
     record_single(device, output_path, stop_rx)
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+/// macOS system audio via ScreenCaptureKit (audio-only). See `sck_capture`.
+#[cfg(target_os = "macos")]
+fn record_system(output_path: PathBuf, stop_rx: std::sync::mpsc::Receiver<()>) -> Result<(), String> {
+    super::sck_capture::record_system(output_path, stop_rx)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 fn record_system(_output_path: PathBuf, _stop_rx: std::sync::mpsc::Receiver<()>) -> Result<(), String> {
     Err("system audio capture is not yet supported on this platform".to_string())
 }
@@ -344,7 +360,7 @@ fn record_mixed(output_path: PathBuf, stop_rx: std::sync::mpsc::Receiver<()>, ec
     mic_thread.join().map_err(|_| "mic thread panicked".to_string())??;
     sys_thread.join().map_err(|_| "sys thread panicked".to_string())??;
 
-    ffmpeg_mix(&mic_tmp, &sys_tmp, &output_path, echo_cancel)?;
+    ffmpeg_mix(&mic_tmp, &sys_tmp, &output_path, &build_mix_filter(echo_cancel))?;
 
     let _ = std::fs::remove_file(&mic_tmp);
     let _ = std::fs::remove_file(&sys_tmp);
@@ -370,16 +386,52 @@ pub(crate) fn build_mix_filter(echo_cancel: bool) -> String {
     }
 }
 
-/// Mix two WAV files into one using ffmpeg with noise reduction on the mic track.
-#[cfg(target_os = "linux")]
-fn ffmpeg_mix(a: &PathBuf, b: &PathBuf, out: &PathBuf, echo_cancel: bool) -> Result<(), String> {
-    let filter = build_mix_filter(echo_cancel);
+/// macOS mic+system mix filter.
+///
+/// On macOS the system stream (ScreenCaptureKit) and the mic stream (cpal) run
+/// on **independent audio clocks** that drift apart over a long meeting — the
+/// risk section-05 calls out and the drift spike quantifies. Unlike the Linux
+/// path (mic + parec, same PulseAudio clock domain), a plain `amix` here would
+/// accumulate skew. So each input is first passed through
+/// `aresample=async=1`, which continuously stretches/squeezes the stream to
+/// its presentation timestamps — i.e. the *timestamp-align/resample* option
+/// from section-05, applied before mixing rather than punting to a
+/// bounded-drift caveat. `min_hard_comp=0.100` bounds any single correction so
+/// speech is not pitch-warped audibly.
+///
+/// In the AEC branch the system track is consumed twice (echo reference +
+/// final mix), so it is `asplit`; a filter-graph pad cannot be reused
+/// (unlike a raw input specifier such as `[1:a]`).
+#[cfg(target_os = "macos")]
+pub(crate) fn build_mix_filter_macos(echo_cancel: bool) -> String {
+    let resync = "aresample=async=1:min_hard_comp=0.100:first_pts=0";
+    if echo_cancel {
+        format!(
+            "[0:a]{resync}[mic_r];\
+             [1:a]{resync},asplit=2[sys_a][sys_b];\
+             [mic_r][sys_a]anlms=order=512:mu=0.05:eps=1[mic_aec];\
+             [mic_aec]highpass=f=80,dynaudnorm[mic_clean];\
+             [mic_clean][sys_b]amix=inputs=2:duration=longest:normalize=0"
+        )
+    } else {
+        format!(
+            "[0:a]{resync}[mic_r];\
+             [1:a]{resync}[sys_r];\
+             [mic_r]highpass=f=80,dynaudnorm[mic_clean];\
+             [mic_clean][sys_r]amix=inputs=2:duration=longest:normalize=0"
+        )
+    }
+}
+
+/// Mix two WAV files into one using ffmpeg with the given `-filter_complex`.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn ffmpeg_mix(a: &PathBuf, b: &PathBuf, out: &PathBuf, filter: &str) -> Result<(), String> {
     let status = std::process::Command::new("ffmpeg")
         .args([
             "-y",
             "-i", a.to_str().unwrap(),
             "-i", b.to_str().unwrap(),
-            "-filter_complex", &filter,
+            "-filter_complex", filter,
             out.to_str().unwrap(),
         ])
         .stdout(std::process::Stdio::null())
@@ -394,7 +446,51 @@ fn ffmpeg_mix(a: &PathBuf, b: &PathBuf, out: &PathBuf, echo_cancel: bool) -> Res
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+/// macOS mixed capture: mic via cpal + system via ScreenCaptureKit, each to a
+/// separate temp WAV, then mixed by ffmpeg with clock-drift compensation
+/// (`build_mix_filter_macos`). The two backends run on independent audio
+/// clocks; the resample-to-PTS in the mix filter aligns them.
+#[cfg(target_os = "macos")]
+fn record_mixed(output_path: PathBuf, stop_rx: std::sync::mpsc::Receiver<()>, echo_cancel: bool) -> Result<(), String> {
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let mic_tmp = output_path.with_extension("mic_tmp.wav");
+    let sys_tmp = output_path.with_extension("sys_tmp.wav");
+
+    let (mic_stop_tx, mic_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
+    let (sys_stop_tx, sys_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
+
+    let mic_path = mic_tmp.clone();
+    let sys_path = sys_tmp.clone();
+
+    let mic_thread = thread::spawn(move || {
+        let host = cpal::default_host();
+        let mic = default_mic(&host)?;
+        record_single(mic, mic_path, mic_stop_rx)
+    });
+
+    let sys_thread = thread::spawn(move || {
+        super::sck_capture::record_system(sys_path, sys_stop_rx)
+    });
+
+    let _ = stop_rx.recv();
+    let _ = mic_stop_tx.send(());
+    let _ = sys_stop_tx.send(());
+
+    mic_thread.join().map_err(|_| "mic thread panicked".to_string())??;
+    sys_thread.join().map_err(|_| "sys thread panicked".to_string())??;
+
+    ffmpeg_mix(&mic_tmp, &sys_tmp, &output_path, &build_mix_filter_macos(echo_cancel))?;
+
+    let _ = std::fs::remove_file(&mic_tmp);
+    let _ = std::fs::remove_file(&sys_tmp);
+
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 fn record_mixed(_output_path: PathBuf, _stop_rx: std::sync::mpsc::Receiver<()>, _echo_cancel: bool) -> Result<(), String> {
     Err("mixed audio capture is not yet supported on this platform".to_string())
 }
@@ -536,5 +632,119 @@ mod tests {
         let f = build_mix_filter(true);
         assert!(f.contains("highpass=f=80"), "missing highpass in AEC filter: {f}");
         assert!(f.contains("dynaudnorm"), "missing dynaudnorm in AEC filter: {f}");
+    }
+
+    // ── build_mix_filter_macos — pure function (clock-drift compensation) ────
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_mix_filter_resamples_both_inputs_to_pts() {
+        for aec in [false, true] {
+            let f = build_mix_filter_macos(aec);
+            // Both the mic ([0:a]) and system ([1:a]) inputs must be
+            // resampled-to-PTS to absorb the independent-clock drift.
+            assert_eq!(
+                f.matches("aresample=async=1").count(),
+                2,
+                "both inputs must be drift-compensated: {f}"
+            );
+            assert!(f.contains("highpass=f=80"), "missing mic cleanup: {f}");
+            assert!(f.contains("dynaudnorm"), "missing mic normaliser: {f}");
+            assert!(
+                f.contains("amix=inputs=2:duration=longest"),
+                "missing final mix: {f}"
+            );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_mix_filter_aec_splits_system_pad_for_reuse() {
+        let f = build_mix_filter_macos(true);
+        assert!(f.contains("anlms=order=512"), "AEC must subtract system: {f}");
+        // A filter-graph pad cannot be consumed twice; the system track is
+        // needed by both anlms and amix, so it must be asplit.
+        assert!(f.contains("asplit=2"), "system pad must be split for reuse: {f}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_mix_filter_no_aec_has_no_anlms_or_split() {
+        let f = build_mix_filter_macos(false);
+        assert!(!f.contains("anlms"), "non-AEC must not echo-cancel: {f}");
+        assert!(!f.contains("asplit"), "non-AEC needs no pad split: {f}");
+    }
+
+    // ── 60-min mic↔system clock-drift spike (section-05) ────────────────────
+    //
+    // Captures macOS system audio (ScreenCaptureKit) and the mic (cpal)
+    // simultaneously, then measures how far the two independent audio clocks
+    // drift apart. Silence is fine — both backends emit continuous frames, so
+    // sample counts reveal the drift without any audio playing.
+    //
+    // Run the real spike (needs Screen-Recording permission granted):
+    //   MA_DRIFT_SPIKE_SECS=3600 cargo test --manifest-path rust/Cargo.toml \
+    //     -p meeting-adapters drift_spike_system_vs_mic -- --ignored --nocapture
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    #[ignore = "60-min hardware spike; needs Screen-Recording permission"]
+    async fn drift_spike_system_vs_mic() {
+        use std::time::{Duration, Instant};
+        use tempfile::tempdir;
+
+        let secs: u64 = std::env::var("MA_DRIFT_SPIKE_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(60);
+
+        let dir = tempdir().unwrap();
+        let sys_path = dir.path().join("sys.wav");
+        let mic_path = dir.path().join("mic.wav");
+        let cap = CpalAudioCapture::new();
+
+        cap.start_session("sys", &sys_path, CaptureSource::System, false)
+            .await
+            .expect("system capture failed to start (Screen-Recording permission?)");
+        cap.start_session("mic", &mic_path, CaptureSource::Mic, false)
+            .await
+            .expect("mic capture failed to start");
+
+        // Steady-state window: start/stop transients add a near-equal offset
+        // to both streams and largely cancel in the relative metric.
+        let t0 = Instant::now();
+        tokio::time::sleep(Duration::from_secs(secs)).await;
+        let wall = t0.elapsed().as_secs_f64();
+
+        cap.stop_session("sys").await.expect("system stop failed");
+        cap.stop_session("mic").await.expect("mic stop failed");
+
+        let (sys_frames, sys_rate) = wav_frames_and_rate(&sys_path);
+        let (mic_frames, mic_rate) = wav_frames_and_rate(&mic_path);
+
+        let sys_secs = sys_frames as f64 / sys_rate as f64;
+        let mic_secs = mic_frames as f64 / mic_rate as f64;
+        let drift_ms = (sys_secs - mic_secs) * 1000.0;
+        let drift_ppm = if wall > 0.0 { drift_ms / 1000.0 / wall * 1e6 } else { 0.0 };
+        let proj_60min_ms = if wall > 0.0 { drift_ms / wall * 3600.0 } else { 0.0 };
+
+        println!("──── macOS mic↔system clock-drift spike ────");
+        println!("wall window:        {wall:.3} s");
+        println!("system (SCK):       {sys_frames} frames @ {sys_rate} Hz = {sys_secs:.3} s");
+        println!("mic (cpal):         {mic_frames} frames @ {mic_rate} Hz = {mic_secs:.3} s");
+        println!("drift (sys - mic):  {drift_ms:.1} ms  ({drift_ppm:.1} ppm)");
+        println!("projected over 60m: {proj_60min_ms:.1} ms");
+        println!("────────────────────────────────────────────");
+
+        assert!(sys_frames > 0, "system WAV captured no audio (TCC denied?)");
+        assert!(mic_frames > 0, "mic WAV captured no audio");
+    }
+
+    #[cfg(target_os = "macos")]
+    fn wav_frames_and_rate(path: &std::path::Path) -> (u64, u32) {
+        let r = hound::WavReader::open(path)
+            .unwrap_or_else(|e| panic!("cannot open {}: {e}", path.display()));
+        let spec = r.spec();
+        // `duration()` is samples *per channel* = frames.
+        (u64::from(r.duration()), spec.sample_rate)
     }
 }

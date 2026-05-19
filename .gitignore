@@ -24,3 +24,8 @@ ARCHITECTURE.md
 
 # Internal docs (not ready for repo)
 docs/
+
+# Qt migration build outputs (section-07 packaging)
+/dist/
+/qt-app/build/
+/qt-app/build-*-pkg/

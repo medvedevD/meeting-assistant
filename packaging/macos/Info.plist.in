@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Info.plist template for MeetingAssistant.app.
+
+  Consumed by CMake via the MACOSX_BUNDLE_INFO_PLIST target property; CMake
+  substitutes the ${MACOSX_BUNDLE_*} variables (see qt-app/CMakeLists.txt).
+  The non-variable keys below are the ones section-05/07 actually require —
+  do not hand-edit them in the generated bundle, edit this template.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+    <key>CFBundleIdentifier</key>
+    <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+    <key>CFBundleName</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+    <key>CFBundleDisplayName</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+    <key>CFBundleVersion</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+    <key>CFBundleIconFile</key>
+    <string>${MACOSX_BUNDLE_ICON_FILE}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+
+    <!-- macOS floor is 13.0: ScreenCaptureKit audio-only capture (section-05). -->
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+
+    <!-- section-05: ScreenCaptureKit triggers the Screen-Recording TCC prompt.
+         Without this key macOS kills the process WITHOUT prompting. The string
+         is user-facing in the consent dialog; keep it honest about audio. -->
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Meeting Assistant records system audio (other participants) for transcription. macOS routes this consent through Screen Recording; no screen content is ever captured.</string>
+
+    <!-- Mic capture path (cpal). -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Meeting Assistant records your microphone so your side of the meeting is transcribed.</string>
+</dict>
+</plist>

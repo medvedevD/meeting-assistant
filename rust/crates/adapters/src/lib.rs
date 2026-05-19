@@ -20,4 +20,4 @@ pub mod templates;
 pub use templates::FileTemplateLoader;
 
 pub mod audio;
-pub use audio::CpalAudioCapture;
+pub use audio::{run_recovery, CpalAudioCapture, RecoveryReport, WavRecovery};

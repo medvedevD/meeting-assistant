@@ -1,4 +1,6 @@
 mod cli;
+// `new_sidecar` is used only by the meeting-server bin.
+#[allow(dead_code)]
 mod container;
 
 use anyhow::Result;
