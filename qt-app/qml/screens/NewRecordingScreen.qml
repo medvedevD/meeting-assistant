@@ -53,6 +53,16 @@ Page {
         stopReq.post("/api/v1/recordings/" + recId + "/stop", {})
     }
 
+    // ScreenCaptureKit guidance includes a stable deep-link to the right
+    // Settings pane (rust/crates/adapters/src/audio/sck_capture.rs).
+    // Its presence in the error string is our permission-error signal.
+    readonly property string screenRecordingSettingsUrl:
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+
+    function isPermissionError(msg) {
+        return msg && msg.indexOf(scr.screenRecordingSettingsUrl) !== -1
+    }
+
     Request {
         id: startReq
         onOk: function (j) {
@@ -62,8 +72,51 @@ Page {
             scr.st = "recording"
         }
         onFail: function (s, e) {
+            if (scr.isPermissionError(e)) {
+                permissionDialog.open()
+                scr.st = "idle"
+                return
+            }
             scr.errorMsg = qsTr("Ошибка старта записи: %1").arg(e)
             scr.st = "error"
+        }
+    }
+
+    Dialog {
+        id: permissionDialog
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 64, 520)
+        title: qsTr("Нужно разрешение macOS")
+        standardButtons: Dialog.NoButton
+
+        contentItem: ColumnLayout {
+            spacing: 12
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                text: qsTr("Для записи системного звука macOS требует разрешение «Запись экрана» (Screen Recording). Несмотря на название, Meeting Assistant записывает только звук и никогда не делает снимки экрана.")
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                opacity: 0.7
+                font.pixelSize: 12
+                text: qsTr("Откройте Системные настройки → Конфиденциальность и безопасность → Запись экрана, включите Meeting Assistant и попробуйте снова. После обновления приложения разрешение может сброситься — тогда его нужно включить повторно.")
+            }
+        }
+
+        footer: DialogButtonBox {
+            Button {
+                text: qsTr("Отмена")
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+            }
+            Button {
+                text: qsTr("Открыть настройки")
+                highlighted: true
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+                onClicked: Qt.openUrlExternally(scr.screenRecordingSettingsUrl)
+            }
         }
     }
 
@@ -270,12 +323,14 @@ Page {
     ColumnLayout {
         visible: scr.st === "error"
         anchors.centerIn: parent
+        width: Math.min(parent.width - 64, 560)
         spacing: 16
         Label {
-            Layout.alignment: Qt.AlignHCenter
+            Layout.fillWidth: true
             text: scr.errorMsg
             color: scr.palette.toolTipText
             wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
         }
         Button {
             Layout.alignment: Qt.AlignHCenter

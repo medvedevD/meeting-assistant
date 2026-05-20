@@ -26,6 +26,7 @@ axum = "0.7"
 clap = { version = "4", features = ["derive", "env"] }
 fs2 = "0.4"
 getrandom = "0.2"
+dirs = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

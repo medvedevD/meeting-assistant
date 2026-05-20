@@ -13,7 +13,24 @@ Item {
 
     property string selectedId: ""
 
-    Component.onCompleted: store.refresh()
+    // AppShell is instantiated eagerly by the StackLayout in Main.qml — well
+    // before the sidecar finishes its handshake/health gate. Refreshing on
+    // Component.onCompleted hits an unconfigured ApiClient. Gate on
+    // api.configured (not sidecar.state): SidecarManager emits stateChanged
+    // *before* the ready() signal that drives ApiClient::configure, so listening
+    // to state would still fire one tick too early.
+    Component.onCompleted: {
+        if (api.configured)
+            store.refresh()
+    }
+
+    Connections {
+        target: api
+        function onConfiguredChanged() {
+            if (api.configured)
+                store.refresh()
+        }
+    }
 
     // ── navigation (always reset to the list root, then push target) ─────────
     function showList() {

@@ -109,7 +109,13 @@ pub fn default_db_path() -> PathBuf {
 }
 
 pub fn default_recordings_dir() -> PathBuf {
-    xdg_cache_dir().join("meeting-assistant/recordings")
+    // User-visible content → OS Documents folder, not a cache dir.
+    // `dirs::document_dir()` resolves XDG user-dirs on Linux, `$HOME/Documents` on macOS,
+    // and `FOLDERID_Documents` on Windows (OneDrive-redirect aware).
+    dirs::document_dir()
+        .or_else(|| dirs::home_dir().map(|h| h.join("Documents")))
+        .expect("cannot resolve user's Documents directory")
+        .join("meeting-assistant")
 }
 
 pub fn default_prompts_dir() -> PathBuf {
@@ -133,11 +139,3 @@ fn xdg_data_dir() -> PathBuf {
         })
 }
 
-fn xdg_cache_dir() -> PathBuf {
-    std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let home = std::env::var_os("HOME").expect("$HOME is not set");
-            PathBuf::from(home).join(".cache")
-        })
-}
