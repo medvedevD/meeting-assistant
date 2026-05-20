@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Canonical dev workflow for the Qt migration (successor to run-compose.sh).
+# Canonical dev workflow.
 #
 # Builds the Rust `meeting-server` sidecar + the Qt GUI, copies the sidecar
 # next to the GUI binary (so SidecarManager finds it via applicationDirPath),

@@ -323,12 +323,9 @@ fn random_token_hex() -> String {
     s
 }
 
-/// Single-instance lock. Same mechanism and **same path**
-/// (`$XDG_DATA_HOME/meeting-assistant/meeting-assistant.lock`) the FFI app uses
-/// (`ffi::app_core::try_acquire_singleton`), reimplemented here because the FFI
-/// crate is a cdylib, not a library dependency. Returns `Ok(false)` if another
-/// live instance holds it. The OS releases the flock on process exit, even on
-/// SIGKILL, so stale lock files are never a problem.
+/// Single-instance lock at `$XDG_DATA_HOME/meeting-assistant/meeting-assistant.lock`.
+/// Returns `Ok(false)` if another live instance holds it. The OS releases the
+/// flock on process exit, even on SIGKILL, so stale lock files are never a problem.
 fn try_acquire_singleton() -> Result<bool> {
     use fs2::FileExt;
     use std::sync::OnceLock;
