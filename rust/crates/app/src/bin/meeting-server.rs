@@ -146,6 +146,24 @@ async fn run(args: Args) -> Result<()> {
         env!("CARGO_PKG_VERSION"),
     );
 
+    // ── Install OS termination handlers BEFORE the handshake ────────────────
+    // Once the handshake is on stdout the parent treats us as live and may
+    // SIGTERM us at any instant. tokio installs the kernel handler when
+    // `signal()` is called (not on first poll), so creating these *now*
+    // replaces SIGTERM's default disposition (instant kill) before we ever
+    // announce readiness. Polling the handler only inside the axum
+    // graceful-shutdown future left a startup window where SIGTERM killed the
+    // sidecar with a signal exit instead of our graceful exit(0) —
+    // section-08's SIGTERM contract test caught exactly this race on Linux CI.
+    #[cfg(unix)]
+    let (mut sig_term, mut sig_int) = {
+        use tokio::signal::unix::{signal, SignalKind};
+        (
+            signal(SignalKind::terminate()).context("install SIGTERM handler")?,
+            signal(SignalKind::interrupt()).context("install SIGINT handler")?,
+        )
+    };
+
     // ── Handshake — MUST be the first bytes on stdout ─────────────────────────
     let handshake = serde_json::json!({
         "ready": true,
@@ -167,8 +185,15 @@ async fn run(args: Args) -> Result<()> {
     spawn_parent_watchdog(&args, std::sync::Arc::clone(&parent_gone));
 
     let shutdown = async move {
+        #[cfg(unix)]
         tokio::select! {
-            _ = os_terminate_signal() => tracing::info!("received termination signal"),
+            _ = sig_term.recv() => tracing::info!("received SIGTERM"),
+            _ = sig_int.recv()  => tracing::info!("received SIGINT"),
+            _ = parent_gone.notified() => tracing::info!("parent process gone"),
+        }
+        #[cfg(not(unix))]
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => tracing::info!("received Ctrl-C"),
             _ = parent_gone.notified() => tracing::info!("parent process gone"),
         }
     };
@@ -189,25 +214,6 @@ async fn run(args: Args) -> Result<()> {
     }
     tracing::info!("graceful shutdown complete");
     std::process::exit(EXIT_OK);
-}
-
-/// Resolves when the OS asks us to terminate (SIGTERM or SIGINT on Unix,
-/// Ctrl-C / Ctrl-Close on Windows).
-async fn os_terminate_signal() {
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{signal, SignalKind};
-        let mut term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
-        let mut int = signal(SignalKind::interrupt()).expect("install SIGINT handler");
-        tokio::select! {
-            _ = term.recv() => {}
-            _ = int.recv() => {}
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = tokio::signal::ctrl_c().await;
-    }
 }
 
 /// Spawns the parent-death watchdog(s). On parent death any watchdog fires
@@ -288,7 +294,11 @@ fn parent_alive(pid: i32) -> bool {
     };
     unsafe {
         let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid as u32);
-        if h.is_null() {
+        // windows-sys' `HANDLE` is `isize` in some resolutions and
+        // `*mut c_void` in others — `.is_null()` only compiles on the latter.
+        // Cast through `isize` so both shapes work; a NULL handle is 0 either
+        // way, which is what `OpenProcess` returns on failure.
+        if (h as isize) == 0 {
             return false; // process no longer exists
         }
         let signaled = WaitForSingleObject(h, 0) == WAIT_OBJECT_0;

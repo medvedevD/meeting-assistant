@@ -66,9 +66,6 @@ jobs:
           version: '6.7.3'
           cache: true
 
-      - name: Install Ninja (portable across all 3 OSes)
-        run: python -m pip install ninja
-
       # ── Build the Rust sidecar (the artefact the Qt smoke spawns) ──────────
       - name: Build meeting-server (release)
         shell: bash
@@ -84,10 +81,14 @@ jobs:
         run: cargo test --release --manifest-path rust/Cargo.toml -p meeting-assistant --test sidecar_contract
 
       # ── Build both: the Qt GUI + the offscreen smoke test ─────────────────
+      # Default per-OS generator (Unix Makefiles on Linux/macOS, Visual Studio
+      # on Windows). `--config Release` / `-C Release` are no-ops for the
+      # single-config generators and required for the VS multi-config one, so
+      # the same recipe works everywhere with no extra build-tool deps.
       - name: Configure qt-app (tests on)
         shell: bash
         run: |
-          cmake -S qt-app -B qt-app/build -G Ninja \
+          cmake -S qt-app -B qt-app/build \
             -DCMAKE_BUILD_TYPE=Release \
             -DMA_BUILD_TESTS=ON \
             -DMA_SMOKE_SIDECAR="$PWD/${{ matrix.sidecar }}" \
@@ -95,9 +96,9 @@ jobs:
 
       - name: Build qt-app (GUI + tst_smoke)
         shell: bash
-        run: cmake --build qt-app/build --parallel
+        run: cmake --build qt-app/build --config Release --parallel
 
       # ── Offscreen Qt boot smoke (handshake+health+fetch+version-mismatch) ──
       - name: Offscreen Qt smoke
         shell: bash
-        run: ctest --test-dir qt-app/build --output-on-failure
+        run: ctest --test-dir qt-app/build -C Release --output-on-failure
