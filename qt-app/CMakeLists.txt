@@ -90,6 +90,11 @@ add_dependencies(meeting-assistant-qt gen_client_protocol)
 
 target_include_directories(meeting-assistant-qt PRIVATE "${_gen_dir}")
 
+# SettingsStore is a QML singleton (decision #12): one shared server-settings
+# cache reachable from any screen as `SettingsStore`.
+set_source_files_properties(qml/SettingsStore.qml PROPERTIES
+    QT_QML_SINGLETON_TYPE TRUE)
+
 qt_add_qml_module(meeting-assistant-qt
     URI MeetingAssistant
     VERSION 1.0
@@ -97,13 +102,21 @@ qt_add_qml_module(meeting-assistant-qt
         qml/Main.qml
         qml/AppShell.qml
         qml/MeetingStore.qml
+        qml/SettingsStore.qml
         qml/Request.qml
         qml/screens/MeetingListScreen.qml
         qml/screens/NewRecordingScreen.qml
         qml/screens/GenerateProtocolScreen.qml
         qml/screens/MeetingDetailScreen.qml
         qml/screens/SettingsScreen.qml
-        qml/screens/DiagnosticsScreen.qml)
+        qml/screens/DiagnosticsScreen.qml
+        qml/screens/settings/WhisperPanel.qml
+        qml/screens/settings/LlmPanel.qml
+        qml/screens/settings/TemplatesPanel.qml
+        qml/screens/settings/StoragePanel.qml
+        qml/screens/settings/RecordingPanel.qml
+        qml/components/PipelineProgress.qml
+        qml/i18n/errors.js)
 
 # Fusion fallback: compiled-in `:/qtquickcontrols2.conf`. Qt Quick Controls
 # reads this at startup; combined with QQuickStyle::setStyle("Fusion") in

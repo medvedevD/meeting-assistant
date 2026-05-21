@@ -26,6 +26,16 @@ QtObject {
         _id = api.post(path, body)
     }
 
+    function put(path, body) {
+        busy = true
+        _id = api.put(path, body)
+    }
+
+    function del(path) {
+        busy = true
+        _id = api.del(path)
+    }
+
     property Connections _conn: Connections {
         target: api
         function onRequestSucceeded(requestId, path, json) {

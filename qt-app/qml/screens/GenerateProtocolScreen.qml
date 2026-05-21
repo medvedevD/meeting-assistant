@@ -7,7 +7,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtCore
+import MeetingAssistant
 
 Page {
     id: scr
@@ -24,10 +24,15 @@ Page {
     property string errorMsg: ""
     property string transcript: ""
 
-    Settings {
-        id: prefs
-        category: "protocol"
-        property string defaultTemplate: ""
+    // Per-generation template override, seeded from the server default
+    // (decision #13). Editing it does NOT change the global default.
+    property string templateName: ""
+    Connections {
+        target: SettingsStore
+        function onLoadedChanged() {
+            if (SettingsStore.loaded && scr.templateName.length === 0)
+                scr.templateName = SettingsStore.defaultTemplate()
+        }
     }
 
     function generate() {
@@ -44,8 +49,8 @@ Page {
     function generateProtocol() {
         st = "generating"
         var body = { "transcript": transcript, "meeting_name": meetingName }
-        if (prefs.defaultTemplate.trim().length > 0)
-            body["template_name"] = prefs.defaultTemplate.trim()
+        if (templateName.trim().length > 0)
+            body["template_name"] = templateName.trim()
         protocolsReq.post("/api/v1/protocols", body)
     }
 
@@ -79,7 +84,11 @@ Page {
         }
     }
 
-    Component.onCompleted: if (autoStart && st === "idle") generate()
+    Component.onCompleted: {
+        if (SettingsStore.loaded) templateName = SettingsStore.defaultTemplate()
+        else SettingsStore.refresh()
+        if (autoStart && st === "idle") generate()
+    }
 
     header: ToolBar {
         RowLayout {
@@ -119,9 +128,9 @@ Page {
             Label { text: qsTr("Шаблон протокола (необязательно)"); opacity: 0.7 }
             TextField {
                 Layout.fillWidth: true
-                text: prefs.defaultTemplate
+                text: scr.templateName
                 placeholderText: qsTr("По умолчанию")
-                onEditingFinished: prefs.defaultTemplate = text
+                onEditingFinished: scr.templateName = text
             }
         }
         Item { Layout.fillHeight: true }

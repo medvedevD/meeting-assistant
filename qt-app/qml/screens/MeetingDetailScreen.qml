@@ -5,6 +5,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import MeetingAssistant
 
 Page {
     id: scr
@@ -18,6 +19,76 @@ Page {
 
     readonly property string protocol: store ? store.protocolFor(meetingId) : ""
     readonly property bool hasProtocol: protocol.length > 0
+
+    // Active reprocess job (transcribe / protocol). Drives the inline progress.
+    property string activeJobId: ""
+    property string actionNote: ""
+
+    function reprocess(kind) {
+        scr.actionNote = ""
+        reprocessReq.post("/api/v1/meetings/" + meetingId + "/reprocess",
+                          { "kind": kind })
+    }
+
+    Request {
+        id: reprocessReq
+        onOk: function (j) { scr.activeJobId = j.job_id }
+        onFail: function (s, e) { scr.actionNote = qsTr("Ошибка: %1").arg(e) }
+    }
+    Request {
+        id: deleteReq
+        onOk: function (j) {
+            scr.store.refresh()
+            scr.shell.showList()
+        }
+        onFail: function (s, e) { scr.actionNote = qsTr("Ошибка удаления: %1").arg(e) }
+    }
+    Request {
+        id: deleteAudioReq
+        onOk: function (j) {
+            scr.actionNote = qsTr("Аудио удалено, транскрипт сохранён.")
+            scr.store.refresh()
+        }
+        onFail: function (s, e) { scr.actionNote = qsTr("Ошибка: %1").arg(e) }
+    }
+
+    Menu {
+        id: actionMenu
+        MenuItem {
+            text: qsTr("Перетранскрибировать")
+            enabled: scr.audioPath.length > 0 && scr.activeJobId.length === 0
+            onTriggered: scr.reprocess("transcribe")
+        }
+        MenuItem {
+            text: qsTr("Перегенерировать протокол")
+            enabled: scr.activeJobId.length === 0
+            onTriggered: scr.reprocess("protocol")
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: qsTr("Удалить аудио (оставить транскрипт)")
+            enabled: scr.audioPath.length > 0
+            onTriggered: deleteAudioReq.del("/api/v1/meetings/" + scr.meetingId + "?mode=audio")
+        }
+        MenuItem {
+            text: qsTr("Удалить встречу")
+            onTriggered: confirmDelete.open()
+        }
+    }
+
+    Dialog {
+        id: confirmDelete
+        modal: true
+        anchors.centerIn: Overlay.overlay
+        title: qsTr("Удалить встречу?")
+        standardButtons: Dialog.Yes | Dialog.No
+        onAccepted: deleteReq.del("/api/v1/meetings/" + scr.meetingId + "?mode=full")
+        Label {
+            width: 360
+            wrapMode: Text.WordWrap
+            text: qsTr("Встреча, её транскрипт, протокол и аудиофайл будут удалены безвозвратно.")
+        }
+    }
 
     header: ToolBar {
         RowLayout {
@@ -46,6 +117,10 @@ Page {
                 text: qsTr("⟳")
                 onClicked: scr.store.refresh()
             }
+            ToolButton {
+                text: qsTr("⋯")
+                onClicked: actionMenu.popup()
+            }
         }
     }
 
@@ -72,6 +147,36 @@ Page {
                 color: scr.palette.highlight
             }
         }
+        // action note (delete-audio result / reprocess errors)
+        Label {
+            visible: scr.actionNote.length > 0
+            Layout.fillWidth: true
+            Layout.leftMargin: 16
+            Layout.rightMargin: 16
+            wrapMode: Text.WordWrap
+            opacity: 0.8
+            text: scr.actionNote
+        }
+
+        // inline reprocess progress (transcribe / protocol regeneration)
+        Pane {
+            visible: scr.activeJobId.length > 0
+            Layout.fillWidth: true
+            Layout.leftMargin: 16
+            Layout.rightMargin: 16
+            PipelineProgress {
+                width: parent.width
+                jobId: scr.activeJobId
+                onOpenSettings: scr.shell.showSettings()
+                onFinished: function (status, job) {
+                    scr.activeJobId = ""
+                    scr.store.refresh()
+                    if (status === "done")
+                        scr.actionNote = qsTr("Готово.")
+                }
+            }
+        }
+
         MenuSeparator { Layout.fillWidth: true }
 
         // protocol present → markdown render

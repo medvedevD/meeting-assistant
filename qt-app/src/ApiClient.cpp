@@ -26,6 +26,14 @@ int ApiClient::post(const QString &path, const QVariantMap &body) {
     return send("POST", path, body, /*hasBody=*/true);
 }
 
+int ApiClient::put(const QString &path, const QVariantMap &body) {
+    return send("PUT", path, body, /*hasBody=*/true);
+}
+
+int ApiClient::del(const QString &path) {
+    return send("DELETE", path, {}, /*hasBody=*/false);
+}
+
 int ApiClient::send(const QByteArray &verb, const QString &path,
                      const QVariantMap &body, bool hasBody) {
     const int id = m_nextId++;

@@ -1,21 +1,66 @@
-// SettingsScreen — partial reimplement (audit). Recording defaults + default
-// template are real inputs to /recordings and /protocols, persisted
-// client-side via QtCore.Settings (shared with NewRecording/Generate).
-// Core-managed keys have no sidecar route → stated honestly, not faked.
+// SettingsScreen — macOS-style category sidebar (ListView) + StackLayout of
+// panels (Phase 5, decision #12/#13). Server-side settings are the single
+// source of truth: the screen pulls the snapshot via the SettingsStore
+// singleton into an editable `draft`, the panels mutate it, and a single
+// "Сохранить" button PUTs the whole document. db_path / meetings_dir changes
+// are restart-required (decision #2) → a banner, applied on next launch.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtCore
+import MeetingAssistant
 
 Page {
     id: scr
     property var shell
 
-    Settings { id: rec; category: "recording"
-        property string source: "mixed"
-        property bool echoCancel: false }
-    Settings { id: proto; category: "protocol"
-        property string defaultTemplate: "" }
+    // Editable working copy of the snapshot. Panels mutate it in place; Save
+    // PUTs it. Re-seeded whenever the store (re)loads.
+    property var draft: ({})
+    // Bumped on every edit so derived bindings (e.g. the restart banner) refresh.
+    property int rev: 0
+    function touch() { rev++ }
+    // Emitted whenever `draft` is (re)seeded from the store — panels (re)read
+    // their control values from it on this, not on every keystroke.
+    signal reseeded()
+
+    readonly property bool restartNeeded: {
+        rev // depend on edits
+        if (!SettingsStore.loaded || !draft.paths)
+            return false
+        var orig = SettingsStore.paths()
+        return (draft.paths.db || "") !== (orig.db || "")
+            || (draft.paths.meetings_dir || "") !== (orig.meetings_dir || "")
+    }
+
+    function seedDraft() {
+        if (!SettingsStore.loaded)
+            return
+        draft = JSON.parse(JSON.stringify(SettingsStore.snapshot))
+        rev++
+        reseeded()
+    }
+
+    function save() {
+        SettingsStore.apply(scr.draft, function (ok, res) {
+            if (ok) {
+                toast.show(qsTr("Настройки сохранены"))
+                scr.seedDraft()
+            } else {
+                toast.show(qsTr("Ошибка сохранения: %1").arg(res))
+            }
+        })
+    }
+
+    Component.onCompleted: {
+        if (SettingsStore.loaded)
+            seedDraft()
+        else
+            SettingsStore.refresh()
+    }
+    Connections {
+        target: SettingsStore
+        function onLoadedChanged() { if (SettingsStore.loaded) scr.seedDraft() }
+    }
 
     header: ToolBar {
         RowLayout {
@@ -31,90 +76,152 @@ Page {
         }
     }
 
-    ScrollView {
+    // ── loading / error gate ──────────────────────────────────────────────────
+    BusyIndicator {
+        anchors.centerIn: parent
+        running: true
+        visible: SettingsStore.status === "loading" && !SettingsStore.loaded
+    }
+    ColumnLayout {
+        anchors.centerIn: parent
+        visible: SettingsStore.status === "error" && !SettingsStore.loaded
+        spacing: 10
+        Label {
+            Layout.alignment: Qt.AlignHCenter
+            text: qsTr("Не удалось загрузить настройки: %1").arg(SettingsStore.errorMessage)
+            wrapMode: Text.WordWrap
+        }
+        Button {
+            Layout.alignment: Qt.AlignHCenter
+            text: qsTr("Повторить")
+            onClicked: SettingsStore.refresh()
+        }
+    }
+
+    // ── main content ──────────────────────────────────────────────────────────
+    ColumnLayout {
         anchors.fill: parent
-        clip: true
-        ColumnLayout {
-            width: scr.width
-            spacing: 16
+        visible: SettingsStore.loaded
+        spacing: 0
 
-            GroupBox {
-                title: qsTr("Запись по умолчанию")
-                Layout.fillWidth: true
-                Layout.margins: 24
-                ColumnLayout {
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 0
+
+            // category sidebar
+            Pane {
+                Layout.preferredWidth: 200
+                Layout.fillHeight: true
+                padding: 0
+                ListView {
+                    id: catList
                     anchors.fill: parent
-                    spacing: 12
-                    Label { text: qsTr("Источник звука"); opacity: 0.7 }
-                    RowLayout {
-                        spacing: 16
-                        ButtonGroup { id: g }
-                        RadioButton {
-                            text: qsTr("Микрофон"); ButtonGroup.group: g
-                            checked: rec.source === "mic"
-                            onCheckedChanged: if (checked) rec.source = "mic"
-                        }
-                        RadioButton {
-                            text: qsTr("Система"); ButtonGroup.group: g
-                            checked: rec.source === "system"
-                            onCheckedChanged: if (checked) rec.source = "system"
-                        }
-                        RadioButton {
-                            text: qsTr("Оба"); ButtonGroup.group: g
-                            checked: rec.source === "mixed"
-                            onCheckedChanged: if (checked) rec.source = "mixed"
-                        }
+                    clip: true
+                    currentIndex: 0
+                    model: ListModel {
+                        ListElement { label: qsTr("Транскрипция") }
+                        ListElement { label: qsTr("LLM-провайдер") }
+                        ListElement { label: qsTr("Шаблоны") }
+                        ListElement { label: qsTr("Хранилище") }
+                        ListElement { label: qsTr("Запись") }
                     }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Label { text: qsTr("Подавление эха"); Layout.fillWidth: true }
-                        Switch {
-                            checked: rec.echoCancel
-                            onToggled: rec.echoCancel = checked
-                        }
+                    delegate: ItemDelegate {
+                        required property int index
+                        required property string label
+                        width: ListView.view.width
+                        text: label
+                        highlighted: catList.currentIndex === index
+                        onClicked: catList.currentIndex = index
                     }
                 }
             }
 
-            GroupBox {
-                title: qsTr("Протокол")
+            ToolSeparator { Layout.fillHeight: true; padding: 0 }
+
+            // panel stack
+            ColumnLayout {
                 Layout.fillWidth: true
-                Layout.leftMargin: 24
-                Layout.rightMargin: 24
-                ColumnLayout {
-                    anchors.fill: parent
-                    spacing: 8
+                Layout.fillHeight: true
+                spacing: 0
+
+                // restart-required banner
+                Pane {
+                    Layout.fillWidth: true
+                    visible: scr.restartNeeded
+                    background: Rectangle { color: scr.palette.highlight; opacity: 0.15 }
                     Label {
-                        text: qsTr("Шаблон по умолчанию (пусто = встроенный)")
-                        opacity: 0.7
-                    }
-                    TextField {
-                        Layout.fillWidth: true
-                        text: proto.defaultTemplate
-                        placeholderText: qsTr("По умолчанию")
-                        onEditingFinished: proto.defaultTemplate = text
+                        width: parent.width
+                        wrapMode: Text.WordWrap
+                        text: qsTr("Изменение пути к базе данных или каталога встреч " +
+                                   "вступит в силу после перезапуска приложения.")
                     }
                 }
-            }
+                // insecure-secrets banner (keyring unavailable → plaintext fallback)
+                Pane {
+                    Layout.fillWidth: true
+                    visible: SettingsStore.secretsFallback()
+                    background: Rectangle { color: scr.palette.toolTipText; opacity: 0.12 }
+                    Label {
+                        width: parent.width
+                        wrapMode: Text.WordWrap
+                        text: qsTr("Системное хранилище ключей недоступно — API-ключи " +
+                                   "сохраняются в файл без шифрования " +
+                                   "(~/.config/meeting-assistant/secrets.json).")
+                    }
+                }
 
-            GroupBox {
-                title: qsTr("Управляется ядром")
-                Layout.fillWidth: true
-                Layout.leftMargin: 24
-                Layout.rightMargin: 24
-                Layout.bottomMargin: 24
-                Label {
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    opacity: 0.7
-                    text: qsTr("Модель Whisper, путь к базе, каталог встреч, " +
-                               "промпты, ключ Anthropic и параметры " +
-                               "транскрайбера задаются ядром и пока не " +
-                               "доступны через API сайдкара. Эти настройки " +
-                               "появятся здесь после добавления " +
-                               "соответствующего маршрута в ядро.")
+                StackLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    currentIndex: catList.currentIndex
+
+                    WhisperPanel   { scr: scr }
+                    LlmPanel       { scr: scr }
+                    TemplatesPanel { scr: scr }
+                    StoragePanel   { scr: scr }
+                    RecordingPanel { scr: scr }
                 }
             }
         }
+
+        // ── footer: save / reset ────────────────────────────────────────────
+        MenuSeparator { Layout.fillWidth: true }
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.margins: 12
+            Label {
+                Layout.fillWidth: true
+                opacity: 0.7
+                font.pixelSize: 12
+                text: SettingsStore.status === "saving" ? qsTr("Сохранение…") : ""
+            }
+            Button {
+                text: qsTr("Сбросить изменения")
+                enabled: SettingsStore.status !== "saving"
+                onClicked: scr.seedDraft()
+            }
+            Button {
+                text: qsTr("Сохранить")
+                highlighted: true
+                enabled: SettingsStore.status !== "saving"
+                onClicked: scr.save()
+            }
+        }
+    }
+
+    // lightweight toast
+    Popup {
+        id: toast
+        property string message: ""
+        function show(m) { message = m; open(); hideTimer.restart() }
+        modal: false
+        focus: false
+        closePolicy: Popup.NoAutoClose
+        x: (scr.width - width) / 2
+        y: scr.height - height - 24
+        padding: 12
+        Label { text: toast.message }
+        Timer { id: hideTimer; interval: 2500; onTriggered: toast.close() }
     }
 }

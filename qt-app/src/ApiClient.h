@@ -30,6 +30,9 @@ public:
     // `body` (POST) is serialised as a JSON object. Returns a request id.
     Q_INVOKABLE int get(const QString &path);
     Q_INVOKABLE int post(const QString &path, const QVariantMap &body);
+    Q_INVOKABLE int put(const QString &path, const QVariantMap &body);
+    // DELETE — `del` because `delete` is a C++ keyword. No body.
+    Q_INVOKABLE int del(const QString &path);
 
 signals:
     void configuredChanged();
