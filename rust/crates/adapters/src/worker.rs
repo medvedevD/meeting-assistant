@@ -2,8 +2,9 @@ use std::sync::Arc;
 use tokio::time::{Duration, sleep};
 use tracing::{error, info, warn};
 use meeting_core::{
-    entities::meeting::now_unix,
-    ports::{JobRepo, MeetingFileStore, MeetingRepo, Transcriber},
+    entities::{meeting::now_unix, Meeting},
+    ports::{JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber},
+    usecases::generate_protocol,
 };
 
 const MAX_ATTEMPTS: u32 = 5;
@@ -14,6 +15,8 @@ pub struct Worker {
     meeting_repo: Arc<dyn MeetingRepo>,
     transcriber: Arc<dyn Transcriber>,
     file_store: Arc<dyn MeetingFileStore>,
+    llm: Arc<dyn LlmProvider>,
+    templates: Arc<dyn TemplateLoader>,
 }
 
 impl Worker {
@@ -22,8 +25,10 @@ impl Worker {
         meeting_repo: Arc<dyn MeetingRepo>,
         transcriber: Arc<dyn Transcriber>,
         file_store: Arc<dyn MeetingFileStore>,
+        llm: Arc<dyn LlmProvider>,
+        templates: Arc<dyn TemplateLoader>,
     ) -> Self {
-        Self { job_repo, meeting_repo, transcriber, file_store }
+        Self { job_repo, meeting_repo, transcriber, file_store, llm, templates }
     }
 
     pub async fn run(self, mut shutdown: tokio::sync::oneshot::Receiver<()>) {
@@ -82,35 +87,91 @@ impl Worker {
             }
         };
 
-        match self.transcriber.transcribe(&meeting.audio_path).await {
-            Ok(transcript) => {
+        let result = if job.kind.is_transcription() {
+            self.run_transcribe(&job, &meeting).await
+        } else {
+            // JobKind::RegenerateProtocol
+            self.run_regenerate_protocol(&job, &meeting).await
+        };
+
+        match result {
+            Ok(()) => {
                 let now = now_unix();
-                match self.file_store.write_transcript(&meeting.meeting_dir, &transcript.text).await {
-                    Ok(path) => {
-                        if let Err(e) = self.meeting_repo
-                            .save_transcript_file(&meeting.id, &transcript.text, &path)
-                            .await
-                        {
-                            warn!(job_id = %job.id, "save_transcript_file failed: {e}");
-                        }
-                    }
-                    Err(e) => {
-                        warn!(job_id = %job.id, "write transcript.md failed: {e}");
-                        if let Err(e) = self.meeting_repo.save_transcript(&meeting.id, &transcript.text).await {
-                            warn!(job_id = %job.id, "save_transcript fallback failed: {e}");
-                        }
-                    }
-                }
                 if let Err(e) = self.job_repo.mark_done(&job.id, now).await {
                     error!(job_id = %job.id, "mark_done failed: {e}");
                 } else {
-                    info!(job_id = %job.id, "job done");
+                    info!(job_id = %job.id, kind = %job.kind.as_str(), "job done");
+                }
+            }
+            Err(e) => self.handle_failure(&job, &e.to_string()).await,
+        }
+    }
+
+    /// Transcribe (or re-transcribe) the meeting's audio and persist the result.
+    async fn run_transcribe(
+        &self,
+        job: &meeting_core::entities::Job,
+        meeting: &Meeting,
+    ) -> Result<(), meeting_core::CoreError> {
+        let transcript = self.transcriber.transcribe(&meeting.audio_path).await?;
+        match self.file_store.write_transcript(&meeting.meeting_dir, &transcript.text).await {
+            Ok(path) => {
+                if let Err(e) = self.meeting_repo
+                    .save_transcript_file(&meeting.id, &transcript.text, &path)
+                    .await
+                {
+                    warn!(job_id = %job.id, "save_transcript_file failed: {e}");
                 }
             }
             Err(e) => {
-                self.handle_failure(&job, &e.to_string()).await;
+                warn!(job_id = %job.id, "write transcript.md failed: {e}");
+                if let Err(e) = self.meeting_repo.save_transcript(&meeting.id, &transcript.text).await {
+                    warn!(job_id = %job.id, "save_transcript fallback failed: {e}");
+                }
             }
         }
+        Ok(())
+    }
+
+    /// Regenerate the protocol from the stored transcript via the LLM.
+    async fn run_regenerate_protocol(
+        &self,
+        job: &meeting_core::entities::Job,
+        meeting: &Meeting,
+    ) -> Result<(), meeting_core::CoreError> {
+        use meeting_core::CoreError;
+        let transcript = meeting
+            .transcript_text
+            .as_deref()
+            .filter(|t| !t.is_empty())
+            .ok_or_else(|| CoreError::Validation("meeting has no transcript".into()))?;
+
+        let protocol = generate_protocol(
+            Arc::clone(&self.llm),
+            Arc::clone(&self.templates),
+            transcript,
+            job.template_name.as_deref(),
+            Some(&meeting.name),
+        )
+        .await?;
+
+        match self.file_store.write_protocol(&meeting.meeting_dir, &protocol.markdown).await {
+            Ok(path) => {
+                if let Err(e) = self.meeting_repo
+                    .save_protocol_file(&meeting.id, &protocol.markdown, &path)
+                    .await
+                {
+                    warn!(job_id = %job.id, "save_protocol_file failed: {e}");
+                }
+            }
+            Err(e) => {
+                warn!(job_id = %job.id, "write protocol.md failed: {e}");
+                if let Err(e) = self.meeting_repo.save_protocol(&meeting.id, &protocol.markdown).await {
+                    warn!(job_id = %job.id, "save_protocol fallback failed: {e}");
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn handle_failure(&self, job: &meeting_core::entities::Job, error: &str) {

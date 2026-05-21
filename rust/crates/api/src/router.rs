@@ -99,6 +99,10 @@ fn api_routes() -> Router<Arc<AppState>> {
         .route("/api/v1/recordings", post(recordings::start))
         .route("/api/v1/recordings/:id/stop", post(recordings::stop))
         .route("/api/v1/meetings", get(meetings::list))
+        .route("/api/v1/meetings/import", post(meetings::import))
+        .route("/api/v1/meetings/scan", get(meetings::scan))
+        .route("/api/v1/meetings/:id/reprocess", post(meetings::reprocess))
+        .route("/api/v1/meetings/:id", axum::routing::delete(meetings::delete))
 }
 
 fn settings_routes() -> Router<Arc<dyn SettingsService>> {
@@ -233,6 +237,10 @@ mod tests {
         ("POST", "/api/v1/recordings"),
         ("POST", "/api/v1/recordings/abc/stop"),
         ("GET", "/api/v1/meetings"),
+        ("POST", "/api/v1/meetings/import"),
+        ("GET", "/api/v1/meetings/scan"),
+        ("POST", "/api/v1/meetings/abc/reprocess"),
+        ("DELETE", "/api/v1/meetings/abc"),
         ("GET", "/api/v1/settings"),
         ("PUT", "/api/v1/settings"),
         ("PUT", "/api/v1/settings/secret"),

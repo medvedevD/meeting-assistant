@@ -185,6 +185,81 @@ impl MeetingRepo for SqliteMeetingRepo {
         Ok(())
     }
 
+    async fn delete_audio_only(&self, id: &str) -> Result<(), CoreError> {
+        let db = Arc::clone(&self.0);
+        let id = id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = db.conn.lock().unwrap();
+            // audio_path is NOT NULL; an empty string is the "audio removed"
+            // sentinel (see Phase 3 deviation note). Transcript/protocol kept.
+            conn.execute(
+                "UPDATE meetings SET audio_path='' WHERE id=?1",
+                rusqlite::params![id],
+            )
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+        .map_err(|e| CoreError::Storage(e.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn clear_transcript(&self, id: &str) -> Result<(), CoreError> {
+        let db = Arc::clone(&self.0);
+        let id = id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE meetings SET transcript_text=NULL, transcript_path=NULL WHERE id=?1",
+                rusqlite::params![id],
+            )
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+        .map_err(|e| CoreError::Storage(e.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn clear_protocol(&self, id: &str) -> Result<(), CoreError> {
+        let db = Arc::clone(&self.0);
+        let id = id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE meetings SET protocol_text=NULL, protocol_path=NULL WHERE id=?1",
+                rusqlite::params![id],
+            )
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+        .map_err(|e| CoreError::Storage(e.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn delete(&self, id: &str) -> Result<(), CoreError> {
+        let db = Arc::clone(&self.0);
+        let id = id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let mut conn = db.conn.lock().unwrap();
+            let tx = conn.transaction()?;
+            // jobs reference meetings(id); remove children first to satisfy FK.
+            tx.execute("DELETE FROM jobs WHERE meeting_id=?1", rusqlite::params![id])?;
+            tx.execute("DELETE FROM meetings WHERE id=?1", rusqlite::params![id])?;
+            tx.commit()
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+        .map_err(|e| CoreError::Storage(e.to_string()))?;
+
+        Ok(())
+    }
+
     async fn list_all(&self) -> Result<Vec<Meeting>, CoreError> {
         let db = Arc::clone(&self.0);
 
@@ -314,5 +389,48 @@ mod tests {
         let repo = make_repo();
         let meetings = repo.list_all().await.unwrap();
         assert!(meetings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_audio_only_keeps_transcript_and_protocol() {
+        let repo = make_repo();
+        let m = Meeting::new("Встреча".to_string(), PathBuf::from("/audio/x.wav"));
+        repo.save(&m).await.unwrap();
+        repo.save_transcript(&m.id, "Текст").await.unwrap();
+        repo.save_protocol(&m.id, "# Протокол").await.unwrap();
+
+        repo.delete_audio_only(&m.id).await.unwrap();
+
+        let found = repo.find_by_id(&m.id).await.unwrap().unwrap();
+        assert_eq!(found.audio_path, PathBuf::new());
+        assert_eq!(found.transcript_text.as_deref(), Some("Текст"));
+        assert_eq!(found.protocol_text.as_deref(), Some("# Протокол"));
+    }
+
+    #[tokio::test]
+    async fn clear_transcript_and_protocol_null_out() {
+        let repo = make_repo();
+        let m = Meeting::new("Встреча".to_string(), PathBuf::from("/audio/x.wav"));
+        repo.save(&m).await.unwrap();
+        repo.save_transcript_file(&m.id, "t", &PathBuf::from("/d/transcript.md")).await.unwrap();
+        repo.save_protocol_file(&m.id, "p", &PathBuf::from("/d/protocol.md")).await.unwrap();
+
+        repo.clear_transcript(&m.id).await.unwrap();
+        repo.clear_protocol(&m.id).await.unwrap();
+
+        let found = repo.find_by_id(&m.id).await.unwrap().unwrap();
+        assert!(found.transcript_text.is_none());
+        assert!(found.transcript_path.is_none());
+        assert!(found.protocol_text.is_none());
+        assert!(found.protocol_path.is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_removes_row() {
+        let repo = make_repo();
+        let m = Meeting::new("Встреча".to_string(), PathBuf::from("/audio/x.wav"));
+        repo.save(&m).await.unwrap();
+        repo.delete(&m.id).await.unwrap();
+        assert!(repo.find_by_id(&m.id).await.unwrap().is_none());
     }
 }

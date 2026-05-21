@@ -19,6 +19,21 @@ pub use stop_recording::stop_recording;
 mod list_meetings;
 pub use list_meetings::list_meetings;
 
+mod import_audio;
+pub use import_audio::{import_audio, ImportResult};
+
+mod scan_recordings_dir;
+pub use scan_recordings_dir::{scan_recordings_dir, ScanCandidate, DEFAULT_MAX_DEPTH};
+
+mod reprocess_transcribe;
+pub use reprocess_transcribe::reprocess_transcribe;
+
+mod regenerate_protocol;
+pub use regenerate_protocol::regenerate_protocol;
+
+mod delete_meeting;
+pub use delete_meeting::{delete_meeting, DeleteMode};
+
 mod templates;
 pub use templates::{
     delete_template, get_template, list_templates, rename_template, save_template,

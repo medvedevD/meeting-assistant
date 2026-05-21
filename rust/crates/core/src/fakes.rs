@@ -117,6 +117,43 @@ impl MeetingRepo for FakeMeetingRepo {
     async fn list_all(&self) -> Result<Vec<Meeting>, CoreError> {
         Ok(self.store.lock().unwrap().clone())
     }
+
+    async fn delete_audio_only(&self, id: &str) -> Result<(), CoreError> {
+        let mut store = self.store.lock().unwrap();
+        if let Some(m) = store.iter_mut().find(|m| m.id == id) {
+            m.audio_path = PathBuf::new();
+            Ok(())
+        } else {
+            Err(CoreError::NotFound(id.to_string()))
+        }
+    }
+
+    async fn clear_transcript(&self, id: &str) -> Result<(), CoreError> {
+        let mut store = self.store.lock().unwrap();
+        if let Some(m) = store.iter_mut().find(|m| m.id == id) {
+            m.transcript_text = None;
+            m.transcript_path = None;
+            Ok(())
+        } else {
+            Err(CoreError::NotFound(id.to_string()))
+        }
+    }
+
+    async fn clear_protocol(&self, id: &str) -> Result<(), CoreError> {
+        let mut store = self.store.lock().unwrap();
+        if let Some(m) = store.iter_mut().find(|m| m.id == id) {
+            m.protocol_text = None;
+            m.protocol_path = None;
+            Ok(())
+        } else {
+            Err(CoreError::NotFound(id.to_string()))
+        }
+    }
+
+    async fn delete(&self, id: &str) -> Result<(), CoreError> {
+        self.store.lock().unwrap().retain(|m| m.id != id);
+        Ok(())
+    }
 }
 
 // ── FakeMeetingFileStore ─────────────────────────────────────────────────────
@@ -124,11 +161,24 @@ impl MeetingRepo for FakeMeetingRepo {
 #[derive(Default)]
 pub struct FakeMeetingFileStore {
     pub written: Mutex<Vec<(PathBuf, String)>>,
+    /// `(dest_dir, source)` for each `import_audio` call.
+    pub imported: Mutex<Vec<(PathBuf, PathBuf)>>,
+    pub removed_files: Mutex<Vec<PathBuf>>,
+    pub removed_dirs: Mutex<Vec<PathBuf>>,
+    /// Files returned by `list_audio_files`, regardless of the queried dir.
+    audio_files: Mutex<Vec<PathBuf>>,
 }
 
 impl FakeMeetingFileStore {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    pub fn with_audio_files(files: impl IntoIterator<Item = PathBuf>) -> Arc<Self> {
+        Arc::new(Self {
+            audio_files: Mutex::new(files.into_iter().collect()),
+            ..Self::default()
+        })
     }
 }
 
@@ -144,6 +194,29 @@ impl MeetingFileStore for FakeMeetingFileStore {
         let path = dir.join("protocol.md");
         self.written.lock().unwrap().push((path.clone(), text.to_string()));
         Ok(path)
+    }
+
+    async fn import_audio(&self, dir: &Path, source: &Path) -> Result<PathBuf, CoreError> {
+        self.imported
+            .lock()
+            .unwrap()
+            .push((dir.to_path_buf(), source.to_path_buf()));
+        let name = source.file_name().unwrap_or_default();
+        Ok(dir.join(name))
+    }
+
+    async fn list_audio_files(&self, _dir: &Path, _max_depth: usize) -> Result<Vec<PathBuf>, CoreError> {
+        Ok(self.audio_files.lock().unwrap().clone())
+    }
+
+    async fn remove_file(&self, path: &Path) -> Result<(), CoreError> {
+        self.removed_files.lock().unwrap().push(path.to_path_buf());
+        Ok(())
+    }
+
+    async fn remove_dir_all(&self, dir: &Path) -> Result<(), CoreError> {
+        self.removed_dirs.lock().unwrap().push(dir.to_path_buf());
+        Ok(())
     }
 }
 

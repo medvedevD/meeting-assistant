@@ -153,6 +153,8 @@ impl Container {
             Arc::clone(&self.meeting_repo),
             Arc::clone(&self.transcriber),
             Arc::clone(&self.file_store),
+            Arc::clone(&self.llm),
+            Arc::clone(&self.templates),
         );
         let handle = tokio::spawn(worker.run(shutdown_rx));
         (handle, shutdown_tx)
