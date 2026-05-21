@@ -3,16 +3,22 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
+use crate::llm::{LlmConfig, ProviderKind};
+
 /// Persisted user settings. All fields are optional to allow partial saves and forward-compat.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PersistedSettings {
     pub paths: PersistedPaths,
-    /// Stored in plaintext in the config file. On first run migrated from the old Tauri store.
+    /// **Deprecated** plaintext key from the pre-keyring era. Read only so the
+    /// composition layer can migrate it into the OS keyring, then clear it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anthropic_api_key: Option<String>,
     pub recording: RecordingPrefs,
     pub default_template: Option<String>,
     #[serde(default)]
     pub transcriber: PersistedTranscriberPrefs,
+    #[serde(default)]
+    pub llm: LlmPrefs,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,13 +31,100 @@ pub struct PersistedTranscriberPrefs {
     /// CPU threads for inference. 0 = auto (physical cores). Default: 0.
     #[serde(default)]
     pub n_threads: u32,
+    /// Override path to the Whisper model file. `None` = core default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_path: Option<String>,
 }
 
 fn default_beam_size() -> u32 { 1 }
 
 impl Default for PersistedTranscriberPrefs {
     fn default() -> Self {
-        Self { language: "ru".into(), beam_size: 1, n_threads: 0 }
+        Self { language: "ru".into(), beam_size: 1, n_threads: 0, model_path: None }
+    }
+}
+
+// ── LLM provider preferences ───────────────────────────────────────────────────
+
+/// Per-provider configuration. All five providers are stored simultaneously so
+/// switching the active provider never loses the others' settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LlmPrefs {
+    /// Currently selected provider.
+    #[serde(default = "default_provider")]
+    pub active: ProviderKind,
+    #[serde(default = "anthropic_cfg")]
+    pub anthropic: ProviderCfg,
+    #[serde(default = "openai_cfg")]
+    pub openai: ProviderCfg,
+    #[serde(default = "gemini_cfg")]
+    pub gemini: ProviderCfg,
+    #[serde(default = "mistral_cfg")]
+    pub mistral: ProviderCfg,
+    #[serde(default = "ollama_cfg")]
+    pub ollama: ProviderCfg,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderCfg {
+    pub model: String,
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
+    /// `None` = use the provider's default endpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
+fn default_max_tokens() -> u32 { 4096 }
+fn default_provider() -> ProviderKind { ProviderKind::Anthropic }
+
+fn cfg_for(kind: ProviderKind) -> ProviderCfg {
+    ProviderCfg { model: kind.default_model().to_string(), max_tokens: 4096, base_url: None }
+}
+fn anthropic_cfg() -> ProviderCfg { cfg_for(ProviderKind::Anthropic) }
+fn openai_cfg() -> ProviderCfg { cfg_for(ProviderKind::Openai) }
+fn gemini_cfg() -> ProviderCfg { cfg_for(ProviderKind::Gemini) }
+fn mistral_cfg() -> ProviderCfg { cfg_for(ProviderKind::Mistral) }
+fn ollama_cfg() -> ProviderCfg { cfg_for(ProviderKind::Ollama) }
+
+impl Default for LlmPrefs {
+    fn default() -> Self {
+        Self {
+            active: ProviderKind::Anthropic,
+            anthropic: anthropic_cfg(),
+            openai: openai_cfg(),
+            gemini: gemini_cfg(),
+            mistral: mistral_cfg(),
+            ollama: ollama_cfg(),
+        }
+    }
+}
+
+impl LlmPrefs {
+    pub fn cfg(&self, kind: ProviderKind) -> &ProviderCfg {
+        match kind {
+            ProviderKind::Anthropic => &self.anthropic,
+            ProviderKind::Openai => &self.openai,
+            ProviderKind::Gemini => &self.gemini,
+            ProviderKind::Mistral => &self.mistral,
+            ProviderKind::Ollama => &self.ollama,
+        }
+    }
+
+    /// Resolve a runnable [`LlmConfig`] for the given provider, filling the
+    /// effective API key (env override or stored) supplied by the caller.
+    pub fn resolve(&self, kind: ProviderKind, api_key: String) -> LlmConfig {
+        let cfg = self.cfg(kind);
+        LlmConfig {
+            kind,
+            model: cfg.model.clone(),
+            max_tokens: cfg.max_tokens,
+            base_url: cfg
+                .base_url
+                .clone()
+                .unwrap_or_else(|| kind.default_base_url().to_string()),
+            api_key,
+        }
     }
 }
 

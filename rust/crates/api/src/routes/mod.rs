@@ -3,5 +3,6 @@ pub mod jobs;
 pub mod protocols;
 pub mod recordings;
 pub mod meetings;
+pub mod settings;
 pub mod health;
 pub mod version;

@@ -23,4 +23,16 @@ pub enum CoreError {
     Template(String),
     #[error("recording error: {0}")]
     Recording(String),
+    #[error("authentication failed: {0}")]
+    ApiAuth(String),
+    #[error("rate limit or quota exceeded: {0}")]
+    ApiQuota(String),
+    #[error("request timed out: {0}")]
+    ApiTimeout(String),
+    #[error("audio corrupt: {0}")]
+    AudioCorrupt(String),
+    #[error("network error: {0}")]
+    Network(String),
+    #[error("worker terminated: {0}")]
+    WorkerKilled(String),
 }

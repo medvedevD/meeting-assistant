@@ -72,6 +72,10 @@ impl Sidecar {
             // Isolate DB, recordings dir and the singleton lock.
             .env("XDG_DATA_HOME", data_dir)
             .env("XDG_CACHE_HOME", data_dir)
+            // Isolate settings.json + the secrets fallback file, and force the
+            // file fallback so tests never read/write the real OS keyring.
+            .env("XDG_CONFIG_HOME", data_dir)
+            .env("MEETING_ASSISTANT_KEYRING_DISABLE", "1")
             .env_remove("ANTHROPIC_API_KEY")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -260,6 +264,74 @@ fn api_routes_401_without_token_and_200_with_it() {
         reqwest::StatusCode::OK,
         "valid bearer token must reach the handler (200)"
     );
+}
+
+// ── Settings: GET/PUT round-trip + secret has_key ────────────────────────────
+
+#[test]
+fn settings_get_put_roundtrip_and_secret_flag() {
+    let s = Sidecar::spawn();
+    let c = client();
+    let url = format!("{}/api/v1/settings", s.base_url());
+    let tok = &s.handshake.token;
+
+    // GET: sanitized snapshot with the default shape.
+    let snap: serde_json::Value = c
+        .get(&url)
+        .bearer_auth(tok)
+        .send()
+        .expect("get settings")
+        .json()
+        .expect("json");
+    assert_eq!(snap["transcriber"]["language"], "ru", "default language");
+    assert_eq!(snap["llm"]["active"], "anthropic", "default provider");
+    // No key configured yet (ANTHROPIC_API_KEY is removed in the test env).
+    assert_eq!(snap["llm"]["anthropic"]["has_key"], false);
+    // Keyring is force-disabled in tests, so the UI-facing fallback flag is set.
+    assert_eq!(snap["secrets_fallback"], true);
+    // Secret values must never be present in the snapshot.
+    assert!(snap["llm"]["anthropic"].get("api_key").is_none());
+
+    // PUT a full settings object with a changed language; expect it echoed back.
+    let mut updated = snap.clone();
+    updated["transcriber"]["language"] = serde_json::json!("en");
+    let put_resp = c
+        .put(&url)
+        .bearer_auth(tok)
+        .json(&updated)
+        .send()
+        .expect("put settings");
+    assert_eq!(put_resp.status(), reqwest::StatusCode::OK);
+    let echoed: serde_json::Value = put_resp.json().expect("json");
+    assert_eq!(echoed["transcriber"]["language"], "en");
+
+    // GET again: the change persisted.
+    let after: serde_json::Value = c
+        .get(&url)
+        .bearer_auth(tok)
+        .send()
+        .expect("get settings")
+        .json()
+        .expect("json");
+    assert_eq!(after["transcriber"]["language"], "en");
+
+    // Store an OpenAI key; the snapshot's has_key flips without leaking the key.
+    let secret_resp = c
+        .put(format!("{}/secret", url))
+        .bearer_auth(tok)
+        .json(&serde_json::json!({"provider": "openai", "value": "sk-test"}))
+        .send()
+        .expect("put secret");
+    assert_eq!(secret_resp.status(), reqwest::StatusCode::NO_CONTENT);
+
+    let after_secret: serde_json::Value = c
+        .get(&url)
+        .bearer_auth(tok)
+        .send()
+        .expect("get settings")
+        .json()
+        .expect("json");
+    assert_eq!(after_secret["llm"]["openai"]["has_key"], true);
 }
 
 // ── Loopback-only bind ───────────────────────────────────────────────────────

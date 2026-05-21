@@ -1,23 +1,35 @@
 use std::path::PathBuf;
+use std::sync::RwLock;
 use async_trait::async_trait;
 use meeting_core::{CoreError, ports::TemplateLoader};
 
 /// Loads templates from `.md` files in a directory.
 /// File name (without extension) is the template name.
+/// The directory is interior-mutable so it can be hot-swapped when the user
+/// changes the prompts path in settings.
 pub struct FileTemplateLoader {
-    dir: PathBuf,
+    dir: RwLock<PathBuf>,
 }
 
 impl FileTemplateLoader {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into() }
+        Self { dir: RwLock::new(dir.into()) }
+    }
+
+    fn dir(&self) -> PathBuf {
+        self.dir.read().unwrap().clone()
+    }
+
+    /// Change the prompts directory at runtime.
+    pub fn set_dir(&self, dir: impl Into<PathBuf>) {
+        *self.dir.write().unwrap() = dir.into();
     }
 }
 
 #[async_trait]
 impl TemplateLoader for FileTemplateLoader {
     async fn load(&self, name: &str) -> Result<Option<String>, CoreError> {
-        let path = self.dir.join(format!("{name}.md"));
+        let path = self.dir().join(format!("{name}.md"));
         if !path.exists() {
             return Ok(None);
         }
@@ -28,12 +40,13 @@ impl TemplateLoader for FileTemplateLoader {
     }
 
     async fn list_names(&self) -> Result<Vec<String>, CoreError> {
-        let mut entries = match tokio::fs::read_dir(&self.dir).await {
+        let dir = self.dir();
+        let mut entries = match tokio::fs::read_dir(&dir).await {
             Ok(entries) => entries,
             // A missing prompts dir is a misconfiguration, not a fatal error:
             // return no templates so the UI (e.g. the settings window) stays usable.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                tracing::warn!("prompts dir not found: {} — no templates available", self.dir.display());
+                tracing::warn!("prompts dir not found: {} — no templates available", dir.display());
                 return Ok(Vec::new());
             }
             Err(e) => return Err(CoreError::Template(e.to_string())),

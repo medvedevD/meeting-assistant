@@ -79,7 +79,7 @@ mod tests {
     use axum::{body::Body, http::{Request, StatusCode}};
     use http_body_util::BodyExt;
     use tower::ServiceExt;
-    use meeting_core::fakes::{FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingRepo, FakeTemplateLoader, FakeTranscriber};
+    use meeting_core::fakes::{FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo, FakeTemplateLoader, FakeTranscriber};
     use crate::router::{AppState, create_router};
 
     fn make_app() -> axum::Router {
@@ -90,6 +90,7 @@ mod tests {
             llm: FakeLlmProvider::new(""),
             templates: FakeTemplateLoader::empty(),
             audio_capture: FakeAudioCapture::new(),
+            file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
         })
     }
@@ -150,6 +151,7 @@ mod tests {
             llm: FakeLlmProvider::new(""),
             templates: FakeTemplateLoader::empty(),
             audio_capture: FakeAudioCapture::new(),
+            file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
         });
 

@@ -88,7 +88,7 @@ mod tests {
     use std::path::PathBuf;
     use tower::ServiceExt;
     use meeting_core::{
-        fakes::{FakeAudioCapture, FakeLlmProvider, FakeMeetingRepo, FakeJobRepo, FakeTemplateLoader, FakeTranscriber},
+        fakes::{FakeAudioCapture, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo, FakeJobRepo, FakeTemplateLoader, FakeTranscriber},
         ports::{AudioCapture, CaptureSource},
     };
     use crate::router::{AppState, create_router};
@@ -104,6 +104,7 @@ mod tests {
             llm: FakeLlmProvider::new(""),
             templates: FakeTemplateLoader::empty(),
             audio_capture: capture,
+            file_store: FakeMeetingFileStore::new(),
             recordings_dir: PathBuf::from("/tmp/recordings"),
         })
     }

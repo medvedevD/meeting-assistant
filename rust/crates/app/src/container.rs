@@ -1,12 +1,25 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use anyhow::{Context, Result};
-use meeting_core::ports::{AudioCapture, JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber};
-use meeting_adapters::{
-    AnthropicProvider, CpalAudioCapture, Db, FileTemplateLoader, FsMeetingFileStore,
-    LazyWhisperTranscriber, SqliteJobRepo, SqliteMeetingRepo, TranscriberPrefs,
-    WhisperTranscriber, Worker,
+use meeting_core::ports::{
+    AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber,
 };
+use meeting_adapters::{
+    build_llm, AnthropicProvider, CpalAudioCapture, Db, FileTemplateLoader, FsMeetingFileStore,
+    JsonSettingsStore, KeyringSecretStore, LazyWhisperTranscriber, SqliteJobRepo, SqliteMeetingRepo,
+    SwappableLlm, TranscriberPrefs, WhisperTranscriber, Worker,
+};
+
+/// Concrete handles the composition layer keeps so it can apply settings
+/// changes at runtime (hot-swap LLM, update transcriber prefs/model, swap
+/// prompts dir). Populated only by [`Container::new_sidecar`].
+pub struct SettingsHandles {
+    pub settings_store: Arc<JsonSettingsStore>,
+    pub secrets: Arc<KeyringSecretStore>,
+    pub llm: Arc<SwappableLlm>,
+    pub transcriber: Arc<LazyWhisperTranscriber>,
+    pub templates: Arc<FileTemplateLoader>,
+}
 
 pub struct Container {
     pub transcriber: Arc<dyn Transcriber>,
@@ -15,7 +28,10 @@ pub struct Container {
     pub llm: Arc<dyn LlmProvider>,
     pub templates: Arc<dyn TemplateLoader>,
     pub audio_capture: Arc<dyn AudioCapture>,
+    pub file_store: Arc<dyn MeetingFileStore>,
     pub recordings_dir: PathBuf,
+    /// `None` in CLI (`new_desktop`) mode; `Some` for the sidecar.
+    pub settings_handles: Option<SettingsHandles>,
 }
 
 impl Container {
@@ -35,8 +51,9 @@ impl Container {
         let llm = Arc::new(AnthropicProvider::new(api_key));
         let templates = Arc::new(FileTemplateLoader::new(prompts_dir));
         let audio_capture = Arc::new(CpalAudioCapture::new());
+        let file_store: Arc<dyn MeetingFileStore> = Arc::new(FsMeetingFileStore);
 
-        Ok(Self { transcriber, meeting_repo, job_repo, llm, templates, audio_capture, recordings_dir })
+        Ok(Self { transcriber, meeting_repo, job_repo, llm, templates, audio_capture, file_store, recordings_dir, settings_handles: None })
     }
 
     /// Sidecar wiring — mirrors the `ffi/app_core.rs` adapter graph rather than
@@ -56,20 +73,55 @@ impl Container {
         prompts_dir: &Path,
         recordings_dir: PathBuf,
     ) -> Result<Self> {
-        let prefs = TranscriberPrefs::new("ru", 1, 0);
-        let transcriber: Arc<dyn Transcriber> =
-            Arc::new(LazyWhisperTranscriber::new(model_path.to_path_buf(), prefs));
+        // ── Settings + secrets are the single source of configuration ─────────
+        let settings_store = Arc::new(JsonSettingsStore::open_default());
+        let secrets = Arc::new(KeyringSecretStore::open_default());
+
+        // One-time migration: a pre-keyring build stored the Anthropic key in
+        // plaintext inside settings.json. Move it into the keyring, then clear it.
+        let mut settings = settings_store.load();
+        if let Some(key) = settings.anthropic_api_key.take() {
+            if !key.is_empty() {
+                let _ = secrets.set("anthropic", &key);
+                tracing::info!("migrated legacy plaintext Anthropic key into the keyring");
+            }
+            let _ = settings_store.save(settings.clone());
+        }
+
+        // Effective paths: a settings override wins over the passed default. (db
+        // and recordings overrides are restart-required and applied at boot.)
+        let model = settings.transcriber.model_path.clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| model_path.to_path_buf());
+        let prompts = settings.paths.prompts.clone()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| prompts_dir.to_path_buf());
+
+        // ── Transcriber (lazy) with prefs from settings ───────────────────────
+        let prefs = TranscriberPrefs::new(
+            settings.transcriber.language.clone(),
+            settings.transcriber.beam_size,
+            settings.transcriber.n_threads,
+        );
+        let transcriber_handle = Arc::new(LazyWhisperTranscriber::new(model, prefs));
+        let transcriber: Arc<dyn Transcriber> = transcriber_handle.clone();
 
         let db = Db::open(db_path)?;
         let meeting_repo = Arc::new(SqliteMeetingRepo(Arc::clone(&db)));
         let job_repo = Arc::new(SqliteJobRepo(Arc::clone(&db)));
 
-        // Missing key is non-fatal here (unlike `new_desktop`): the sidecar must
-        // still serve recording/transcription/listing without it.
-        let api_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
-        let llm = Arc::new(AnthropicProvider::new(api_key));
-        let templates = Arc::new(FileTemplateLoader::new(prompts_dir));
+        // ── LLM: active provider, with the effective key (env → keyring/file) ──
+        let active = settings.llm.active;
+        let key = secrets.effective_key(active.as_str());
+        let cfg = settings.llm.resolve(active, key);
+        let llm_handle = Arc::new(SwappableLlm::new(build_llm(&cfg)));
+        let llm: Arc<dyn LlmProvider> = llm_handle.clone();
+
+        let templates_handle = Arc::new(FileTemplateLoader::new(prompts));
+        let templates: Arc<dyn TemplateLoader> = templates_handle.clone();
+
         let audio_capture = Arc::new(CpalAudioCapture::new());
+        let file_store: Arc<dyn MeetingFileStore> = Arc::new(FsMeetingFileStore);
 
         Ok(Self {
             transcriber,
@@ -78,7 +130,15 @@ impl Container {
             llm,
             templates,
             audio_capture,
+            file_store,
             recordings_dir,
+            settings_handles: Some(SettingsHandles {
+                settings_store,
+                secrets,
+                llm: llm_handle,
+                transcriber: transcriber_handle,
+                templates: templates_handle,
+            }),
         })
     }
 
@@ -92,7 +152,7 @@ impl Container {
             Arc::clone(&self.job_repo),
             Arc::clone(&self.meeting_repo),
             Arc::clone(&self.transcriber),
-            Arc::new(FsMeetingFileStore),
+            Arc::clone(&self.file_store),
         );
         let handle = tokio::spawn(worker.run(shutdown_rx));
         (handle, shutdown_tx)

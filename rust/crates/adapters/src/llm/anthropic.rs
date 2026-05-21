@@ -4,6 +4,8 @@ use meeting_core::{CoreError, ports::LlmProvider};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
+use super::errors::{classify_http, classify_transport};
+
 pub struct AnthropicProvider {
     api_key: String,
     model: String,
@@ -40,6 +42,35 @@ impl AnthropicProvider {
     pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
         self.max_tokens = max_tokens;
         self
+    }
+
+    /// Cheap credential check: a 1-token completion. Surfaces auth/quota errors
+    /// without running a full protocol generation.
+    pub async fn probe(&self) -> Result<(), CoreError> {
+        let body = RequestBody {
+            model: &self.model,
+            max_tokens: 1,
+            messages: vec![Message {
+                role: "user",
+                content: vec![ContentBlock { kind: "text", text: "hi", cache_control: None }],
+            }],
+        };
+        let url = format!("{}/v1/messages", self.base_url);
+        let resp = self.client
+            .post(&url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| classify_transport("Anthropic", &e))?;
+        if resp.status().is_success() {
+            Ok(())
+        } else {
+            let status = resp.status().as_u16();
+            let text = resp.text().await.unwrap_or_default();
+            Err(classify_http("Anthropic", status, &text))
+        }
     }
 }
 
@@ -114,12 +145,12 @@ impl LlmProvider for AnthropicProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| CoreError::Llm(e.to_string()))?;
+            .map_err(|e| classify_transport("Anthropic", &e))?;
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let text = resp.text().await.unwrap_or_default();
-            return Err(CoreError::Llm(format!("Anthropic API error {status}: {text}")));
+            return Err(classify_http("Anthropic", status, &text));
         }
 
         let parsed: ResponseBody = resp.json().await.map_err(|e| CoreError::Llm(e.to_string()))?;
@@ -213,7 +244,7 @@ mod tests {
             .await;
 
         let err = provider.generate("transcript", None).await.unwrap_err();
-        assert!(matches!(err, CoreError::Llm(_)));
+        assert!(matches!(err, CoreError::Network(_)));
     }
 
     #[tokio::test]
@@ -229,7 +260,7 @@ mod tests {
             .await;
 
         let err = provider.generate("t", None).await.unwrap_err();
-        assert!(matches!(err, CoreError::Llm(_)));
+        assert!(matches!(err, CoreError::ApiAuth(_)));
     }
 
     #[tokio::test]

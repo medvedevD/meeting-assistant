@@ -6,11 +6,15 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use axum::routing::put;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
-use meeting_core::ports::{AudioCapture, JobRepo, LlmProvider, MeetingRepo, TemplateLoader, Transcriber};
-use crate::routes::{transcribe, jobs, protocols, recordings, meetings, health, version};
+use meeting_core::ports::{
+    AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber,
+};
+use crate::routes::{transcribe, jobs, protocols, recordings, meetings, settings, health, version};
+use crate::settings_service::SettingsService;
 
 pub struct AppState {
     pub transcriber: Arc<dyn Transcriber>,
@@ -19,6 +23,7 @@ pub struct AppState {
     pub llm: Arc<dyn LlmProvider>,
     pub templates: Arc<dyn TemplateLoader>,
     pub audio_capture: Arc<dyn AudioCapture>,
+    pub file_store: Arc<dyn MeetingFileStore>,
     /// Directory where per-meeting recording subdirs are created.
     pub recordings_dir: PathBuf,
 }
@@ -49,14 +54,21 @@ pub fn create_router(state: AppState) -> Router {
 /// stdout handshake — never argv, never logged.
 pub fn create_server_router(
     state: AppState,
+    settings_service: Arc<dyn SettingsService>,
     auth_token: String,
     build_version: impl Into<String>,
 ) -> Router {
     let token: Arc<str> = Arc::from(auth_token.as_str());
 
     let api = api_routes()
-        .route_layer(middleware::from_fn_with_state(token, require_bearer))
+        .route_layer(middleware::from_fn_with_state(token.clone(), require_bearer))
         .with_state(Arc::new(state));
+
+    // Settings routes carry their own state (the SettingsService), kept off
+    // AppState so existing route tests stay untouched. Same bearer gate.
+    let settings = settings_routes()
+        .route_layer(middleware::from_fn_with_state(token, require_bearer))
+        .with_state(settings_service);
 
     let meta = Router::new()
         .route("/health", get(health::handle))
@@ -67,7 +79,7 @@ pub fn create_server_router(
             min_protocol: crate::MIN_PROTOCOL_VERSION,
         });
 
-    api.merge(meta)
+    api.merge(settings).merge(meta)
 }
 
 fn api_routes() -> Router<Arc<AppState>> {
@@ -79,6 +91,13 @@ fn api_routes() -> Router<Arc<AppState>> {
         .route("/api/v1/recordings", post(recordings::start))
         .route("/api/v1/recordings/:id/stop", post(recordings::stop))
         .route("/api/v1/meetings", get(meetings::list))
+}
+
+fn settings_routes() -> Router<Arc<dyn SettingsService>> {
+    Router::new()
+        .route("/api/v1/settings", get(settings::get).put(settings::put))
+        .route("/api/v1/settings/secret", put(settings::put_secret))
+        .route("/api/v1/settings/test", post(settings::test))
 }
 
 /// Rejects any request to an `/api/*` route that lacks a matching
@@ -125,11 +144,28 @@ mod tests {
     use std::path::PathBuf;
     use tower::ServiceExt;
     use meeting_core::fakes::{
-        FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingRepo, FakeTemplateLoader,
-        FakeTranscriber,
+        FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo,
+        FakeTemplateLoader, FakeTranscriber,
     };
 
     const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    struct FakeSettings;
+    #[async_trait::async_trait]
+    impl SettingsService for FakeSettings {
+        fn snapshot(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        async fn update(&self, _body: serde_json::Value) -> Result<serde_json::Value, String> {
+            Ok(serde_json::json!({}))
+        }
+        async fn set_secret(&self, _provider: String, _value: Option<String>) -> Result<(), String> {
+            Ok(())
+        }
+        async fn test_provider(&self, _provider: String) -> Result<(), String> {
+            Ok(())
+        }
+    }
 
     fn server() -> Router {
         create_server_router(
@@ -140,14 +176,16 @@ mod tests {
                 llm: FakeLlmProvider::new(""),
                 templates: FakeTemplateLoader::empty(),
                 audio_capture: FakeAudioCapture::new(),
+                file_store: FakeMeetingFileStore::new(),
                 recordings_dir: PathBuf::from("/tmp"),
             },
+            Arc::new(FakeSettings),
             TOKEN.to_string(),
             "0.1.0-test",
         )
     }
 
-    // The 7 API routes the contract requires to be auth-gated.
+    // The API routes the contract requires to be auth-gated.
     const API_ROUTES: &[(&str, &str)] = &[
         ("POST", "/api/v1/transcribe"),
         ("POST", "/api/v1/jobs"),
@@ -156,6 +194,10 @@ mod tests {
         ("POST", "/api/v1/recordings"),
         ("POST", "/api/v1/recordings/abc/stop"),
         ("GET", "/api/v1/meetings"),
+        ("GET", "/api/v1/settings"),
+        ("PUT", "/api/v1/settings"),
+        ("PUT", "/api/v1/settings/secret"),
+        ("POST", "/api/v1/settings/test"),
     ];
 
     #[tokio::test]

@@ -42,7 +42,7 @@ mod tests {
     use tower::ServiceExt;
     use meeting_core::{
         entities::Meeting,
-        fakes::{FakeAudioCapture, FakeLlmProvider, FakeMeetingRepo, FakeJobRepo, FakeTemplateLoader, FakeTranscriber},
+        fakes::{FakeAudioCapture, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo, FakeJobRepo, FakeTemplateLoader, FakeTranscriber},
         ports::MeetingRepo,
     };
     use crate::router::{AppState, create_router};
@@ -55,6 +55,7 @@ mod tests {
             llm: FakeLlmProvider::new(""),
             templates: FakeTemplateLoader::empty(),
             audio_capture: FakeAudioCapture::new(),
+            file_store: FakeMeetingFileStore::new(),
             recordings_dir: PathBuf::from("/tmp"),
         })
     }

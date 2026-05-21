@@ -203,6 +203,7 @@ impl Cli {
                     llm: container.llm,
                     templates: container.templates,
                     audio_capture: container.audio_capture,
+                    file_store: container.file_store,
                     recordings_dir: container.recordings_dir,
                 };
                 axum::serve(listener, meeting_api::create_router(state)).await?;

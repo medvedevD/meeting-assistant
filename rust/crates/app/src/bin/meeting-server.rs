@@ -24,6 +24,9 @@
 #[path = "../container.rs"]
 mod container;
 
+#[path = "../settings_service.rs"]
+mod settings_service;
+
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
@@ -103,8 +106,17 @@ async fn run(args: Args) -> Result<()> {
     std::fs::create_dir_all(&recordings)
         .with_context(|| format!("cannot create recordings dir {recordings:?}"))?;
 
-    let container = Container::new_sidecar(&model, &db, &prompts, recordings)
+    let mut container = Container::new_sidecar(&model, &db, &prompts, recordings)
         .context("failed to wire sidecar adapter graph")?;
+
+    // Take the runtime handles out before the adapter Arcs are moved into
+    // AppState; build the settings service that powers the /settings routes.
+    let handles = container
+        .settings_handles
+        .take()
+        .expect("sidecar container must carry settings handles");
+    let settings_service: std::sync::Arc<dyn meeting_api::SettingsService> =
+        std::sync::Arc::new(settings_service::AppSettingsService::new(handles));
 
     // ── Crash-safe recording recovery (section-06) ────────────────────────────
     // A previous core may have been killed mid-recording, leaving an
@@ -140,8 +152,10 @@ async fn run(args: Args) -> Result<()> {
             llm: container.llm,
             templates: container.templates,
             audio_capture: container.audio_capture,
+            file_store: container.file_store,
             recordings_dir: container.recordings_dir,
         },
+        settings_service,
         token.clone(),
         env!("CARGO_PKG_VERSION"),
     );
