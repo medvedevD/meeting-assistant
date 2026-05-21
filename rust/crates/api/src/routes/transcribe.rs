@@ -131,6 +131,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: std::sync::Arc::clone(&file_store) as _,
             recordings_dir: PathBuf::from("/tmp"),
+            progress: std::sync::Arc::new(dashmap::DashMap::new()),
         });
 
         let body = serde_json::json!({

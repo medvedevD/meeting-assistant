@@ -51,6 +51,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
+            progress: std::sync::Arc::new(dashmap::DashMap::new()),
         })
     }
 
@@ -92,6 +93,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
+            progress: std::sync::Arc::new(dashmap::DashMap::new()),
         });
 
         let body = serde_json::json!({
@@ -129,6 +131,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
+            progress: std::sync::Arc::new(dashmap::DashMap::new()),
         });
 
         let body = serde_json::json!({

@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use rusqlite::OptionalExtension;
 use meeting_core::{
     CoreError,
-    entities::{Job, JobKind, JobStatus},
+    entities::{ErrorClass, Job, JobKind, JobStatus},
     ports::JobRepo,
 };
 use super::Db;
@@ -24,11 +24,16 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         created_at: row.get(7)?,
         updated_at: row.get(8)?,
         template_name: row.get(9)?,
+        // Guard for NULL (old rows) and unknown/legacy values.
+        error_class: row
+            .get::<_, Option<String>>(10)?
+            .as_deref()
+            .and_then(ErrorClass::from_str),
     })
 }
 
 const SELECT_COLS: &str =
-    "id, meeting_id, kind, status, attempts, last_error, retry_after, created_at, updated_at, template_name";
+    "id, meeting_id, kind, status, attempts, last_error, retry_after, created_at, updated_at, template_name, error_class";
 
 #[async_trait]
 impl JobRepo for SqliteJobRepo {
@@ -161,19 +166,21 @@ impl JobRepo for SqliteJobRepo {
         &self,
         id: &str,
         error: &str,
+        error_class: Option<&str>,
         attempts: u32,
         now_ts: i64,
     ) -> Result<(), CoreError> {
         let db = Arc::clone(&self.0);
         let id = id.to_string();
         let error = error.to_string();
+        let error_class = error_class.map(|s| s.to_string());
 
         tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().unwrap();
             conn.execute(
                 "UPDATE jobs SET status='failed', attempts=?1, last_error=?2,
-                 updated_at=?3 WHERE id=?4",
-                rusqlite::params![attempts, error, now_ts, id],
+                 error_class=?3, updated_at=?4 WHERE id=?5",
+                rusqlite::params![attempts, error, error_class, now_ts, id],
             )
         })
         .await
@@ -318,10 +325,27 @@ mod tests {
         jr.enqueue(&job).await.unwrap();
         jr.claim_pending(i64::MAX).await.unwrap();
 
-        jr.mark_permanently_failed(&job.id, "crashed", 5, 2000).await.unwrap();
+        jr.mark_permanently_failed(&job.id, "crashed", Some("api_auth"), 5, 2000).await.unwrap();
         let j = jr.find_by_id(&job.id).await.unwrap().unwrap();
         assert_eq!(j.status, JobStatus::Failed);
         assert_eq!(j.attempts, 5);
         assert_eq!(j.last_error.as_deref(), Some("crashed"));
+        assert_eq!(j.error_class, Some(meeting_core::entities::ErrorClass::ApiAuth));
+    }
+
+    #[tokio::test]
+    async fn error_class_null_for_pending_and_persists_on_failure() {
+        let (mr, jr) = make_repos();
+        let m = insert_meeting(&mr).await;
+        let job = Job::new_transcribe(m.id);
+        jr.enqueue(&job).await.unwrap();
+
+        // Old/pending rows have NULL error_class → None, no panic.
+        let pending = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert!(pending.error_class.is_none());
+
+        jr.mark_permanently_failed(&job.id, "boom", None, 5, 1).await.unwrap();
+        let failed = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert!(failed.error_class.is_none());
     }
 }

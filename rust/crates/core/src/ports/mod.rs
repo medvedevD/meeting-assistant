@@ -1,5 +1,5 @@
 mod transcriber;
-pub use transcriber::Transcriber;
+pub use transcriber::{ProgressSink, Transcriber};
 
 mod meeting_repo;
 pub use meeting_repo::MeetingRepo;

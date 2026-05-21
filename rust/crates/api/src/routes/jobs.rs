@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use meeting_core::{
-    entities::Job,
+    entities::{Job, JobProgress},
     usecases::{get_job_status, submit_transcription_job},
 };
 use crate::router::AppState;
@@ -26,6 +26,10 @@ pub struct JobResponse {
     pub status: String,
     pub attempts: u32,
     pub last_error: Option<String>,
+    /// Classified terminal failure (persisted), for the UI error banner.
+    pub error_class: Option<String>,
+    /// Live pipeline progress, present only while the job is active (in-memory).
+    pub progress: Option<JobProgress>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -39,6 +43,8 @@ impl From<Job> for JobResponse {
             status: j.status.as_str().to_string(),
             attempts: j.attempts,
             last_error: j.last_error,
+            error_class: j.error_class.map(|c| c.as_str().to_string()),
+            progress: None,
             created_at: j.created_at,
             updated_at: j.updated_at,
         }
@@ -70,7 +76,12 @@ pub async fn status(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("job {id} not found")))?;
 
-    Ok(Json(job.into()))
+    // Merge the persisted job (status + error_class) with the live in-memory
+    // progress, present only while the job is mid-flight (decision #11).
+    let mut resp: JobResponse = job.into();
+    resp.progress = state.progress.get(&id).map(|p| p.value().clone());
+
+    Ok(Json(resp))
 }
 
 #[cfg(test)]
@@ -92,6 +103,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
+            progress: std::sync::Arc::new(dashmap::DashMap::new()),
         })
     }
 
@@ -153,6 +165,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
+            progress: std::sync::Arc::new(dashmap::DashMap::new()),
         });
 
         // submit
@@ -188,5 +201,63 @@ mod tests {
         let status_json = body_json(response).await;
         assert_eq!(status_json["id"], job_id);
         assert_eq!(status_json["status"], "pending");
+        // No live progress entry → null; no terminal failure → null error_class.
+        assert!(status_json["progress"].is_null());
+        assert!(status_json["error_class"].is_null());
+    }
+
+    #[tokio::test]
+    async fn status_merges_live_progress_and_persisted_error_class() {
+        use meeting_core::entities::{Job, JobProgress, PipelineStage};
+        use meeting_core::ports::JobRepo;
+
+        let jr = FakeJobRepo::new();
+        let progress: crate::router::LiveProgress = std::sync::Arc::new(dashmap::DashMap::new());
+
+        // A claimed job with a live progress entry, plus a (separate) failed job
+        // carrying a persisted error_class.
+        let active = Job::new_transcribe("m1".into());
+        jr.enqueue(&active).await.unwrap();
+        progress.insert(
+            active.id.clone(),
+            JobProgress::new(PipelineStage::Transcribing, "Распознавание речи", 42),
+        );
+
+        let failed = Job::new_transcribe("m2".into());
+        jr.enqueue(&failed).await.unwrap();
+        jr.mark_permanently_failed(&failed.id, "boom", Some("api_auth"), 5, 1).await.unwrap();
+
+        let app = create_router(AppState {
+            transcriber: FakeTranscriber::new("fake"),
+            meeting_repo: FakeMeetingRepo::new(),
+            job_repo: Arc::clone(&jr) as Arc<dyn JobRepo>,
+            llm: FakeLlmProvider::new(""),
+            templates: FakeTemplateLoader::empty(),
+            audio_capture: FakeAudioCapture::new(),
+            file_store: FakeMeetingFileStore::new(),
+            recordings_dir: std::path::PathBuf::from("/tmp"),
+            progress: Arc::clone(&progress),
+        });
+
+        // Active job: live progress merged in.
+        let resp = app
+            .clone()
+            .oneshot(Request::builder().uri(format!("/api/v1/jobs/{}", active.id)).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let json = body_json(resp).await;
+        assert_eq!(json["progress"]["stage"], "transcribing");
+        assert_eq!(json["progress"]["percent"], 42);
+        assert!(json["error_class"].is_null());
+
+        // Failed job: error_class from DB, no live progress.
+        let resp = app
+            .oneshot(Request::builder().uri(format!("/api/v1/jobs/{}", failed.id)).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let json = body_json(resp).await;
+        assert_eq!(json["status"], "failed");
+        assert_eq!(json["error_class"], "api_auth");
+        assert!(json["progress"].is_null());
     }
 }

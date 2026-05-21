@@ -166,6 +166,7 @@ async fn run(args: Args) -> Result<()> {
             audio_capture: container.audio_capture,
             file_store: container.file_store,
             recordings_dir: container.recordings_dir,
+            progress: container.progress,
         },
         settings_service,
         template_service,

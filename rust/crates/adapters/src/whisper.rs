@@ -1,9 +1,18 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use async_trait::async_trait;
-use meeting_core::{CoreError, entities::{Segment, Transcript}, ports::Transcriber};
+use meeting_core::{
+    CoreError,
+    entities::{PipelineStage, Segment, Transcript},
+    ports::{ProgressSink, Transcriber},
+};
 use serde::{Deserialize, Serialize};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+/// A progress sink that discards reports — used by the non-progress path.
+fn noop_sink() -> ProgressSink {
+    Arc::new(|_stage: PipelineStage, _pct: u8| {})
+}
 
 // ── Transcriber preferences ───────────────────────────────────────────────────
 
@@ -56,15 +65,35 @@ impl Transcriber for WhisperTranscriber {
         let ctx = Arc::clone(&self.ctx);
         let path = audio_path.to_path_buf();
         let prefs = TranscriberPrefs::default();
-        tokio::task::spawn_blocking(move || run_whisper(&ctx, &path, &prefs))
+        let sink = noop_sink();
+        tokio::task::spawn_blocking(move || run_whisper(&ctx, &path, &prefs, &sink))
+            .await
+            .map_err(|e| CoreError::Transcription(e.to_string()))?
+    }
+
+    async fn transcribe_with_progress(
+        &self,
+        audio_path: &Path,
+        on_progress: ProgressSink,
+    ) -> Result<Transcript, CoreError> {
+        let ctx = Arc::clone(&self.ctx);
+        let path = audio_path.to_path_buf();
+        let prefs = TranscriberPrefs::default();
+        tokio::task::spawn_blocking(move || run_whisper(&ctx, &path, &prefs, &on_progress))
             .await
             .map_err(|e| CoreError::Transcription(e.to_string()))?
     }
 }
 
-fn run_whisper(ctx: &WhisperContext, audio_path: &PathBuf, prefs: &TranscriberPrefs) -> Result<Transcript, CoreError> {
+fn run_whisper(
+    ctx: &WhisperContext,
+    audio_path: &PathBuf,
+    prefs: &TranscriberPrefs,
+    on_progress: &ProgressSink,
+) -> Result<Transcript, CoreError> {
     let t_total = std::time::Instant::now();
 
+    on_progress(PipelineStage::DecodingAudio, 0);
     let t = std::time::Instant::now();
     let samples = load_wav_as_mono_f32(audio_path)
         .map_err(|e| CoreError::Transcription(e.to_string()))?;
@@ -93,6 +122,16 @@ fn run_whisper(ctx: &WhisperContext, audio_path: &PathBuf, prefs: &TranscriberPr
     params.set_print_progress(false);
     params.set_print_realtime(false);
     params.set_print_timestamps(false);
+
+    // Stream inference progress (0–100) into the live-progress sink, inside the
+    // Transcribing stage. The callback runs on the inference thread.
+    on_progress(PipelineStage::Transcribing, 0);
+    {
+        let sink = Arc::clone(on_progress);
+        params.set_progress_callback_safe(move |p: i32| {
+            sink(PipelineStage::Transcribing, p.clamp(0, 100) as u8);
+        });
+    }
 
     let t = std::time::Instant::now();
     state.full(params, &samples)
@@ -185,7 +224,12 @@ fn bench_log(msg: &str) {
 
 #[async_trait]
 pub(crate) trait WhisperRunner: Send + Sync {
-    async fn run(&self, audio_path: &Path, prefs: &TranscriberPrefs) -> Result<Transcript, CoreError>;
+    async fn run(
+        &self,
+        audio_path: &Path,
+        prefs: &TranscriberPrefs,
+        on_progress: ProgressSink,
+    ) -> Result<Transcript, CoreError>;
 }
 
 pub(crate) type RunnerFactory =
@@ -216,11 +260,16 @@ struct RealWhisperRunner {
 
 #[async_trait]
 impl WhisperRunner for RealWhisperRunner {
-    async fn run(&self, audio_path: &Path, prefs: &TranscriberPrefs) -> Result<Transcript, CoreError> {
+    async fn run(
+        &self,
+        audio_path: &Path,
+        prefs: &TranscriberPrefs,
+        on_progress: ProgressSink,
+    ) -> Result<Transcript, CoreError> {
         let ctx = Arc::clone(&self.ctx);
         let path = audio_path.to_path_buf();
         let prefs = prefs.clone();
-        tokio::task::spawn_blocking(move || run_whisper(&ctx, &path, &prefs))
+        tokio::task::spawn_blocking(move || run_whisper(&ctx, &path, &prefs, &on_progress))
             .await
             .map_err(|e| CoreError::Transcription(e.to_string()))?
     }
@@ -291,9 +340,15 @@ impl LazyWhisperTranscriber {
     }
 }
 
-#[async_trait]
-impl Transcriber for LazyWhisperTranscriber {
-    async fn transcribe(&self, audio_path: &Path) -> Result<Transcript, CoreError> {
+impl LazyWhisperTranscriber {
+    /// Shared acquire → run → release path used by both `transcribe` and
+    /// `transcribe_with_progress`. The `on_progress` sink is forwarded to the
+    /// runner (a no-op sink for the plain path).
+    async fn transcribe_inner(
+        &self,
+        audio_path: &Path,
+        on_progress: ProgressSink,
+    ) -> Result<Transcript, CoreError> {
         let prefs = self.prefs.read().unwrap().clone();
         let model_path = self.model_path.read().unwrap().clone();
 
@@ -313,7 +368,7 @@ impl Transcriber for LazyWhisperTranscriber {
         }; // ← lock released, runner lives as Arc
 
         // --- 2. TRANSCRIBE (без lock) ---
-        let result = runner.run(audio_path, &prefs).await;
+        let result = runner.run(audio_path, &prefs, on_progress).await;
 
         // --- 3. RELEASE ---
         {
@@ -331,6 +386,21 @@ impl Transcriber for LazyWhisperTranscriber {
         }
 
         result
+    }
+}
+
+#[async_trait]
+impl Transcriber for LazyWhisperTranscriber {
+    async fn transcribe(&self, audio_path: &Path) -> Result<Transcript, CoreError> {
+        self.transcribe_inner(audio_path, noop_sink()).await
+    }
+
+    async fn transcribe_with_progress(
+        &self,
+        audio_path: &Path,
+        on_progress: ProgressSink,
+    ) -> Result<Transcript, CoreError> {
+        self.transcribe_inner(audio_path, on_progress).await
     }
 }
 
@@ -361,7 +431,12 @@ mod tests {
 
     #[async_trait]
     impl WhisperRunner for FakeRunner {
-        async fn run(&self, _audio_path: &Path, _prefs: &TranscriberPrefs) -> Result<Transcript, CoreError> {
+        async fn run(
+            &self,
+            _audio_path: &Path,
+            _prefs: &TranscriberPrefs,
+            _on_progress: ProgressSink,
+        ) -> Result<Transcript, CoreError> {
             if self.fail_run {
                 return Err(CoreError::Transcription("fake run error".into()));
             }

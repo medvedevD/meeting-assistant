@@ -15,6 +15,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
     (2, include_str!("../../../../migrations/002_protocol.sql")),
     (3, include_str!("../../../../migrations/003_file_paths.sql")),
     (4, include_str!("../../../../migrations/004_job_template.sql")),
+    (5, include_str!("../../../../migrations/005_job_error_class.sql")),
 ];
 
 pub struct Db {

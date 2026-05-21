@@ -6,8 +6,8 @@ use meeting_core::ports::{
 };
 use meeting_adapters::{
     build_llm, AnthropicProvider, CpalAudioCapture, Db, FileTemplateLoader, FsMeetingFileStore,
-    JsonSettingsStore, KeyringSecretStore, LazyWhisperTranscriber, SqliteJobRepo, SqliteMeetingRepo,
-    SwappableLlm, TranscriberPrefs, WhisperTranscriber, Worker,
+    JsonSettingsStore, KeyringSecretStore, LazyWhisperTranscriber, LiveProgress, SqliteJobRepo,
+    SqliteMeetingRepo, SwappableLlm, TranscriberPrefs, WhisperTranscriber, Worker,
 };
 
 /// Concrete handles the composition layer keeps so it can apply settings
@@ -30,6 +30,9 @@ pub struct Container {
     pub audio_capture: Arc<dyn AudioCapture>,
     pub file_store: Arc<dyn MeetingFileStore>,
     pub recordings_dir: PathBuf,
+    /// Live, in-memory job-progress table shared between the worker (writer)
+    /// and the `GET /jobs/:id` handler (reader). Never persisted.
+    pub progress: LiveProgress,
     /// `None` in CLI (`new_desktop`) mode; `Some` for the sidecar.
     pub settings_handles: Option<SettingsHandles>,
 }
@@ -53,7 +56,7 @@ impl Container {
         let audio_capture = Arc::new(CpalAudioCapture::new());
         let file_store: Arc<dyn MeetingFileStore> = Arc::new(FsMeetingFileStore);
 
-        Ok(Self { transcriber, meeting_repo, job_repo, llm, templates, audio_capture, file_store, recordings_dir, settings_handles: None })
+        Ok(Self { transcriber, meeting_repo, job_repo, llm, templates, audio_capture, file_store, recordings_dir, progress: Arc::new(dashmap::DashMap::new()), settings_handles: None })
     }
 
     /// Sidecar wiring — mirrors the `ffi/app_core.rs` adapter graph rather than
@@ -132,6 +135,7 @@ impl Container {
             audio_capture,
             file_store,
             recordings_dir,
+            progress: Arc::new(dashmap::DashMap::new()),
             settings_handles: Some(SettingsHandles {
                 settings_store,
                 secrets,
@@ -155,6 +159,7 @@ impl Container {
             Arc::clone(&self.file_store),
             Arc::clone(&self.llm),
             Arc::clone(&self.templates),
+            Arc::clone(&self.progress),
         );
         let handle = tokio::spawn(worker.run(shutdown_rx));
         (handle, shutdown_tx)

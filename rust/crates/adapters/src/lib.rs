@@ -14,7 +14,7 @@ pub mod db;
 pub use db::{Db, SqliteMeetingRepo, SqliteJobRepo};
 
 mod worker;
-pub use worker::Worker;
+pub use worker::{LiveProgress, Worker};
 
 pub mod llm;
 pub use llm::{

@@ -7,12 +7,19 @@ use axum::{
     Router,
 };
 use axum::routing::put;
+use dashmap::DashMap;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
+use meeting_core::entities::JobProgress;
 use meeting_core::ports::{
     AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber,
 };
+
+/// Live, in-memory job-progress table keyed by job id. Shared with the worker
+/// (the writer); the `GET /jobs/:id` handler reads it. Never persisted
+/// (decision #11).
+pub type LiveProgress = Arc<DashMap<String, JobProgress>>;
 use crate::routes::{transcribe, jobs, protocols, recordings, meetings, settings, templates, health, version};
 use crate::settings_service::SettingsService;
 use crate::template_service::TemplateService;
@@ -27,6 +34,8 @@ pub struct AppState {
     pub file_store: Arc<dyn MeetingFileStore>,
     /// Directory where per-meeting recording subdirs are created.
     pub recordings_dir: PathBuf,
+    /// Live, in-memory job-progress table (shared with the worker).
+    pub progress: LiveProgress,
 }
 
 /// Payload of `GET /version`. Build version is informational; the protocol
@@ -220,6 +229,7 @@ mod tests {
                 audio_capture: FakeAudioCapture::new(),
                 file_store: FakeMeetingFileStore::new(),
                 recordings_dir: PathBuf::from("/tmp"),
+            progress: std::sync::Arc::new(dashmap::DashMap::new()),
             },
             Arc::new(FakeSettings),
             Arc::new(FakeTemplates),

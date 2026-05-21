@@ -290,6 +290,7 @@ impl JobRepo for FakeJobRepo {
         &self,
         id: &str,
         error: &str,
+        error_class: Option<&str>,
         attempts: u32,
         now_ts: i64,
     ) -> Result<(), CoreError> {
@@ -298,6 +299,7 @@ impl JobRepo for FakeJobRepo {
             j.status = JobStatus::Failed;
             j.attempts = attempts;
             j.last_error = Some(error.to_string());
+            j.error_class = error_class.and_then(crate::entities::ErrorClass::from_str);
             j.updated_at = now_ts;
         }
         Ok(())

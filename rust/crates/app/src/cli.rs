@@ -205,6 +205,7 @@ impl Cli {
                     audio_capture: container.audio_capture,
                     file_store: container.file_store,
                     recordings_dir: container.recordings_dir,
+                    progress: container.progress,
                 };
                 axum::serve(listener, meeting_api::create_router(state)).await?;
             }
