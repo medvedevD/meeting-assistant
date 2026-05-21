@@ -266,6 +266,52 @@ fn api_routes_401_without_token_and_200_with_it() {
     );
 }
 
+/// Every `/api/v1/*` route the Phases 1–5 work added must sit behind the same
+/// bearer gate as the original ones. This pins the *real binary's* router (not
+/// just the in-crate unit list) so a route registered without the auth layer —
+/// or merged onto a sub-router that skips it — fails here.
+#[test]
+fn every_api_route_is_bearer_gated_401_without_token() {
+    let s = Sidecar::spawn();
+    let c = client();
+
+    // (method, path) for each auth-gated route, including the Phase 1–5 additions:
+    // settings*, templates*, meetings/{import,scan,:id/reprocess,:id}.
+    let routes: &[(&str, &str)] = &[
+        ("POST", "/api/v1/transcribe"),
+        ("POST", "/api/v1/jobs"),
+        ("GET", "/api/v1/jobs/abc"),
+        ("POST", "/api/v1/protocols"),
+        ("POST", "/api/v1/recordings"),
+        ("POST", "/api/v1/recordings/abc/stop"),
+        ("GET", "/api/v1/meetings"),
+        ("POST", "/api/v1/meetings/import"),
+        ("GET", "/api/v1/meetings/scan"),
+        ("POST", "/api/v1/meetings/abc/reprocess"),
+        ("DELETE", "/api/v1/meetings/abc"),
+        ("GET", "/api/v1/settings"),
+        ("PUT", "/api/v1/settings"),
+        ("PUT", "/api/v1/settings/secret"),
+        ("POST", "/api/v1/settings/test"),
+        ("GET", "/api/v1/templates"),
+        ("GET", "/api/v1/templates/foo"),
+        ("PUT", "/api/v1/templates/foo"),
+        ("DELETE", "/api/v1/templates/foo"),
+        ("POST", "/api/v1/templates/foo/rename"),
+    ];
+
+    for (method, path) in routes {
+        let url = format!("{}{}", s.base_url(), path);
+        let m = reqwest::Method::from_bytes(method.as_bytes()).unwrap();
+        let resp = c.request(m, &url).send().expect("request");
+        assert_eq!(
+            resp.status(),
+            reqwest::StatusCode::UNAUTHORIZED,
+            "{method} {path} must be 401 without a bearer token"
+        );
+    }
+}
+
 // ── Settings: GET/PUT round-trip + secret has_key ────────────────────────────
 
 #[test]

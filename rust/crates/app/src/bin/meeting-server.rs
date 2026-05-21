@@ -127,6 +127,12 @@ async fn run(args: Args) -> Result<()> {
             handles.templates.clone(),
             handles.settings_store.clone(),
         ));
+    // Resolver for the API-layer `default_template` fallback (decision #3):
+    // reads the live settings store so a hot-swapped default is picked up.
+    let default_template: meeting_api::DefaultTemplateFn = {
+        let store = handles.settings_store.clone();
+        std::sync::Arc::new(move || store.load().default_template.clone())
+    };
     let settings_service: std::sync::Arc<dyn meeting_api::SettingsService> =
         std::sync::Arc::new(settings_service::AppSettingsService::new(handles));
 
@@ -167,6 +173,7 @@ async fn run(args: Args) -> Result<()> {
             file_store: container.file_store,
             recordings_dir: container.recordings_dir,
             progress: container.progress,
+            default_template,
         },
         settings_service,
         template_service,

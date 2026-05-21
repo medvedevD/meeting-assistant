@@ -104,6 +104,7 @@ mod tests {
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
             progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            default_template: crate::router::no_default_template(),
         })
     }
 
@@ -166,6 +167,7 @@ mod tests {
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
             progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            default_template: crate::router::no_default_template(),
         });
 
         // submit
@@ -237,6 +239,7 @@ mod tests {
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
             progress: Arc::clone(&progress),
+            default_template: crate::router::no_default_template(),
         });
 
         // Active job: live progress merged in.

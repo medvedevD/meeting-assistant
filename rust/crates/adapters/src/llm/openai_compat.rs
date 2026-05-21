@@ -138,7 +138,7 @@ impl LlmProvider for OpenAiCompatProvider {
 mod tests {
     use super::*;
     use serde_json::json;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -182,5 +182,58 @@ mod tests {
 
         let provider = OpenAiCompatProvider::new("OpenAI", "k", "gpt-4o", 4096, server.uri());
         assert!(provider.probe().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn mistral_parses_chat_completion() {
+        // Mistral speaks the same Chat Completions wire format; it differs only
+        // by label/base_url/model, so the same path must serve it.
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(header("authorization", "Bearer mk"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{"message": {"role": "assistant", "content": "# Мистраль"}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let provider =
+            OpenAiCompatProvider::new("Mistral", "mk", "mistral-large-latest", 4096, server.uri());
+        let out = provider.generate("transcript", None).await.unwrap();
+        assert_eq!(out, "# Мистраль");
+    }
+
+    #[tokio::test]
+    async fn ollama_is_keyless_and_still_generates() {
+        // Ollama is local and keyless: an empty key must not break the request
+        // (the provider omits the Authorization header — see `auth`).
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{"message": {"role": "assistant", "content": "# Оллама"}}]
+            })))
+            .mount(&server)
+            .await;
+
+        let provider =
+            OpenAiCompatProvider::new("Ollama", "", "llama3.1:8b", 4096, server.uri());
+        let out = provider.generate("transcript", None).await.unwrap();
+        assert_eq!(out, "# Оллама");
+    }
+
+    #[tokio::test]
+    async fn classifies_401_as_auth() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("bad key"))
+            .mount(&server)
+            .await;
+
+        let provider = OpenAiCompatProvider::new("OpenAI", "k", "gpt-4o", 4096, server.uri());
+        let err = provider.generate("t", None).await.unwrap_err();
+        assert!(matches!(err, CoreError::ApiAuth(_)));
     }
 }

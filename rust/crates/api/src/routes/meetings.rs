@@ -180,13 +180,19 @@ pub async fn reprocess(
             &id,
         )
         .await,
-        "protocol" => regenerate_protocol(
-            Arc::clone(&state.meeting_repo),
-            Arc::clone(&state.job_repo),
-            &id,
-            req.template_name,
-        )
-        .await,
+        "protocol" => {
+            // Decision #3: resolve the configured default template in the API
+            // layer before the job is enqueued, so the worker's use-case call
+            // receives a ready template name and settings never reach the core.
+            let template_name = req.template_name.or_else(|| (state.default_template)());
+            regenerate_protocol(
+                Arc::clone(&state.meeting_repo),
+                Arc::clone(&state.job_repo),
+                &id,
+                template_name,
+            )
+            .await
+        }
         other => {
             return Err((StatusCode::BAD_REQUEST, format!("unknown reprocess kind '{other}'")));
         }
@@ -262,6 +268,7 @@ mod tests {
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: PathBuf::from("/tmp"),
             progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            default_template: crate::router::no_default_template(),
         })
     }
 
@@ -357,6 +364,7 @@ mod tests {
             file_store,
             recordings_dir: PathBuf::from("/recordings"),
             progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            default_template: crate::router::no_default_template(),
         })
     }
 

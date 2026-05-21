@@ -206,6 +206,8 @@ impl Cli {
                     file_store: container.file_store,
                     recordings_dir: container.recordings_dir,
                     progress: container.progress,
+                    // Legacy CLI passes template names explicitly; no resolver.
+                    default_template: meeting_api::no_default_template(),
                 };
                 axum::serve(listener, meeting_api::create_router(state)).await?;
             }

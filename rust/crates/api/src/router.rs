@@ -20,6 +20,18 @@ use meeting_core::ports::{
 /// (the writer); the `GET /jobs/:id` handler reads it. Never persisted
 /// (decision #11).
 pub type LiveProgress = Arc<DashMap<String, JobProgress>>;
+
+/// Resolves the configured `default_template` name when a protocol request
+/// omits one. Decision #3: settings never leak into the core; the API layer
+/// resolves the name (reading the live settings store) **before** calling the
+/// `generate_protocol` use-case, which only ever sees a ready `template_name`.
+pub type DefaultTemplateFn = Arc<dyn Fn() -> Option<String> + Send + Sync>;
+
+/// A resolver that always yields no default template. Used by per-route unit
+/// tests and the legacy CLI, which pass template names explicitly.
+pub fn no_default_template() -> DefaultTemplateFn {
+    Arc::new(|| None)
+}
 use crate::routes::{transcribe, jobs, protocols, recordings, meetings, settings, templates, health, version};
 use crate::settings_service::SettingsService;
 use crate::template_service::TemplateService;
@@ -36,6 +48,9 @@ pub struct AppState {
     pub recordings_dir: PathBuf,
     /// Live, in-memory job-progress table (shared with the worker).
     pub progress: LiveProgress,
+    /// Resolves the configured default template when a protocol request omits
+    /// one (decision #3 — the API layer resolves it before the use-case runs).
+    pub default_template: DefaultTemplateFn,
 }
 
 /// Payload of `GET /version`. Build version is informational; the protocol
@@ -230,6 +245,7 @@ mod tests {
                 file_store: FakeMeetingFileStore::new(),
                 recordings_dir: PathBuf::from("/tmp"),
             progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            default_template: super::no_default_template(),
             },
             Arc::new(FakeSettings),
             Arc::new(FakeTemplates),

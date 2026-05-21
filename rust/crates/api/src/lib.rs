@@ -3,7 +3,10 @@ mod routes;
 mod settings_service;
 mod template_service;
 
-pub use router::{create_router, create_server_router, AppState, LiveProgress, VersionInfo};
+pub use router::{
+    create_router, create_server_router, no_default_template, AppState, DefaultTemplateFn,
+    LiveProgress, VersionInfo,
+};
 pub use settings_service::SettingsService;
 pub use template_service::{TemplateDto, TemplateError, TemplateService};
 

@@ -132,6 +132,7 @@ mod tests {
             file_store: std::sync::Arc::clone(&file_store) as _,
             recordings_dir: PathBuf::from("/tmp"),
             progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            default_template: crate::router::no_default_template(),
         });
 
         let body = serde_json::json!({

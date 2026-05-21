@@ -20,11 +20,17 @@ pub async fn generate(
     State(state): State<Arc<AppState>>,
     Json(req): Json<GenerateRequest>,
 ) -> Result<(StatusCode, Json<GenerateResponse>), (StatusCode, String)> {
+    // Decision #3: when the request omits a template, resolve the configured
+    // `default_template` here (API layer) so the use-case stays settings-free.
+    let template_name = req
+        .template_name
+        .clone()
+        .or_else(|| (state.default_template)());
     let protocol = generate_protocol(
         Arc::clone(&state.llm),
         Arc::clone(&state.templates),
         &req.transcript,
-        req.template_name.as_deref(),
+        template_name.as_deref(),
         req.meeting_name.as_deref(),
     )
     .await
@@ -52,6 +58,7 @@ mod tests {
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
             progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            default_template: crate::router::no_default_template(),
         })
     }
 
@@ -94,6 +101,7 @@ mod tests {
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
             progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            default_template: crate::router::no_default_template(),
         });
 
         let body = serde_json::json!({
@@ -132,6 +140,7 @@ mod tests {
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
             progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            default_template: crate::router::no_default_template(),
         });
 
         let body = serde_json::json!({
@@ -155,5 +164,93 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json = body_json(response).await;
         assert_eq!(json["markdown"], "# 1-на-1 протокол");
+    }
+
+    #[tokio::test]
+    async fn resolves_default_template_when_request_omits_one() {
+        // Decision #3: with no `template_name` in the request, the API layer
+        // falls back to the configured default. The FakeTemplateLoader only
+        // knows "Ретро"; if the default weren't resolved, the use-case would
+        // hit the built-in prompt and the loader would never be consulted —
+        // so a 200 here proves the named template was selected.
+        let templates = FakeTemplateLoader::new([
+            ("Ретро", "Ретро-протокол.\n{transcript}\n"),
+        ]);
+
+        let app = create_router(AppState {
+            transcriber: FakeTranscriber::new("fake"),
+            meeting_repo: FakeMeetingRepo::new(),
+            job_repo: FakeJobRepo::new(),
+            llm: FakeLlmProvider::new("# Ретро протокол"),
+            templates,
+            audio_capture: FakeAudioCapture::new(),
+            file_store: FakeMeetingFileStore::new(),
+            recordings_dir: std::path::PathBuf::from("/tmp"),
+            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            default_template: std::sync::Arc::new(|| Some("Ретро".to_string())),
+        });
+
+        // No template_name in the body.
+        let body = serde_json::json!({ "transcript": "Обсудили спринт." });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/protocols")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = body_json(response).await;
+        assert_eq!(json["markdown"], "# Ретро протокол");
+    }
+
+    #[tokio::test]
+    async fn explicit_template_overrides_default() {
+        // An explicit `template_name` must win over the configured default.
+        let templates = FakeTemplateLoader::new([
+            ("1-на-1", "1-на-1.\n{transcript}\n"),
+            ("Дефолт", "Дефолт.\n{transcript}\n"),
+        ]);
+
+        let app = create_router(AppState {
+            transcriber: FakeTranscriber::new("fake"),
+            meeting_repo: FakeMeetingRepo::new(),
+            job_repo: FakeJobRepo::new(),
+            llm: FakeLlmProvider::new("# 1-на-1"),
+            templates,
+            audio_capture: FakeAudioCapture::new(),
+            file_store: FakeMeetingFileStore::new(),
+            recordings_dir: std::path::PathBuf::from("/tmp"),
+            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            default_template: std::sync::Arc::new(|| Some("Дефолт".to_string())),
+        });
+
+        let body = serde_json::json!({
+            "transcript": "текст",
+            "template_name": "1-на-1"
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/protocols")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // 200 with the 1-на-1 body proves the explicit name was used, not "Дефолт".
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = body_json(response).await;
+        assert_eq!(json["markdown"], "# 1-на-1");
     }
 }
