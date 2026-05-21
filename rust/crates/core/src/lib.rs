@@ -17,6 +17,10 @@ pub enum CoreError {
     Storage(String),
     #[error("not found: {0}")]
     NotFound(String),
+    #[error("already exists: {0}")]
+    AlreadyExists(String),
+    #[error("validation failed: {0}")]
+    Validation(String),
     #[error("LLM error: {0}")]
     Llm(String),
     #[error("template error: {0}")]

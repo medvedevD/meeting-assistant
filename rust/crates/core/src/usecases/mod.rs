@@ -18,3 +18,9 @@ pub use stop_recording::stop_recording;
 
 mod list_meetings;
 pub use list_meetings::list_meetings;
+
+mod templates;
+pub use templates::{
+    delete_template, get_template, list_templates, rename_template, save_template,
+    validate_template_name, TemplateWithBody,
+};

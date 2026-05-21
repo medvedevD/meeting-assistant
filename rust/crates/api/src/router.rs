@@ -13,8 +13,9 @@ use std::sync::Arc;
 use meeting_core::ports::{
     AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber,
 };
-use crate::routes::{transcribe, jobs, protocols, recordings, meetings, settings, health, version};
+use crate::routes::{transcribe, jobs, protocols, recordings, meetings, settings, templates, health, version};
 use crate::settings_service::SettingsService;
+use crate::template_service::TemplateService;
 
 pub struct AppState {
     pub transcriber: Arc<dyn Transcriber>,
@@ -55,6 +56,7 @@ pub fn create_router(state: AppState) -> Router {
 pub fn create_server_router(
     state: AppState,
     settings_service: Arc<dyn SettingsService>,
+    template_service: Arc<dyn TemplateService>,
     auth_token: String,
     build_version: impl Into<String>,
 ) -> Router {
@@ -67,8 +69,14 @@ pub fn create_server_router(
     // Settings routes carry their own state (the SettingsService), kept off
     // AppState so existing route tests stay untouched. Same bearer gate.
     let settings = settings_routes()
-        .route_layer(middleware::from_fn_with_state(token, require_bearer))
+        .route_layer(middleware::from_fn_with_state(token.clone(), require_bearer))
         .with_state(settings_service);
+
+    // Template routes follow the same separate-state pattern (the
+    // TemplateService), for the same reason. Same bearer gate.
+    let templates = template_routes()
+        .route_layer(middleware::from_fn_with_state(token, require_bearer))
+        .with_state(template_service);
 
     let meta = Router::new()
         .route("/health", get(health::handle))
@@ -79,7 +87,7 @@ pub fn create_server_router(
             min_protocol: crate::MIN_PROTOCOL_VERSION,
         });
 
-    api.merge(settings).merge(meta)
+    api.merge(settings).merge(templates).merge(meta)
 }
 
 fn api_routes() -> Router<Arc<AppState>> {
@@ -98,6 +106,16 @@ fn settings_routes() -> Router<Arc<dyn SettingsService>> {
         .route("/api/v1/settings", get(settings::get).put(settings::put))
         .route("/api/v1/settings/secret", put(settings::put_secret))
         .route("/api/v1/settings/test", post(settings::test))
+}
+
+fn template_routes() -> Router<Arc<dyn TemplateService>> {
+    Router::new()
+        .route("/api/v1/templates", get(templates::list))
+        .route(
+            "/api/v1/templates/:name",
+            get(templates::get).put(templates::put).delete(templates::delete),
+        )
+        .route("/api/v1/templates/:name/rename", post(templates::rename))
 }
 
 /// Rejects any request to an `/api/*` route that lacks a matching
@@ -167,6 +185,26 @@ mod tests {
         }
     }
 
+    struct FakeTemplates;
+    #[async_trait::async_trait]
+    impl TemplateService for FakeTemplates {
+        async fn list(&self) -> Result<Vec<crate::TemplateDto>, crate::TemplateError> {
+            Ok(Vec::new())
+        }
+        async fn get(&self, _name: &str) -> Result<String, crate::TemplateError> {
+            Ok(String::new())
+        }
+        async fn save(&self, _name: &str, _body: &str) -> Result<(), crate::TemplateError> {
+            Ok(())
+        }
+        async fn delete(&self, _name: &str) -> Result<Option<String>, crate::TemplateError> {
+            Ok(None)
+        }
+        async fn rename(&self, _old: &str, _new: &str) -> Result<(), crate::TemplateError> {
+            Ok(())
+        }
+    }
+
     fn server() -> Router {
         create_server_router(
             AppState {
@@ -180,6 +218,7 @@ mod tests {
                 recordings_dir: PathBuf::from("/tmp"),
             },
             Arc::new(FakeSettings),
+            Arc::new(FakeTemplates),
             TOKEN.to_string(),
             "0.1.0-test",
         )
@@ -198,6 +237,11 @@ mod tests {
         ("PUT", "/api/v1/settings"),
         ("PUT", "/api/v1/settings/secret"),
         ("POST", "/api/v1/settings/test"),
+        ("GET", "/api/v1/templates"),
+        ("GET", "/api/v1/templates/foo"),
+        ("PUT", "/api/v1/templates/foo"),
+        ("DELETE", "/api/v1/templates/foo"),
+        ("POST", "/api/v1/templates/foo/rename"),
     ];
 
     #[tokio::test]

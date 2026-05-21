@@ -266,29 +266,54 @@ impl LlmProvider for FakeLlmProvider {
 // ── FakeTemplateLoader ───────────────────────────────────────────────────────
 
 pub struct FakeTemplateLoader {
-    templates: HashMap<String, String>,
+    templates: Mutex<HashMap<String, String>>,
 }
 
 impl FakeTemplateLoader {
     pub fn new(templates: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>) -> Arc<Self> {
         Arc::new(Self {
-            templates: templates.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
+            templates: Mutex::new(
+                templates.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
+            ),
         })
     }
 
     pub fn empty() -> Arc<Self> {
-        Arc::new(Self { templates: HashMap::new() })
+        Arc::new(Self { templates: Mutex::new(HashMap::new()) })
     }
 }
 
 #[async_trait]
 impl TemplateLoader for FakeTemplateLoader {
     async fn load(&self, name: &str) -> Result<Option<String>, CoreError> {
-        Ok(self.templates.get(name).cloned())
+        Ok(self.templates.lock().unwrap().get(name).cloned())
     }
 
     async fn list_names(&self) -> Result<Vec<String>, CoreError> {
-        Ok(self.templates.keys().cloned().collect())
+        Ok(self.templates.lock().unwrap().keys().cloned().collect())
+    }
+
+    async fn save(&self, name: &str, body: &str) -> Result<(), CoreError> {
+        self.templates.lock().unwrap().insert(name.to_string(), body.to_string());
+        Ok(())
+    }
+
+    async fn delete(&self, name: &str) -> Result<(), CoreError> {
+        self.templates
+            .lock()
+            .unwrap()
+            .remove(name)
+            .map(|_| ())
+            .ok_or_else(|| CoreError::NotFound(format!("template '{name}'")))
+    }
+
+    async fn rename(&self, old: &str, new: &str) -> Result<(), CoreError> {
+        let mut t = self.templates.lock().unwrap();
+        let body = t
+            .remove(old)
+            .ok_or_else(|| CoreError::NotFound(format!("template '{old}'")))?;
+        t.insert(new.to_string(), body);
+        Ok(())
     }
 }
 

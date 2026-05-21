@@ -24,12 +24,16 @@ impl FileTemplateLoader {
     pub fn set_dir(&self, dir: impl Into<PathBuf>) {
         *self.dir.write().unwrap() = dir.into();
     }
+
+    fn path_for(&self, name: &str) -> PathBuf {
+        self.dir().join(format!("{name}.md"))
+    }
 }
 
 #[async_trait]
 impl TemplateLoader for FileTemplateLoader {
     async fn load(&self, name: &str) -> Result<Option<String>, CoreError> {
-        let path = self.dir().join(format!("{name}.md"));
+        let path = self.path_for(name);
         if !path.exists() {
             return Ok(None);
         }
@@ -64,6 +68,67 @@ impl TemplateLoader for FileTemplateLoader {
         names.sort();
         Ok(names)
     }
+
+    async fn save(&self, name: &str, body: &str) -> Result<(), CoreError> {
+        let dir = self.dir();
+        // Create the prompts dir on first save so a fresh profile (or a moved
+        // prompts path) does not fail the very first template creation.
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(|e| CoreError::Template(e.to_string()))?;
+
+        // Atomic write: stream into a unique sibling temp file, then rename over
+        // the destination. A crash mid-write leaves the old template intact and
+        // only an orphan `.tmp` behind — never a half-written `.md`.
+        let dest = dir.join(format!("{name}.md"));
+        let tmp = dir.join(format!(
+            ".{name}.{}.tmp",
+            std::process::id() as u64 * 1_000_000 + rand_suffix()
+        ));
+        tokio::fs::write(&tmp, body)
+            .await
+            .map_err(|e| CoreError::Template(e.to_string()))?;
+        match tokio::fs::rename(&tmp, &dest).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&tmp).await;
+                Err(CoreError::Template(e.to_string()))
+            }
+        }
+    }
+
+    async fn delete(&self, name: &str) -> Result<(), CoreError> {
+        let path = self.path_for(name);
+        match tokio::fs::remove_file(&path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Err(CoreError::NotFound(format!("template '{name}'")))
+            }
+            Err(e) => Err(CoreError::Template(e.to_string())),
+        }
+    }
+
+    async fn rename(&self, old: &str, new: &str) -> Result<(), CoreError> {
+        let from = self.path_for(old);
+        let to = self.path_for(new);
+        if !from.exists() {
+            return Err(CoreError::NotFound(format!("template '{old}'")));
+        }
+        // Same-directory rename is atomic on every supported platform.
+        tokio::fs::rename(&from, &to)
+            .await
+            .map_err(|e| CoreError::Template(e.to_string()))
+    }
+}
+
+/// A small per-call nonce for the temp file name. Not cryptographic — only used
+/// so two concurrent saves of the same template never pick the same temp path.
+fn rand_suffix() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as u64)
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -114,5 +179,51 @@ mod tests {
         assert!(names.contains(&"1-на-1".to_string()));
         assert!(names.contains(&"Дейлик".to_string()));
         assert!(!names.contains(&"notes".to_string()));
+    }
+
+    #[tokio::test]
+    async fn save_then_load_roundtrip() {
+        let tmp = setup();
+        let loader = FileTemplateLoader::new(tmp.path());
+        loader.save("Ретро", "Сделай ретро-протокол.").await.unwrap();
+
+        assert!(tmp.path().join("Ретро.md").exists());
+        assert_eq!(loader.load("Ретро").await.unwrap().unwrap(), "Сделай ретро-протокол.");
+    }
+
+    #[tokio::test]
+    async fn save_creates_missing_prompts_dir() {
+        let tmp = setup();
+        let nested = tmp.path().join("does/not/exist/yet");
+        let loader = FileTemplateLoader::new(&nested);
+        loader.save("X", "body").await.unwrap();
+        assert!(nested.join("X.md").exists());
+    }
+
+    #[tokio::test]
+    async fn delete_removes_file_and_reports_missing() {
+        let tmp = setup();
+        fs::write(tmp.path().join("X.md"), "body").unwrap();
+        let loader = FileTemplateLoader::new(tmp.path());
+
+        loader.delete("X").await.unwrap();
+        assert!(!tmp.path().join("X.md").exists());
+
+        let err = loader.delete("X").await.unwrap_err();
+        assert!(matches!(err, CoreError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn rename_moves_body_and_reports_missing_source() {
+        let tmp = setup();
+        fs::write(tmp.path().join("Old.md"), "keep me").unwrap();
+        let loader = FileTemplateLoader::new(tmp.path());
+
+        loader.rename("Old", "New").await.unwrap();
+        assert!(!tmp.path().join("Old.md").exists());
+        assert_eq!(loader.load("New").await.unwrap().unwrap(), "keep me");
+
+        let err = loader.rename("Old", "Whatever").await.unwrap_err();
+        assert!(matches!(err, CoreError::NotFound(_)));
     }
 }

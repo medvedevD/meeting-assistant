@@ -27,6 +27,9 @@ mod container;
 #[path = "../settings_service.rs"]
 mod settings_service;
 
+#[path = "../template_service.rs"]
+mod template_service;
+
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
@@ -115,6 +118,15 @@ async fn run(args: Args) -> Result<()> {
         .settings_handles
         .take()
         .expect("sidecar container must carry settings handles");
+    // The template service shares the same live handles (prompts-dir loader +
+    // settings store) so it sees hot-swapped paths and can clear a dangling
+    // `default_template`. Clone the Arcs out before `handles` moves into the
+    // settings service.
+    let template_service: std::sync::Arc<dyn meeting_api::TemplateService> =
+        std::sync::Arc::new(template_service::AppTemplateService::new(
+            handles.templates.clone(),
+            handles.settings_store.clone(),
+        ));
     let settings_service: std::sync::Arc<dyn meeting_api::SettingsService> =
         std::sync::Arc::new(settings_service::AppSettingsService::new(handles));
 
@@ -156,6 +168,7 @@ async fn run(args: Args) -> Result<()> {
             recordings_dir: container.recordings_dir,
         },
         settings_service,
+        template_service,
         token.clone(),
         env!("CARGO_PKG_VERSION"),
     );

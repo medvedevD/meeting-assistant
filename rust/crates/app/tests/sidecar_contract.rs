@@ -334,6 +334,105 @@ fn settings_get_put_roundtrip_and_secret_flag() {
     assert_eq!(after_secret["llm"]["openai"]["has_key"], true);
 }
 
+// ── Templates: create / read / list / delete lifecycle ──────────────────────
+
+#[test]
+fn templates_crud_lifecycle_and_traversal_rejected() {
+    let s = Sidecar::spawn();
+    let c = client();
+    let tok = &s.handshake.token;
+    let base = format!("{}/api/v1/templates", s.base_url());
+
+    // Point the prompts dir at an isolated tempdir so the test never writes
+    // into the repo's real `/prompts/`. The FileTemplateLoader hot-swaps its
+    // dir on a settings PUT, and the template service shares that handle.
+    let prompts = tempfile::tempdir().expect("prompts tempdir");
+    let settings_url = format!("{}/api/v1/settings", s.base_url());
+    let mut snap: serde_json::Value = c
+        .get(&settings_url)
+        .bearer_auth(tok)
+        .send()
+        .expect("get settings")
+        .json()
+        .expect("json");
+    snap["paths"]["prompts"] = serde_json::json!(prompts.path().to_str().unwrap());
+    let put_settings = c
+        .put(&settings_url)
+        .bearer_auth(tok)
+        .json(&snap)
+        .send()
+        .expect("put settings");
+    assert_eq!(put_settings.status(), reqwest::StatusCode::OK);
+
+    // Create a template with a Cyrillic name (must pass the validator).
+    let name = "Тест-шаблон";
+    let put = c
+        .put(format!("{base}/{name}"))
+        .bearer_auth(tok)
+        .json(&serde_json::json!({ "body": "Сделай протокол.\n{transcript}" }))
+        .send()
+        .expect("put template");
+    assert_eq!(put.status(), reqwest::StatusCode::NO_CONTENT);
+
+    // Read it back.
+    let got: serde_json::Value = c
+        .get(format!("{base}/{name}"))
+        .bearer_auth(tok)
+        .send()
+        .expect("get template")
+        .json()
+        .expect("json");
+    assert_eq!(got["name"], name);
+    assert_eq!(got["body"], "Сделай протокол.\n{transcript}");
+
+    // It shows up in the list with its body.
+    let list: serde_json::Value = c
+        .get(&base)
+        .bearer_auth(tok)
+        .send()
+        .expect("list templates")
+        .json()
+        .expect("json");
+    let found = list["templates"]
+        .as_array()
+        .expect("templates array")
+        .iter()
+        .any(|t| t["name"] == name && t["body"] == "Сделай протокол.\n{transcript}");
+    assert!(found, "created template must appear in the list: {list}");
+
+    // Path traversal is rejected before touching disk (400).
+    let evil = c
+        .put(format!("{base}/{}", "..%2f..%2fevil"))
+        .bearer_auth(tok)
+        .json(&serde_json::json!({ "body": "x" }))
+        .send()
+        .expect("put evil");
+    assert_eq!(
+        evil.status(),
+        reqwest::StatusCode::BAD_REQUEST,
+        "a traversal name must be rejected with 400"
+    );
+
+    // Delete it; no warning since it is not the default template.
+    let del = c
+        .delete(format!("{base}/{name}"))
+        .bearer_auth(tok)
+        .send()
+        .expect("delete template");
+    assert_eq!(del.status(), reqwest::StatusCode::OK);
+    let del_body: serde_json::Value = del.json().expect("json");
+    assert_eq!(del_body["deleted"], name);
+    assert!(del_body["warning"].is_null(), "no warning expected: {del_body}");
+
+    // Reading it now is a 404.
+    let after = c
+        .get(format!("{base}/{name}"))
+        .bearer_auth(tok)
+        .send()
+        .expect("get deleted");
+    assert_eq!(after.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
 // ── Loopback-only bind ───────────────────────────────────────────────────────
 
 #[test]

@@ -1,9 +1,11 @@
 mod router;
 mod routes;
 mod settings_service;
+mod template_service;
 
 pub use router::{create_router, create_server_router, AppState, VersionInfo};
 pub use settings_service::SettingsService;
+pub use template_service::{TemplateDto, TemplateError, TemplateService};
 
 /// IPC protocol version negotiated between the Qt GUI client and this server.
 ///
