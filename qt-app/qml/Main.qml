@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
+import MeetingAssistant
 
 ApplicationWindow {
     id: root
@@ -9,6 +10,15 @@ ApplicationWindow {
     height: 620
     visible: true
     title: qsTr("Meeting Assistant")
+
+    // qt-redesign Phase-1 sign-off: MEETY_THEME_GALLERY=1 shows the token
+    // gallery instead of the app shell. Dev-only; never reached in production.
+    Loader {
+        anchors.fill: parent
+        active: typeof themeGalleryEnabled !== "undefined" && themeGalleryEnabled
+        sourceComponent: ThemeGallery {}
+        z: 1000
+    }
 
     // Skeleton shell (section-03). Real screens land in section-04; this view
     // exists to prove the boundary: Fusion enforced, sidecar lifecycle states,

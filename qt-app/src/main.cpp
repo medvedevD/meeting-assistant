@@ -50,6 +50,11 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("api"), &api);
     engine.rootContext()->setContextProperty(QStringLiteral("controlsStyle"),
                                               QQuickStyle::name());
+    // qt-redesign Phase-1 dev affordance: MEETY_THEME_GALLERY=1 swaps the root
+    // view for the Theme token gallery (palette + typography) for sign-off.
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("themeGalleryEnabled"),
+        qEnvironmentVariableIsSet("MEETY_THEME_GALLERY"));
 
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,

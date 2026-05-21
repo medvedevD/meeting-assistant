@@ -95,6 +95,11 @@ target_include_directories(meeting-assistant-qt PRIVATE "${_gen_dir}")
 set_source_files_properties(qml/SettingsStore.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE)
 
+# Theme is the redesign's design-token singleton (qt-redesign Phase 1):
+# reachable from any screen as `Theme`.
+set_source_files_properties(qml/theme/Theme.qml PROPERTIES
+    QT_QML_SINGLETON_TYPE TRUE)
+
 qt_add_qml_module(meeting-assistant-qt
     URI MeetingAssistant
     VERSION 1.0
@@ -116,7 +121,33 @@ qt_add_qml_module(meeting-assistant-qt
         qml/screens/settings/StoragePanel.qml
         qml/screens/settings/RecordingPanel.qml
         qml/components/PipelineProgress.qml
+        qml/components/MeetyButton.qml
+        qml/components/MeetyField.qml
+        qml/components/MeetySwitch.qml
+        qml/components/MeetySegmented.qml
+        qml/components/MeetyTag.qml
+        qml/components/MeetyCard.qml
+        qml/components/MeetySectionLabel.qml
+        qml/components/MeetyMenu.qml
+        qml/components/MeetyMenuItem.qml
+        qml/components/MeetyIcon.qml
+        qml/components/MeetyIconButton.qml
+        qml/components/MeetyWordmark.qml
+        qml/components/ProtocolDocument.qml
+        qml/theme/Theme.qml
+        qml/theme/ThemeGallery.qml
         qml/i18n/errors.js)
+
+# Bundled design fonts (qt-redesign): variable TTFs registered as :/fonts/*,
+# loaded by Theme.qml's FontLoaders. All OFL-licensed (see fonts/OFL-*.txt);
+# packaging must ship the OFL notices and the binary grows accordingly.
+qt_add_resources(meeting-assistant-qt "meety_fonts"
+    PREFIX "/"
+    FILES
+        fonts/Geist-Variable.ttf
+        fonts/Newsreader-Variable.ttf
+        fonts/Newsreader-Italic-Variable.ttf
+        fonts/JetBrainsMono-Variable.ttf)
 
 # Fusion fallback: compiled-in `:/qtquickcontrols2.conf`. Qt Quick Controls
 # reads this at startup; combined with QQuickStyle::setStyle("Fusion") in

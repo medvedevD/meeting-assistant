@@ -1,6 +1,6 @@
 // Ready-state shell: persistent meeting sidebar + a StackView content pane.
-// Decompose `RootComponent` navigation reimplemented client-side (audit).
-// Plain Fusion + sane spacing only — no restyling (section guardrail).
+// Sidebar restyled to the Meety design (qt-redesign Phase 3): wordmark + local
+// search filter + date-grouped rows + footer. Navigation logic unchanged.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -12,6 +12,7 @@ Item {
     MeetingStore { id: store }
 
     property string selectedId: ""
+    property string query: ""
 
     // AppShell is instantiated eagerly by the StackLayout in Main.qml — well
     // before the sidecar finishes its handshake/health gate. Refreshing on
@@ -79,44 +80,114 @@ Item {
     Component { id: settingsComp; SettingsScreen {} }
     Component { id: diagComp;     DiagnosticsScreen {} }
 
+    // ── date helpers (port of Sidebar.jsx groupByDate / formatTime) ──────────
+    function _sameDay(a, b) {
+        return a.getFullYear() === b.getFullYear()
+            && a.getMonth() === b.getMonth()
+            && a.getDate() === b.getDate()
+    }
+    function rowTime(unixSec) {
+        var d = new Date((unixSec || 0) * 1000)
+        var now = new Date()
+        if (_sameDay(d, now)) return Qt.formatTime(d, "HH:mm")
+        if ((now - d) / 86400000 < 7) return Qt.formatDateTime(d, "ddd")
+        return Qt.formatDateTime(d, "d MMM")
+    }
+    function computeGroups(meetings, q) {
+        var list = meetings || []
+        if (q && q.trim().length) {
+            var qq = q.toLowerCase()
+            list = list.filter(function (m) {
+                return (m.name || "").toLowerCase().indexOf(qq) >= 0
+            })
+        }
+        list = list.slice().sort(function (a, b) {
+            return (b.created_at || 0) - (a.created_at || 0)
+        })
+        var now = new Date()
+        var yesterday = new Date(now.getTime() - 86400000)
+        var today = [], yest = [], week = [], earlier = []
+        for (var i = 0; i < list.length; ++i) {
+            var d = new Date((list[i].created_at || 0) * 1000)
+            if (_sameDay(d, now)) today.push(list[i])
+            else if (_sameDay(d, yesterday)) yest.push(list[i])
+            else if ((now - d) / 86400000 < 7) week.push(list[i])
+            else earlier.push(list[i])
+        }
+        var g = []
+        if (today.length) g.push({ "label": qsTr("Сегодня"), "items": today })
+        if (yest.length) g.push({ "label": qsTr("Вчера"), "items": yest })
+        if (week.length) g.push({ "label": qsTr("На этой неделе"), "items": week })
+        if (earlier.length) g.push({ "label": qsTr("Ранее"), "items": earlier })
+        return g
+    }
+    readonly property var filteredGroups: computeGroups(store.meetings, query)
+    readonly property bool noMatches: store.status === "success"
+                                      && filteredGroups.length === 0
+
     RowLayout {
         anchors.fill: parent
         spacing: 0
 
         // ── sidebar ─────────────────────────────────────────────────────────
-        Pane {
-            Layout.preferredWidth: 280
+        Rectangle {
+            Layout.preferredWidth: Theme.sidebarWidth
             Layout.fillHeight: true
-            padding: 0
+            color: Theme.paperSub
+
+            // right hairline
+            Rectangle {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                width: 1
+                color: Theme.rule
+            }
 
             ColumnLayout {
                 anchors.fill: parent
                 spacing: 0
 
-                // header
+                // header: wordmark + brand + refresh + new
                 RowLayout {
                     Layout.fillWidth: true
-                    Layout.margins: 10
-                    Label {
-                        text: qsTr("Встречи")
-                        font.pixelSize: 16
-                        font.bold: true
-                        Layout.fillWidth: true
+                    Layout.leftMargin: 16
+                    Layout.rightMargin: 12
+                    Layout.topMargin: 14
+                    Layout.bottomMargin: 10
+                    spacing: 8
+
+                    MeetyWordmark { size: 26 }
+                    Text {
+                        text: "meety"
+                        font.family: Theme.fontSerif
+                        font.weight: Theme.wMedium
+                        font.pixelSize: 22
+                        font.letterSpacing: Theme.tracking(22, -0.02)
+                        color: Theme.ink
                     }
-                    ToolButton {
-                        text: qsTr("⟳")
-                        ToolTip.text: qsTr("Обновить")
-                        ToolTip.visible: hovered
+                    Item { Layout.fillWidth: true }
+                    MeetyIconButton {
+                        iconName: "refresh"
+                        ToolTip.text: qsTr("Обновить"); ToolTip.visible: hovered
                         onClicked: store.refresh()
                     }
-                    ToolButton {
-                        text: qsTr("＋")
-                        ToolTip.text: qsTr("Новая запись")
-                        ToolTip.visible: hovered
+                    MeetyIconButton {
+                        iconName: "plus"; iconSize: 17
+                        ToolTip.text: qsTr("Новая запись"); ToolTip.visible: hovered
                         onClicked: shell.showNewRecording()
                     }
                 }
-                MenuSeparator { Layout.fillWidth: true }
+
+                // search (local filter; the ⌘K palette is deferred)
+                MeetyField {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 14
+                    Layout.rightMargin: 14
+                    Layout.bottomMargin: 12
+                    placeholderText: qsTr("Поиск встреч…")
+                    onTextChanged: shell.query = text
+                }
 
                 // list — the four data-states
                 Item {
@@ -129,14 +200,18 @@ Item {
                         visible: store.status === "loading"
                     }
 
-                    Label {
+                    Text {
                         anchors.centerIn: parent
                         width: parent.width - 32
-                        visible: store.status === "empty"
+                        visible: store.status === "empty" || shell.noMatches
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
-                        opacity: 0.7
-                        text: qsTr("Нет встреч")
+                        font.family: Theme.fontSerif
+                        font.italic: true
+                        font.pixelSize: 13
+                        color: Theme.ink4
+                        text: shell.noMatches ? qsTr("Ничего не найдено")
+                                              : qsTr("Нет встреч")
                     }
 
                     ColumnLayout {
@@ -144,78 +219,186 @@ Item {
                         width: parent.width - 24
                         visible: store.status === "error"
                         spacing: 8
-                        Label {
+                        Text {
                             Layout.fillWidth: true
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.WordWrap
-                            color: shell.palette.toolTipText
+                            font.family: Theme.fontUi
+                            font.pixelSize: Theme.fsBody
+                            color: Theme.ink2
                             text: qsTr("Ошибка: %1").arg(store.errorMessage)
                         }
-                        Button {
+                        MeetyButton {
                             Layout.alignment: Qt.AlignHCenter
                             text: qsTr("Повторить")
                             onClicked: store.refresh()
                         }
                     }
 
-                    ListView {
-                        id: list
+                    ScrollView {
                         anchors.fill: parent
-                        visible: store.status === "success"
+                        visible: store.status === "success" && !shell.noMatches
                         clip: true
-                        model: store.meetings
-                        ScrollBar.vertical: ScrollBar {}
-                        delegate: ItemDelegate {
-                            required property var modelData
-                            width: ListView.view.width
-                            highlighted: shell.selectedId === modelData.id
-                            onClicked: shell.showDetail(modelData)
-                            contentItem: ColumnLayout {
-                                spacing: 2
-                                Label {
+                        contentWidth: availableWidth
+                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                        ColumnLayout {
+                            width: parent.width
+                            spacing: 6
+
+                            Repeater {
+                                model: shell.filteredGroups
+                                delegate: ColumnLayout {
+                                    required property var modelData
                                     Layout.fillWidth: true
-                                    text: modelData.name
-                                    elide: Text.ElideRight
-                                    font.bold: true
-                                }
-                                Label {
-                                    text: Qt.formatDateTime(
-                                        new Date(modelData.created_at * 1000),
-                                        Qt.locale(), Locale.ShortFormat)
-                                    opacity: 0.7
-                                    font.pixelSize: 11
-                                }
-                                Label {
-                                    visible: modelData.has_transcript === true
-                                    text: qsTr("Транскрипт")
-                                    font.pixelSize: 11
-                                    color: shell.palette.highlight
+                                    spacing: 1
+
+                                    // section header
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        Layout.leftMargin: 18
+                                        Layout.rightMargin: 18
+                                        Layout.topMargin: 14
+                                        Layout.bottomMargin: 6
+                                        MeetySectionLabel {
+                                            label: modelData.label
+                                            trackingEm: 0.08
+                                        }
+                                        Item { Layout.fillWidth: true }
+                                        Text {
+                                            text: modelData.items.length
+                                            font.family: Theme.fontUi
+                                            font.pixelSize: Theme.fsMicro
+                                            font.weight: Theme.wMedium
+                                            color: Theme.ink4
+                                        }
+                                    }
+
+                                    // rows
+                                    Repeater {
+                                        model: modelData.items
+                                        delegate: Rectangle {
+                                            id: row
+                                            required property var modelData
+                                            readonly property bool selected:
+                                                shell.selectedId === modelData.id
+                                            readonly property bool hasTx:
+                                                modelData.has_transcript === true
+
+                                            Layout.fillWidth: true
+                                            Layout.leftMargin: 8
+                                            Layout.rightMargin: 8
+                                            implicitHeight: rowContent.implicitHeight
+                                                            + 2 * Theme.rowPy
+                                            radius: Theme.rMd
+                                            color: selected ? Theme.paper4
+                                                 : rowHover.hovered ? Theme.paper3
+                                                 : "transparent"
+                                            border.width: selected ? 1 : 0
+                                            border.color: Theme.rule2
+
+                                            // accent left bar (selected)
+                                            Rectangle {
+                                                visible: row.selected
+                                                x: -4
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: 2.5
+                                                height: parent.height - 18
+                                                radius: 2
+                                                color: Theme.accent
+                                            }
+
+                                            HoverHandler { id: rowHover }
+                                            TapHandler {
+                                                onTapped: shell.showDetail(row.modelData)
+                                            }
+
+                                            RowLayout {
+                                                id: rowContent
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.leftMargin: 12
+                                                anchors.rightMargin: 12
+                                                spacing: 10
+
+                                                ColumnLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: 2
+                                                    Text {
+                                                        Layout.fillWidth: true
+                                                        text: row.modelData.name
+                                                        elide: Text.ElideRight
+                                                        font.family: Theme.fontUi
+                                                        font.pixelSize: 13
+                                                        font.weight: row.selected
+                                                                     ? Theme.wSemiBold
+                                                                     : Theme.wMedium
+                                                        color: Theme.ink
+                                                    }
+                                                    Text {
+                                                        text: row.hasTx
+                                                              ? qsTr("транскрипт")
+                                                              : qsTr("нет транскрипта")
+                                                        font.family: Theme.fontUi
+                                                        font.pixelSize: 12
+                                                        color: row.hasTx ? Theme.ink3
+                                                                         : Theme.warn
+                                                    }
+                                                }
+                                                Text {
+                                                    Layout.alignment: Qt.AlignTop
+                                                    text: shell.rowTime(row.modelData.created_at)
+                                                    font.family: Theme.fontUi
+                                                    font.pixelSize: 12
+                                                    color: Theme.ink3
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
+                            Item { Layout.fillWidth: true; height: 8 }
                         }
                     }
                 }
 
-                MenuSeparator { Layout.fillWidth: true }
+                // footer: sync indicator + diagnostics + settings
+                Rectangle {
+                    Layout.fillWidth: true
+                    implicitHeight: 1
+                    color: Theme.rule
+                }
                 RowLayout {
                     Layout.fillWidth: true
-                    Layout.margins: 6
+                    Layout.leftMargin: 14
+                    Layout.rightMargin: 10
+                    Layout.topMargin: 8
+                    Layout.bottomMargin: 8
+                    spacing: 7
+
+                    Rectangle {
+                        width: 6; height: 6; radius: 3; color: Theme.ok
+                    }
+                    Text {
+                        text: qsTr("Локально")
+                        font.family: Theme.fontUi
+                        font.pixelSize: 12
+                        color: Theme.ink3
+                    }
                     Item { Layout.fillWidth: true }
-                    ToolButton {
-                        text: qsTr("Диагностика")
+                    MeetyIconButton {
+                        iconName: "cpu"
+                        ToolTip.text: qsTr("Диагностика"); ToolTip.visible: hovered
                         onClicked: shell.showDiagnostics()
                     }
-                    ToolButton {
-                        text: qsTr("Настройки")
+                    MeetyIconButton {
+                        iconName: "gear"
+                        ToolTip.text: qsTr("Настройки"); ToolTip.visible: hovered
                         onClicked: shell.showSettings()
                     }
                 }
             }
-        }
-
-        ToolSeparator {
-            Layout.fillHeight: true
-            padding: 0
         }
 
         // ── content pane ────────────────────────────────────────────────────
@@ -224,6 +407,7 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             initialItem: MeetingListScreen {}
+            background: Rectangle { color: Theme.paper }
         }
     }
 }
