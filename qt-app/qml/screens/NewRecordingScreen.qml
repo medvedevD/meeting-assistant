@@ -177,32 +177,28 @@ Page {
         onTriggered: scr.visualTick += 1
     }
 
-    Dialog {
+    MeetyDialog {
         id: permissionDialog
-        modal: true
-        anchors.centerIn: Overlay.overlay
-        width: Math.min(scr.width - 64, 520)
+        preferredWidth: 520
         title: qsTr("Нужно разрешение macOS")
-        standardButtons: Dialog.NoButton
-        contentItem: ColumnLayout {
-            spacing: 12
-            Label {
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                text: qsTr("Для записи системного звука macOS требует разрешение «Запись экрана» (Screen Recording). Несмотря на название, Meeting Assistant записывает только звук и никогда не делает снимки экрана.")
-            }
+
+        Text {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            lineHeight: 1.35
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBodyLg
+            color: Theme.ink2
+            text: qsTr("Для записи системного звука macOS требует разрешение «Запись экрана» (Screen Recording). Несмотря на название, Meeting Assistant записывает только звук и никогда не делает снимки экрана.")
         }
-        footer: DialogButtonBox {
-            Button {
-                text: qsTr("Отмена")
-                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            }
-            Button {
-                text: qsTr("Открыть настройки")
-                highlighted: true
-                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-                onClicked: Qt.openUrlExternally(scr.screenRecordingSettingsUrl)
-            }
+
+        footer: MeetyDialogActions {
+            dialog: permissionDialog
+            cancelText: qsTr("Отмена")
+            confirmText: qsTr("Открыть настройки")
+            confirmVariant: "accent"
+            confirmIconName: "gear"
+            onAccepted: Qt.openUrlExternally(scr.screenRecordingSettingsUrl)
         }
     }
 
@@ -215,11 +211,9 @@ Page {
 
     // ── "Из папки" scan dialog ────────────────────────────────────────────────
     ListModel { id: scanModel }
-    Dialog {
+    MeetyDialog {
         id: scanDialog
-        modal: true
-        anchors.centerIn: Overlay.overlay
-        width: Math.min(scr.width - 48, 640)
+        preferredWidth: 640
         height: Math.min(scr.height - 64, 520)
         title: qsTr("Импорт из папки")
         property bool loading: false
@@ -233,59 +227,69 @@ Page {
             open()
         }
 
-        contentItem: ColumnLayout {
-            spacing: 10
-            Label {
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                opacity: 0.7
-                text: qsTr("Аудиофайлы в каталоге встреч, ещё не добавленные как встречи. Отмеченные будут зарегистрированы на месте и поставлены в очередь на транскрипцию.")
-            }
-            BusyIndicator { Layout.alignment: Qt.AlignHCenter; running: scanDialog.loading; visible: scanDialog.loading }
-            Label {
-                Layout.fillWidth: true
-                visible: scanDialog.errorText.length > 0
-                color: Theme.rec
-                wrapMode: Text.WordWrap
-                text: scanDialog.errorText
-            }
-            Label {
-                Layout.fillWidth: true
-                visible: !scanDialog.loading && scanModel.count === 0 && scanDialog.errorText.length === 0
-                opacity: 0.7
-                text: qsTr("Новых файлов не найдено.")
-            }
-            ListView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                model: scanModel
-                ScrollBar.vertical: ScrollBar {}
-                delegate: CheckDelegate {
-                    width: ListView.view.width
-                    text: model.name
-                    checked: model.checked
-                    onToggled: scanModel.setProperty(index, "checked", checked)
-                }
+        Text {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            lineHeight: 1.35
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            color: Theme.ink3
+            text: qsTr("Аудиофайлы в каталоге встреч, ещё не добавленные как встречи. Отмеченные будут зарегистрированы на месте и поставлены в очередь на транскрипцию.")
+        }
+
+        BusyIndicator {
+            Layout.alignment: Qt.AlignHCenter
+            running: scanDialog.loading
+            visible: scanDialog.loading
+        }
+
+        Text {
+            Layout.fillWidth: true
+            visible: scanDialog.errorText.length > 0
+            color: Theme.rec
+            wrapMode: Text.WordWrap
+            lineHeight: 1.35
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            text: scanDialog.errorText
+        }
+
+        Text {
+            Layout.fillWidth: true
+            visible: !scanDialog.loading && scanModel.count === 0 && scanDialog.errorText.length === 0
+            color: Theme.ink3
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            text: qsTr("Новых файлов не найдено.")
+        }
+
+        ListView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            clip: true
+            model: scanModel
+            ScrollBar.vertical: ScrollBar {}
+            delegate: MeetyCheckDelegate {
+                width: ListView.view.width
+                text: model.name
+                checked: model.checked
+                onToggled: scanModel.setProperty(index, "checked", checked)
             }
         }
-        footer: DialogButtonBox {
-            Button {
-                text: qsTr("Отмена")
-                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
-            }
-            Button {
-                text: qsTr("Импортировать выбранные")
-                highlighted: true
-                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
-                onClicked: {
-                    for (var i = 0; i < scanModel.count; ++i) {
-                        var it = scanModel.get(i)
-                        if (it.checked)
-                            scr.store.importFile(it.path, false, true) // register in place
-                    }
-                    scr.store.refresh()
+
+        footer: MeetyDialogActions {
+            dialog: scanDialog
+            cancelText: qsTr("Отмена")
+            confirmText: qsTr("Импортировать выбранные")
+            confirmVariant: "accent"
+            confirmIconName: "download"
+            onAccepted: {
+                for (var i = 0; i < scanModel.count; ++i) {
+                    var it = scanModel.get(i)
+                    if (it.checked)
+                        scr.store.importFile(it.path, false, true) // register in place
                 }
+                scr.store.refresh()
             }
         }
     }

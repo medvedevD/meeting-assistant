@@ -52,17 +52,28 @@ Page {
         }
     }
 
-    Dialog {
+    MeetyDialog {
         id: confirmDelete
-        modal: true
-        anchors.centerIn: Overlay.overlay
+        preferredWidth: 420
         title: qsTr("Удалить встречу?")
-        standardButtons: Dialog.Yes | Dialog.No
         onAccepted: deleteReq.del("/api/v1/meetings/" + scr.meetingId + "?mode=full")
-        Label {
-            width: 360
+
+        Text {
+            Layout.fillWidth: true
             wrapMode: Text.WordWrap
+            lineHeight: 1.35
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBodyLg
+            color: Theme.ink2
             text: qsTr("Встреча, её транскрипт, протокол и аудиофайл будут удалены безвозвратно.")
+        }
+
+        footer: MeetyDialogActions {
+            dialog: confirmDelete
+            cancelText: qsTr("Отмена")
+            confirmText: qsTr("Удалить")
+            confirmVariant: "accent"
+            confirmIconName: "trash"
         }
     }
 

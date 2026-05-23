@@ -134,6 +134,9 @@ qt_add_qml_module(meeting-assistant-qt
         qml/components/MeetySectionLabel.qml
         qml/components/MeetyMenu.qml
         qml/components/MeetyMenuItem.qml
+        qml/components/MeetyDialog.qml
+        qml/components/MeetyDialogActions.qml
+        qml/components/MeetyCheckDelegate.qml
         qml/components/MeetyToolTip.qml
         qml/components/MeetyIcon.qml
         qml/components/MeetyIconButton.qml

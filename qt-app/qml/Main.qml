@@ -84,84 +84,64 @@ ApplicationWindow {
     }
 
     // Version gate (Q9): blocking, non-dismissable. The user cannot proceed.
-    Dialog {
+    MeetyDialog {
         id: incompatibleDialog
-        modal: true
         closePolicy: Popup.NoAutoClose
-        anchors.centerIn: parent
-        width: 460
+        preferredWidth: 460
         title: qsTr("Несовместимые компоненты")
         visible: sidecar.state === SidecarManager.Incompatible
-        standardButtons: Dialog.NoButton
-        background: Rectangle {
-            radius: Theme.rLg
-            color: Theme.paper
-            border.width: 1
-            border.color: Theme.rule
+
+        Text {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            lineHeight: 1.35
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBodyLg
+            color: Theme.ink2
+            text: qsTr("Компоненты несовместимы — обновите приложение.\n\n"
+                       + "Интерфейс использует протокол %1, а ядро "
+                       + "поддерживает только %2–%3.")
+                  .arg(sidecar.clientProtocol)
+                  .arg(sidecar.serverMinProtocol)
+                  .arg(sidecar.serverProtocol)
         }
 
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 12
-            Text {
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                lineHeight: 1.35
-                font.family: Theme.fontUi
-                font.pixelSize: Theme.fsBodyLg
-                color: Theme.ink2
-                text: qsTr("Компоненты несовместимы — обновите приложение.\n\n"
-                           + "Интерфейс использует протокол %1, а ядро "
-                           + "поддерживает только %2–%3.")
-                      .arg(sidecar.clientProtocol)
-                      .arg(sidecar.serverMinProtocol)
-                      .arg(sidecar.serverProtocol)
-            }
-            MeetyButton {
-                text: qsTr("Закрыть")
-                Layout.alignment: Qt.AlignRight
-                onClicked: Qt.quit()
-            }
+        footer: MeetyDialogActions {
+            dialog: incompatibleDialog
+            showCancel: false
+            confirmText: qsTr("Закрыть")
+            confirmVariant: "primary"
+            onAccepted: Qt.quit()
         }
     }
 
     // Non-version fatal (e.g. another instance already running, restart budget
     // exhausted).
-    Dialog {
+    MeetyDialog {
         id: failedDialog
-        modal: true
         closePolicy: Popup.NoAutoClose
-        anchors.centerIn: parent
-        width: 460
+        preferredWidth: 460
         title: qsTr("Не удалось запустить")
         visible: sidecar.state === SidecarManager.Failed
-        standardButtons: Dialog.NoButton
-        background: Rectangle {
-            radius: Theme.rLg
-            color: Theme.paper
-            border.width: 1
-            border.color: Theme.rule
+
+        Text {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            lineHeight: 1.35
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBodyLg
+            color: Theme.ink2
+            text: sidecar.lastError.length > 0
+                  ? sidecar.lastError
+                  : qsTr("Ядро не запустилось.")
         }
 
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 12
-            Text {
-                Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                lineHeight: 1.35
-                font.family: Theme.fontUi
-                font.pixelSize: Theme.fsBodyLg
-                color: Theme.ink2
-                text: sidecar.lastError.length > 0
-                      ? sidecar.lastError
-                      : qsTr("Ядро не запустилось.")
-            }
-            MeetyButton {
-                text: qsTr("Закрыть")
-                Layout.alignment: Qt.AlignRight
-                onClicked: Qt.quit()
-            }
+        footer: MeetyDialogActions {
+            dialog: failedDialog
+            showCancel: false
+            confirmText: qsTr("Закрыть")
+            confirmVariant: "primary"
+            onAccepted: Qt.quit()
         }
     }
 }

@@ -13,11 +13,7 @@ private slots:
 };
 
 static std::unique_ptr<QObject> createDocument(QQmlEngine &engine, QQmlComponent &component) {
-    component.setData(R"qml(
-        import QtQuick
-        import MeetingAssistant
-        ProtocolDocument {}
-    )qml", QUrl());
+    component.loadUrl(QUrl::fromLocalFile(QStringLiteral(MA_PROTOCOL_QML_FILE)));
 
     if (!component.isReady())
         return nullptr;
@@ -26,6 +22,7 @@ static std::unique_ptr<QObject> createDocument(QQmlEngine &engine, QQmlComponent
 
 void ProtocolDocumentTest::parsesEditorialMarkdownBlocks() {
     QQmlEngine engine;
+    engine.addImportPath(QStringLiteral(MA_PROTOCOL_QML_IMPORT_DIR));
 
     QQmlComponent component(&engine);
     std::unique_ptr<QObject> root = createDocument(engine, component);
@@ -60,6 +57,7 @@ void ProtocolDocumentTest::parsesEditorialMarkdownBlocks() {
 
 void ProtocolDocumentTest::parsesDeepHeadingsWithoutVisibleHashes() {
     QQmlEngine engine;
+    engine.addImportPath(QStringLiteral(MA_PROTOCOL_QML_IMPORT_DIR));
 
     QQmlComponent component(&engine);
     std::unique_ptr<QObject> root = createDocument(engine, component);
@@ -87,6 +85,7 @@ void ProtocolDocumentTest::parsesDeepHeadingsWithoutVisibleHashes() {
 
 void ProtocolDocumentTest::escapesInlineHtml() {
     QQmlEngine engine;
+    engine.addImportPath(QStringLiteral(MA_PROTOCOL_QML_IMPORT_DIR));
 
     QQmlComponent component(&engine);
     std::unique_ptr<QObject> root = createDocument(engine, component);

@@ -68,13 +68,11 @@ ScrollView {
         onFail: function (s, e) { panel.status = qsTr("Ошибка переименования: %1").arg(e) }
     }
 
-    Dialog {
+    MeetyDialog {
         id: nameDialog
-        anchors.centerIn: Overlay.overlay
-        modal: true
+        preferredWidth: 380
         title: mode === "new" ? qsTr("Новый шаблон") : qsTr("Переименовать шаблон")
         property string mode: "new"
-        standardButtons: Dialog.Ok | Dialog.Cancel
         onAccepted: {
             var n = nameInput.text.trim()
             if (n.length === 0) return
@@ -85,12 +83,21 @@ ScrollView {
                                { "new_name": n })
             if (mode === "new") panel.selected = n
         }
-        ColumnLayout {
-            MeetyField {
-                id: nameInput
-                Layout.preferredWidth: 320
-                placeholderText: qsTr("Имя шаблона")
-            }
+
+        MeetyField {
+            id: nameInput
+            Layout.fillWidth: true
+            placeholderText: qsTr("Имя шаблона")
+            onAccepted: nameDialog.accept()
+        }
+
+        footer: MeetyDialogActions {
+            dialog: nameDialog
+            cancelText: qsTr("Отмена")
+            confirmText: nameDialog.mode === "new" ? qsTr("Создать") : qsTr("Переименовать")
+            confirmVariant: "accent"
+            confirmIconName: nameDialog.mode === "new" ? "plus" : "edit"
+            confirmEnabled: nameInput.text.trim().length > 0
         }
     }
 

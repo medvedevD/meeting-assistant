@@ -5,6 +5,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import MeetingAssistant
 
 Page {
     id: scr
@@ -37,70 +38,152 @@ Page {
 
     Component.onCompleted: probe()
 
-    header: ToolBar {
+    background: Rectangle { color: Theme.paper }
+
+    component DiagnosticsRow: RowLayout {
+        id: row
+        property string label: ""
+        property string value: ""
+        property bool strong: false
+
+        spacing: 18
+
+        Text {
+            Layout.preferredWidth: 150
+            text: row.label
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            color: Theme.ink3
+        }
+        Text {
+            Layout.fillWidth: true
+            text: row.value
+            wrapMode: Text.WrapAnywhere
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            font.weight: row.strong ? Theme.wSemiBold : Theme.wRegular
+            color: row.strong ? Theme.ink : Theme.ink2
+        }
+    }
+
+    header: Item {
+        implicitHeight: 65
+
         RowLayout {
             anchors.fill: parent
-            ToolButton { text: qsTr("‹ Назад"); onClicked: scr.shell.showList() }
-            Label {
-                text: qsTr("Диагностика")
-                font.bold: true
-                Layout.fillWidth: true
-                horizontalAlignment: Text.AlignHCenter
+            anchors.leftMargin: 24
+            anchors.rightMargin: 24
+            spacing: 12
+
+            MeetyButton {
+                variant: "ghost"
+                iconName: "arrow-left"
+                text: qsTr("Назад")
+                onClicked: scr.shell.showList()
             }
-            ToolButton { text: qsTr("⟳"); onClicked: scr.probe() }
+
+            Text {
+                Layout.fillWidth: true
+                text: qsTr("Диагностика")
+                elide: Text.ElideRight
+                font.family: Theme.fontSerif
+                font.pixelSize: Theme.fsTitle
+                font.weight: Theme.wMedium
+                font.letterSpacing: Theme.tracking(Theme.fsTitle, -0.02)
+                color: Theme.ink
+            }
+
+            MeetyIconButton {
+                iconName: "refresh"
+                onClicked: scr.probe()
+            }
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 1
+            color: Theme.rule
         }
     }
 
     ScrollView {
         anchors.fill: parent
         clip: true
+        contentWidth: availableWidth
+
         ColumnLayout {
-            width: scr.width
+            width: Math.min(parent.width - 48, 760)
+            anchors.horizontalCenter: parent.horizontalCenter
             spacing: 16
 
-            GroupBox {
-                title: qsTr("Сайдкар")
+            MeetyCard {
                 Layout.fillWidth: true
-                Layout.margins: 24
-                GridLayout {
-                    columns: 2
-                    columnSpacing: 24
-                    rowSpacing: 8
-                    Label { text: qsTr("URL:") }
-                    Label { text: sidecar.baseUrl; font.bold: true }
-                    Label { text: qsTr("/health:") }
-                    Label { text: scr.healthText; font.bold: true }
-                    Label { text: qsTr("/version:") }
-                    Label { text: scr.versionText }
-                    Label { text: qsTr("Протокол (клиент):") }
-                    Label { text: sidecar.clientProtocol }
-                    Label { text: qsTr("Протокол (сервер):") }
-                    Label {
-                        text: "[" + sidecar.serverMinProtocol + ", "
-                              + sidecar.serverProtocol + "]"
+                Layout.topMargin: 24
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 12
+
+                    MeetySectionLabel { label: qsTr("Сайдкар") }
+                    DiagnosticsRow {
+                        label: qsTr("URL:")
+                        value: sidecar.baseUrl
+                        strong: true
                     }
-                    Label { text: qsTr("Сборка сервера:") }
-                    Label { text: sidecar.serverBuild }
-                    Label { text: qsTr("Стиль интерфейса:") }
-                    Label { text: controlsStyle; font.bold: true }
+                    DiagnosticsRow {
+                        label: qsTr("/health:")
+                        value: scr.healthText
+                        strong: true
+                    }
+                    DiagnosticsRow {
+                        label: qsTr("/version:")
+                        value: scr.versionText
+                    }
+                    DiagnosticsRow {
+                        label: qsTr("Протокол (клиент):")
+                        value: sidecar.clientProtocol
+                    }
+                    DiagnosticsRow {
+                        label: qsTr("Протокол (сервер):")
+                        value: "[" + sidecar.serverMinProtocol + ", "
+                               + sidecar.serverProtocol + "]"
+                    }
+                    DiagnosticsRow {
+                        label: qsTr("Сборка сервера:")
+                        value: sidecar.serverBuild
+                    }
+                    DiagnosticsRow {
+                        label: qsTr("Стиль интерфейса:")
+                        value: controlsStyle
+                        strong: true
+                    }
                 }
             }
 
-            GroupBox {
-                title: qsTr("Недоступно через сайдкар")
+            MeetyCard {
                 Layout.fillWidth: true
-                Layout.leftMargin: 24
-                Layout.rightMargin: 24
                 Layout.bottomMargin: 24
-                Label {
-                    width: parent.width
-                    wrapMode: Text.WordWrap
-                    opacity: 0.7
-                    text: qsTr("Список аудиоустройств, пути и их статус, " +
-                               "проверка ffmpeg и журнал ядра не " +
-                               "экспонируются через 7 маршрутов сайдкара. " +
-                               "Появятся здесь после добавления " +
-                               "диагностического маршрута в ядро.")
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 12
+
+                    MeetySectionLabel { label: qsTr("Недоступно через сайдкар") }
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        lineHeight: 1.35
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsBody
+                        color: Theme.ink3
+                        text: qsTr("Список аудиоустройств, пути и их статус, " +
+                                   "проверка ffmpeg и журнал ядра не " +
+                                   "экспонируются через 7 маршрутов сайдкара. " +
+                                   "Появятся здесь после добавления " +
+                                   "диагностического маршрута в ядро.")
+                    }
                 }
             }
         }

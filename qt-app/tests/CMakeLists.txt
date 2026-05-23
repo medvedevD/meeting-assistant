@@ -71,6 +71,10 @@ set_tests_properties(qt_pipeline_progress_pending_done PROPERTIES
 qt_add_executable(tst_protocol_document
     tst_protocol_document.cpp)
 
+target_compile_definitions(tst_protocol_document PRIVATE
+    MA_PROTOCOL_QML_IMPORT_DIR="${CMAKE_CURRENT_BINARY_DIR}/protocol_qml"
+    MA_PROTOCOL_QML_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/ProtocolDocument.qml")
+
 set_source_files_properties(
     "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
     PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
@@ -87,6 +91,7 @@ set_source_files_properties(
 qt_add_qml_module(tst_protocol_document
     URI MeetingAssistant
     VERSION 1.0
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/protocol_qml/MeetingAssistant"
     QML_FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/ProtocolDocument.qml"
         "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
