@@ -114,9 +114,10 @@ Page {
         }
 
         MeetyIconButton {
+            id: actionButton
             Layout.alignment: Qt.AlignTop
             iconName: "more"
-            onClicked: actionMenu.popup()
+            onClicked: actionMenu.popupFromButton(actionButton)
             MeetyToolTip { text: qsTr("Действия"); visible: parent.hovered }
         }
     }

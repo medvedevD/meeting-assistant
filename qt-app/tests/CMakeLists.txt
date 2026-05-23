@@ -100,6 +100,43 @@ set_tests_properties(qt_protocol_document_markdown_blocks PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     TIMEOUT 30)
 
+qt_add_executable(tst_meety_menu
+    tst_meety_menu.cpp)
+
+target_compile_definitions(tst_meety_menu PRIVATE
+    MA_MENU_QML_IMPORT_DIR="${CMAKE_CURRENT_BINARY_DIR}/menu_qml")
+
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyMenu.qml"
+    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyMenu.qml")
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyMenuItem.qml"
+    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyMenuItem.qml")
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
+    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyIcon.qml")
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
+    PROPERTIES QT_RESOURCE_ALIAS "qml/theme/Theme.qml")
+
+qt_add_qml_module(tst_meety_menu
+    URI MeetingAssistant
+    VERSION 1.0
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/menu_qml/MeetingAssistant"
+    QML_FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyMenu.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyMenuItem.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml")
+
+target_link_libraries(tst_meety_menu PRIVATE
+    Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2)
+
+add_test(NAME qt_meety_menu_long_items_expand COMMAND tst_meety_menu)
+set_tests_properties(qt_meety_menu_long_items_expand PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 30)
+
 qt_add_executable(tst_smoke
     tst_smoke.cpp
     ../src/SidecarManager.h ../src/SidecarManager.cpp

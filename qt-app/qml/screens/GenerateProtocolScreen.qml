@@ -127,6 +127,8 @@ Page {
 
         RowLayout {
             Layout.fillWidth: true
+            Layout.preferredHeight: 64
+            Layout.maximumHeight: 64
             Layout.leftMargin: 24
             Layout.rightMargin: 24
             Layout.topMargin: 16
@@ -336,9 +338,13 @@ Page {
         ColumnLayout {
             visible: scr.st === "transcribing"
             Layout.alignment: Qt.AlignCenter
+            Layout.fillWidth: true
+            Layout.fillHeight: true
             Layout.preferredWidth: Math.min(720, parent.width - 48)
+            Layout.maximumWidth: 720
             spacing: 22
 
+            Item { Layout.fillHeight: true }
             Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: transcribingCard.implicitHeight + 40
@@ -409,15 +415,20 @@ Page {
                     }
                 }
             }
+            Item { Layout.fillHeight: true }
         }
 
         // ── protocol-job phase (polled via the shared PipelineProgress) ──────
         ColumnLayout {
             visible: scr.st === "generating" || scr.st === "done"
             Layout.alignment: Qt.AlignCenter
+            Layout.fillWidth: true
+            Layout.fillHeight: true
             Layout.preferredWidth: Math.min(720, parent.width - 48)
+            Layout.maximumWidth: 720
             spacing: 22
 
+            Item { Layout.fillHeight: true }
             Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: progressCard.implicitHeight + 40
@@ -469,14 +480,19 @@ Page {
                     }
                 }
             }
+            Item { Layout.fillHeight: true }
         }
 
         // ── error (transcriptFailed / failed) ───────────────────────────────
         ColumnLayout {
             visible: scr.st === "transcriptFailed" || scr.st === "failed"
             Layout.alignment: Qt.AlignCenter
+            Layout.fillWidth: true
+            Layout.fillHeight: true
             Layout.preferredWidth: Math.min(560, parent.width - 64)
+            Layout.maximumWidth: 560
             spacing: 16
+            Item { Layout.fillHeight: true }
             Text {
                 Layout.fillWidth: true
                 horizontalAlignment: Text.AlignHCenter
@@ -491,6 +507,7 @@ Page {
                 text: qsTr("Повторить")
                 onClicked: scr.generate()
             }
+            Item { Layout.fillHeight: true }
         }
     }
 }

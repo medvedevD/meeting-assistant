@@ -13,10 +13,12 @@ MenuItem {
     rightPadding: 10
     topPadding: 7
     bottomPadding: 7
+    implicitWidth: contentRow.implicitWidth + leftPadding + rightPadding
 
     readonly property color _fg: danger ? "#C0341D" : Theme.ink
 
     contentItem: Row {
+        id: contentRow
         spacing: 10
         opacity: control.enabled ? 1.0 : 0.45
         MeetyIcon {
