@@ -1,10 +1,10 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use crate::{
-    CoreError,
     entities::{Job, Meeting},
     ports::{JobRepo, MeetingFileStore, MeetingRepo},
+    CoreError,
 };
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Outcome of an import: the created meeting and, if requested, the queued
 /// transcription job.

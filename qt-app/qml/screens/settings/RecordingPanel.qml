@@ -1,85 +1,81 @@
-// Default recording settings. Edits scr.draft.recording {source, echo_cancel}
-// — now server-authoritative (decision #13), shared with NewRecordingScreen.
+// Default recording settings. Edits scr.draft.recording {source, echo_cancel}.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import MeetingAssistant
 
 ScrollView {
     id: panel
     property var scr
+    font.family: Theme.fontUi
+    font.pixelSize: Theme.fsBody
     clip: true
     contentWidth: availableWidth
 
     function r() { return scr.draft.recording || (scr.draft.recording = { source: "mic", echo_cancel: false }) }
-    function load() {
-        var rec = r()
-        switch (rec.source) {
-        case "mic":    micBtn.checked = true; break
-        case "system": sysBtn.checked = true; break
-        default:       mixBtn.checked = true
+    function sourceIndex() {
+        switch (r().source) {
+        case "mic": return 0
+        case "system": return 1
+        default: return 2
         }
-        echoSwitch.checked = rec.echo_cancel === true
     }
+    function setSourceIndex(index) {
+        r().source = index === 0 ? "mic" : (index === 1 ? "system" : "mixed")
+        scr.touch()
+    }
+    function load() { echoSwitch.checked = r().echo_cancel === true }
     Component.onCompleted: load()
     Connections { target: scr; function onReseeded() { panel.load() } }
 
     ColumnLayout {
         width: panel.availableWidth
-        spacing: 16
+        spacing: 0
 
-        Label {
-            Layout.margins: 16
-            Layout.bottomMargin: 0
-            text: qsTr("Запись по умолчанию")
-            font.pixelSize: 18
-            font.bold: true
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: 32
+            Layout.rightMargin: 32
+            Layout.topMargin: 32
+            text: qsTr("Запись")
+            font.family: Theme.fontSerif
+            font.pixelSize: 26
+            font.weight: Theme.wMedium
+            font.letterSpacing: 0
+            color: Theme.ink
+        }
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: 32
+            Layout.rightMargin: 32
+            Layout.topMargin: 4
+            Layout.bottomMargin: 28
+            text: qsTr("Настройки по умолчанию для новых записей. Их можно переопределить перед каждой записью.")
+            wrapMode: Text.WordWrap
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            color: Theme.ink3
         }
 
-        GroupBox {
+        SettingsRow {
             title: qsTr("Источник звука")
-            Layout.fillWidth: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 8
-                ButtonGroup { id: g }
-                RadioButton {
-                    id: micBtn; text: qsTr("Микрофон"); ButtonGroup.group: g
-                    onCheckedChanged: if (checked) { panel.r().source = "mic"; scr.touch() }
-                }
-                RadioButton {
-                    id: sysBtn; text: qsTr("Система"); ButtonGroup.group: g
-                    onCheckedChanged: if (checked) { panel.r().source = "system"; scr.touch() }
-                }
-                RadioButton {
-                    id: mixBtn; text: qsTr("Оба"); ButtonGroup.group: g
-                    onCheckedChanged: if (checked) { panel.r().source = "mixed"; scr.touch() }
-                }
+            help: qsTr("Выберите источник, который будет предложен по умолчанию.")
+            MeetySegmented {
+                Layout.fillWidth: true
+                model: [qsTr("Микрофон"), qsTr("Система"), qsTr("Оба источника")]
+                currentIndex: panel.sourceIndex()
+                onActivated: function (index) { panel.setSourceIndex(index) }
             }
         }
 
-        GroupBox {
-            title: qsTr("Обработка")
-            Layout.fillWidth: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
-            Layout.bottomMargin: 16
-            RowLayout {
-                anchors.fill: parent
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    Label { text: qsTr("Подавление эха") }
-                    Label {
-                        text: qsTr("Рекомендуется при записи через микрофон")
-                        opacity: 0.6
-                        font.pixelSize: 11
-                    }
-                }
-                Switch {
-                    id: echoSwitch
-                    onToggled: { panel.r().echo_cancel = checked; scr.touch() }
-                }
+        SettingsRow {
+            title: qsTr("Подавление эха")
+            help: qsTr("Рекомендуется при записи через микрофон.")
+            dividerVisible: false
+            Item { Layout.fillWidth: true }
+            MeetySwitch {
+                id: echoSwitch
+                onToggled: { panel.r().echo_cancel = checked; scr.touch() }
             }
         }
     }

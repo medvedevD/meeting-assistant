@@ -11,6 +11,11 @@
 #   --skip-build  Don't reconfigure/rebuild the Qt app
 #   --no-run      Build only; do not launch the GUI
 #
+# Dev-only:
+#   FIRST_RUN=1 ./run-qt.sh
+#       Launch with fresh isolated temporary XDG data/config dirs so the app
+#       behaves like a clean first install without touching real meetings/settings.
+#
 # Qt discovery (first hit wins):
 #   $CMAKE_PREFIX_PATH  →  $QT_DIR  →  ~/Qt/<ver>/<kit>  →  qmake6 on PATH
 #                       →  brew --prefix qt
@@ -118,6 +123,16 @@ fi
 if [[ $RUN -eq 0 ]]; then
     echo "→ Build complete (--no-run). GUI: $GUI_BIN"
     exit 0
+fi
+
+if [[ "${FIRST_RUN:-}" == "1" ]]; then
+    if [[ -z "${FIRST_RUN_DIR:-}" ]]; then
+        FIRST_RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/meeting-assistant-first-run.XXXXXX")"
+    fi
+    mkdir -p "$FIRST_RUN_DIR/data" "$FIRST_RUN_DIR/config"
+    export XDG_DATA_HOME="$FIRST_RUN_DIR/data"
+    export XDG_CONFIG_HOME="$FIRST_RUN_DIR/config"
+    echo "→ FIRST_RUN=1: using isolated app data under $FIRST_RUN_DIR"
 fi
 
 echo "→ Launching Meeting Assistant (Qt)..."

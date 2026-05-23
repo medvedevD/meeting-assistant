@@ -1,5 +1,5 @@
+use crate::{entities::Job, ports::JobRepo, CoreError};
 use std::sync::Arc;
-use crate::{CoreError, entities::Job, ports::JobRepo};
 
 pub async fn get_job_status(
     job_repo: Arc<dyn JobRepo>,
@@ -11,8 +11,8 @@ pub async fn get_job_status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fakes::FakeJobRepo;
     use crate::entities::Job;
+    use crate::fakes::FakeJobRepo;
 
     #[tokio::test]
     async fn returns_none_for_unknown_id() {
@@ -27,7 +27,10 @@ mod tests {
         let job = Job::new_transcribe("meeting-123".to_string());
         jr.enqueue(&job).await.unwrap();
 
-        let found = get_job_status(Arc::clone(&jr) as Arc<dyn JobRepo>, &job.id).await.unwrap().unwrap();
+        let found = get_job_status(Arc::clone(&jr) as Arc<dyn JobRepo>, &job.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(found.id, job.id);
         assert_eq!(found.meeting_id, "meeting-123");
     }

@@ -1,5 +1,9 @@
+use crate::{
+    entities::Job,
+    ports::{JobRepo, MeetingRepo},
+    CoreError,
+};
 use std::sync::Arc;
-use crate::{CoreError, entities::Job, ports::{JobRepo, MeetingRepo}};
 
 /// Re-transcribe an existing meeting: clear the stale transcript + protocol,
 /// then enqueue a fresh transcription job (the worker re-runs Whisper).

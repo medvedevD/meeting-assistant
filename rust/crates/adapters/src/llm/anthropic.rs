@@ -1,8 +1,8 @@
-use std::time::Duration;
 use async_trait::async_trait;
-use meeting_core::{CoreError, ports::LlmProvider};
+use meeting_core::{ports::LlmProvider, CoreError};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 use super::errors::{classify_http, classify_transport};
 
@@ -52,11 +52,16 @@ impl AnthropicProvider {
             max_tokens: 1,
             messages: vec![Message {
                 role: "user",
-                content: vec![ContentBlock { kind: "text", text: "hi", cache_control: None }],
+                content: vec![ContentBlock {
+                    kind: "text",
+                    text: "hi",
+                    cache_control: None,
+                }],
             }],
         };
         let url = format!("{}/v1/messages", self.base_url);
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
@@ -121,24 +126,36 @@ struct ResponseBody {
 
 #[async_trait]
 impl LlmProvider for AnthropicProvider {
-    async fn generate(&self, transcript: &str, instructions: Option<&str>) -> Result<String, CoreError> {
+    async fn generate(
+        &self,
+        transcript: &str,
+        instructions: Option<&str>,
+    ) -> Result<String, CoreError> {
         let mut content = vec![ContentBlock {
             kind: "text",
             text: transcript,
             cache_control: Some(CacheControl { kind: "ephemeral" }),
         }];
         if let Some(instr) = instructions {
-            content.push(ContentBlock { kind: "text", text: instr, cache_control: None });
+            content.push(ContentBlock {
+                kind: "text",
+                text: instr,
+                cache_control: None,
+            });
         }
 
         let body = RequestBody {
             model: &self.model,
             max_tokens: self.max_tokens,
-            messages: vec![Message { role: "user", content }],
+            messages: vec![Message {
+                role: "user",
+                content,
+            }],
         };
 
         let url = format!("{}/v1/messages", self.base_url);
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
@@ -153,7 +170,10 @@ impl LlmProvider for AnthropicProvider {
             return Err(classify_http("Anthropic", status, &text));
         }
 
-        let parsed: ResponseBody = resp.json().await.map_err(|e| CoreError::Llm(e.to_string()))?;
+        let parsed: ResponseBody = resp
+            .json()
+            .await
+            .map_err(|e| CoreError::Llm(e.to_string()))?;
 
         if parsed.stop_reason.as_deref() == Some("max_tokens") {
             tracing::warn!("Anthropic response truncated: max_tokens reached");
@@ -176,11 +196,13 @@ impl LlmProvider for AnthropicProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::{MockServer, Mock, ResponseTemplate};
-    use wiremock::matchers::{method, path, header, body_json};
     use serde_json::json;
+    use wiremock::matchers::{body_json, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    async fn mock_server_with_response(_response_body: serde_json::Value) -> (MockServer, AnthropicProvider) {
+    async fn mock_server_with_response(
+        _response_body: serde_json::Value,
+    ) -> (MockServer, AnthropicProvider) {
         let server = MockServer::start().await;
         let provider = AnthropicProvider::with_base_url("test-api-key", server.uri());
         (server, provider)
@@ -229,7 +251,10 @@ mod tests {
             .mount(&server)
             .await;
 
-        let result = provider.generate("transcript", Some("make it short")).await.unwrap();
+        let result = provider
+            .generate("transcript", Some("make it short"))
+            .await
+            .unwrap();
         assert_eq!(result, "Short.");
     }
 

@@ -1,7 +1,10 @@
+use crate::{
+    ports::{MeetingFileStore, MeetingRepo},
+    CoreError,
+};
+use serde::Serialize;
 use std::path::Path;
 use std::sync::Arc;
-use serde::Serialize;
-use crate::{CoreError, ports::{MeetingFileStore, MeetingRepo}};
 
 /// An audio file found on disk that has no corresponding meeting in the DB.
 #[derive(Debug, Clone, Serialize)]
@@ -46,9 +49,9 @@ fn file_name(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use crate::entities::Meeting;
     use crate::fakes::{FakeMeetingFileStore, FakeMeetingRepo};
+    use std::path::PathBuf;
 
     #[tokio::test]
     async fn excludes_already_tracked_files() {

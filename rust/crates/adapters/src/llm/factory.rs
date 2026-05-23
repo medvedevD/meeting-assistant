@@ -42,14 +42,16 @@ pub async fn probe_llm(cfg: &LlmConfig) -> Result<(), CoreError> {
                 .probe()
                 .await
         }
-        ProviderKind::Gemini => GeminiProvider::new(
-            cfg.api_key.clone(),
-            cfg.model.clone(),
-            cfg.max_tokens,
-            cfg.base_url.clone(),
-        )
-        .probe()
-        .await,
+        ProviderKind::Gemini => {
+            GeminiProvider::new(
+                cfg.api_key.clone(),
+                cfg.model.clone(),
+                cfg.max_tokens,
+                cfg.base_url.clone(),
+            )
+            .probe()
+            .await
+        }
         ProviderKind::Openai | ProviderKind::Mistral | ProviderKind::Ollama => {
             OpenAiCompatProvider::new(
                 cfg.kind.as_str(),

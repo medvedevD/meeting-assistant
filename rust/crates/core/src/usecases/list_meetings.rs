@@ -1,17 +1,15 @@
+use crate::{entities::Meeting, ports::MeetingRepo, CoreError};
 use std::sync::Arc;
-use crate::{CoreError, entities::Meeting, ports::MeetingRepo};
 
-pub async fn list_meetings(
-    meeting_repo: Arc<dyn MeetingRepo>,
-) -> Result<Vec<Meeting>, CoreError> {
+pub async fn list_meetings(meeting_repo: Arc<dyn MeetingRepo>) -> Result<Vec<Meeting>, CoreError> {
     meeting_repo.list_all().await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use crate::{entities::Meeting, fakes::FakeMeetingRepo, ports::MeetingRepo};
+    use std::path::PathBuf;
 
     #[tokio::test]
     async fn empty_repo_returns_empty_vec() {

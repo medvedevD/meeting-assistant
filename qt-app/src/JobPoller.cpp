@@ -87,6 +87,9 @@ void JobPoller::onSucceeded(int requestId, const QString & /*path*/,
         m_status = status;
         emit statusChanged(status, json);
     }
+    // Always push the latest snapshot so progress (percent) updates live, not
+    // only on status transitions.
+    emit jobUpdated(status, json);
     if (isTerminal(status))
         stop();
 }

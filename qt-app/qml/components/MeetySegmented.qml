@@ -11,10 +11,29 @@ Rectangle {
     property int currentIndex: 0
     signal activated(int index)
 
+    activeFocusOnTab: true
     implicitHeight: 30
     implicitWidth: row.implicitWidth + 6
     radius: Theme.rMd
     color: Theme.paper3
+    border.width: activeFocus ? 1 : 0
+    border.color: Theme.focus
+
+    Keys.onLeftPressed: {
+        if (currentIndex > 0) {
+            currentIndex--
+            activated(currentIndex)
+        }
+    }
+    Keys.onRightPressed: {
+        if (currentIndex < model.length - 1) {
+            currentIndex++
+            activated(currentIndex)
+        }
+    }
+    Keys.onSpacePressed: activated(currentIndex)
+    Keys.onReturnPressed: activated(currentIndex)
+    Keys.onEnterPressed: activated(currentIndex)
 
     Item {
         anchors.fill: parent
@@ -37,6 +56,7 @@ Rectangle {
 
         Row {
             id: row
+            width: parent.width
             height: parent.height
             spacing: 2
 
@@ -49,22 +69,33 @@ Rectangle {
                     readonly property bool active: root.currentIndex === index
 
                     height: row.height
-                    implicitWidth: lbl.implicitWidth + 24
+                    implicitWidth: lbl.implicitWidth + 18
+                    width: (row.width - Math.max(0, rep.count - 1) * row.spacing)
+                           / Math.max(1, rep.count)
 
                     Text {
                         id: lbl
-                        anchors.centerIn: parent
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
                         text: modelData
                         font.family: Theme.fontUi
                         font.pixelSize: Theme.fsBody
                         font.weight: Theme.wMedium
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
                         color: parent.active ? Theme.ink : Theme.ink2
                         Behavior on color { ColorAnimation { duration: Theme.durBase } }
                     }
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: { root.currentIndex = index; root.activated(index) }
+                        onClicked: {
+                            root.forceActiveFocus()
+                            root.currentIndex = index
+                            root.activated(index)
+                        }
                     }
                 }
             }

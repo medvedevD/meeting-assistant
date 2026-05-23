@@ -12,6 +12,8 @@ import MeetingAssistant
 Page {
     id: scr
     property var shell
+    font.family: Theme.fontUi
+    font.pixelSize: Theme.fsBody
 
     // Editable working copy of the snapshot. Panels mutate it in place; Save
     // PUTs it. Re-seeded whenever the store (re)loads.
@@ -51,6 +53,17 @@ Page {
         })
     }
 
+    ListModel {
+        id: settingsNavModel
+        Component.onCompleted: {
+            append({ label: qsTr("Транскрипция"), iconName: "mic" })
+            append({ label: qsTr("LLM-провайдер"), iconName: "sparkle" })
+            append({ label: qsTr("Шаблоны"), iconName: "doc" })
+            append({ label: qsTr("Хранилище"), iconName: "storage" })
+            append({ label: qsTr("Запись"), iconName: "mic" })
+        }
+    }
+
     Component.onCompleted: {
         if (SettingsStore.loaded)
             seedDraft()
@@ -62,19 +75,7 @@ Page {
         function onLoadedChanged() { if (SettingsStore.loaded) scr.seedDraft() }
     }
 
-    header: ToolBar {
-        RowLayout {
-            anchors.fill: parent
-            ToolButton { text: qsTr("‹ Назад"); onClicked: scr.shell.showList() }
-            Label {
-                text: qsTr("Настройки")
-                font.bold: true
-                Layout.fillWidth: true
-                horizontalAlignment: Text.AlignHCenter
-            }
-            Item { Layout.preferredWidth: 64 }
-        }
-    }
+    background: Rectangle { color: Theme.paper }
 
     // ── loading / error gate ──────────────────────────────────────────────────
     BusyIndicator {
@@ -86,12 +87,15 @@ Page {
         anchors.centerIn: parent
         visible: SettingsStore.status === "error" && !SettingsStore.loaded
         spacing: 10
-        Label {
+        Text {
             Layout.alignment: Qt.AlignHCenter
             text: qsTr("Не удалось загрузить настройки: %1").arg(SettingsStore.errorMessage)
             wrapMode: Text.WordWrap
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBodyLg
+            color: Theme.rec
         }
-        Button {
+        MeetyButton {
             Layout.alignment: Qt.AlignHCenter
             text: qsTr("Повторить")
             onClicked: SettingsStore.refresh()
@@ -106,38 +110,122 @@ Page {
 
         RowLayout {
             Layout.fillWidth: true
+            Layout.leftMargin: 24
+            Layout.rightMargin: 24
+            Layout.topMargin: 16
+            Layout.bottomMargin: 16
+            spacing: 12
+
+            MeetyButton {
+                variant: "ghost"
+                iconName: "arrow-left"
+                text: qsTr("Назад")
+                onClicked: scr.shell.showList()
+            }
+            Text {
+                Layout.fillWidth: true
+                text: qsTr("Настройки")
+                font.family: Theme.fontSerif
+                font.pixelSize: Theme.fsTitle
+                font.weight: Theme.wMedium
+                font.letterSpacing: 0
+                color: Theme.ink
+                elide: Text.ElideRight
+            }
+            Text {
+                visible: SettingsStore.status === "saving"
+                text: qsTr("Сохранение…")
+                font.family: Theme.fontMono
+                font.pixelSize: Theme.fsSmall
+                color: Theme.ink3
+            }
+            MeetyButton {
+                variant: "ghost"
+                text: qsTr("Сбросить")
+                enabled: SettingsStore.status !== "saving"
+                onClicked: scr.seedDraft()
+            }
+            MeetyButton {
+                variant: "primary"
+                text: qsTr("Сохранить")
+                enabled: SettingsStore.status !== "saving"
+                onClicked: scr.save()
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 1
+            color: Theme.rule
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 0
 
             // category sidebar
-            Pane {
+            Rectangle {
                 Layout.preferredWidth: 200
                 Layout.fillHeight: true
-                padding: 0
+                color: Theme.paperSub
+                border.width: 0
                 ListView {
                     id: catList
                     anchors.fill: parent
+                    anchors.margins: 8
+                    anchors.topMargin: 16
+                    anchors.bottomMargin: 16
                     clip: true
                     currentIndex: 0
-                    model: ListModel {
-                        ListElement { label: qsTr("Транскрипция") }
-                        ListElement { label: qsTr("LLM-провайдер") }
-                        ListElement { label: qsTr("Шаблоны") }
-                        ListElement { label: qsTr("Хранилище") }
-                        ListElement { label: qsTr("Запись") }
-                    }
-                    delegate: ItemDelegate {
+                    model: settingsNavModel
+                    delegate: Rectangle {
                         required property int index
                         required property string label
+                        required property string iconName
                         width: ListView.view.width
-                        text: label
-                        highlighted: catList.currentIndex === index
-                        onClicked: catList.currentIndex = index
+                        height: 34
+                        radius: Theme.rSm
+                        color: catList.currentIndex === index ? Theme.paper4
+                              : navMouse.containsMouse ? Theme.paper3 : "transparent"
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            spacing: 10
+                            MeetyIcon {
+                                name: iconName
+                                size: 12
+                                strokeWidth: 2
+                                color: catList.currentIndex === index ? Theme.ink : Theme.ink2
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: label
+                                font.family: Theme.fontUi
+                                font.pixelSize: Theme.fsBody
+                                font.weight: Theme.wMedium
+                                color: catList.currentIndex === index ? Theme.ink : Theme.ink2
+                                elide: Text.ElideRight
+                            }
+                        }
+                        MouseArea {
+                            id: navMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: catList.currentIndex = index
+                        }
                     }
                 }
             }
 
-            ToolSeparator { Layout.fillHeight: true; padding: 0 }
+            Rectangle {
+                Layout.fillHeight: true
+                Layout.preferredWidth: 1
+                color: Theme.rule
+            }
 
             // panel stack
             ColumnLayout {
@@ -146,25 +234,37 @@ Page {
                 spacing: 0
 
                 // restart-required banner
-                Pane {
+                Rectangle {
                     Layout.fillWidth: true
                     visible: scr.restartNeeded
-                    background: Rectangle { color: scr.palette.highlight; opacity: 0.15 }
-                    Label {
-                        width: parent.width
+                    implicitHeight: restartText.implicitHeight + 24
+                    color: Theme.accentTint
+                    Text {
+                        id: restartText
+                        anchors.fill: parent
+                        anchors.margins: 12
                         wrapMode: Text.WordWrap
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsBody
+                        color: Theme.ink2
                         text: qsTr("Изменение пути к базе данных или каталога встреч " +
                                    "вступит в силу после перезапуска приложения.")
                     }
                 }
                 // insecure-secrets banner (keyring unavailable → plaintext fallback)
-                Pane {
+                Rectangle {
                     Layout.fillWidth: true
                     visible: SettingsStore.secretsFallback()
-                    background: Rectangle { color: scr.palette.toolTipText; opacity: 0.12 }
-                    Label {
-                        width: parent.width
+                    implicitHeight: secretText.implicitHeight + 24
+                    color: Theme.paper3
+                    Text {
+                        id: secretText
+                        anchors.fill: parent
+                        anchors.margins: 12
                         wrapMode: Text.WordWrap
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsBody
+                        color: Theme.ink2
                         text: qsTr("Системное хранилище ключей недоступно — API-ключи " +
                                    "сохраняются в файл без шифрования " +
                                    "(~/.config/meeting-assistant/secrets.json).")
@@ -184,30 +284,6 @@ Page {
                 }
             }
         }
-
-        // ── footer: save / reset ────────────────────────────────────────────
-        MenuSeparator { Layout.fillWidth: true }
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.margins: 12
-            Label {
-                Layout.fillWidth: true
-                opacity: 0.7
-                font.pixelSize: 12
-                text: SettingsStore.status === "saving" ? qsTr("Сохранение…") : ""
-            }
-            Button {
-                text: qsTr("Сбросить изменения")
-                enabled: SettingsStore.status !== "saving"
-                onClicked: scr.seedDraft()
-            }
-            Button {
-                text: qsTr("Сохранить")
-                highlighted: true
-                enabled: SettingsStore.status !== "saving"
-                onClicked: scr.save()
-            }
-        }
     }
 
     // lightweight toast
@@ -221,7 +297,16 @@ Page {
         x: (scr.width - width) / 2
         y: scr.height - height - 24
         padding: 12
-        Label { text: toast.message }
+        background: Rectangle {
+            radius: Theme.rMd
+            color: Theme.ink
+        }
+        Text {
+            text: toast.message
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            color: Theme.paper
+        }
         Timer { id: hideTimer; interval: 2500; onTriggered: toast.close() }
     }
 }

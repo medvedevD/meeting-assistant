@@ -1,7 +1,10 @@
+use crate::{
+    entities::{PipelineStage, Transcript},
+    CoreError,
+};
+use async_trait::async_trait;
 use std::path::Path;
 use std::sync::Arc;
-use async_trait::async_trait;
-use crate::{CoreError, entities::{PipelineStage, Transcript}};
 
 /// Sink the transcriber calls to report fine-grained progress: a pipeline
 /// stage plus a 0–100 percent within it. Implementations may call it many

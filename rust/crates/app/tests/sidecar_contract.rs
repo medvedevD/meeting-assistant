@@ -119,14 +119,13 @@ impl Sidecar {
             }
         };
 
-        let handshake: Handshake = serde_json::from_slice(&stdout_prefix)
-            .unwrap_or_else(|e| {
-                let _ = child.kill();
-                panic!(
-                    "handshake is not valid JSON ({e}): {:?}",
-                    String::from_utf8_lossy(&stdout_prefix)
-                )
-            });
+        let handshake: Handshake = serde_json::from_slice(&stdout_prefix).unwrap_or_else(|e| {
+            let _ = child.kill();
+            panic!(
+                "handshake is not valid JSON ({e}): {:?}",
+                String::from_utf8_lossy(&stdout_prefix)
+            )
+        });
 
         Sidecar {
             child,
@@ -468,7 +467,10 @@ fn templates_crud_lifecycle_and_traversal_rejected() {
     assert_eq!(del.status(), reqwest::StatusCode::OK);
     let del_body: serde_json::Value = del.json().expect("json");
     assert_eq!(del_body["deleted"], name);
-    assert!(del_body["warning"].is_null(), "no warning expected: {del_body}");
+    assert!(
+        del_body["warning"].is_null(),
+        "no warning expected: {del_body}"
+    );
 
     // Reading it now is a 404.
     let after = c
@@ -557,9 +559,9 @@ fn parent_death_via_parent_pid_poll_exits_within_budget() {
     dummy.kill().expect("kill dummy parent");
     dummy.wait().ok();
 
-    let status = s
-        .wait_for_exit(REAP_BUDGET)
-        .unwrap_or_else(|| panic!("sidecar did not exit within {REAP_BUDGET:?} after parent death"));
+    let status = s.wait_for_exit(REAP_BUDGET).unwrap_or_else(|| {
+        panic!("sidecar did not exit within {REAP_BUDGET:?} after parent death")
+    });
     // Parent-death is a clean shutdown path (exit 0).
     assert_eq!(status.code(), Some(0), "parent-death exit must be graceful");
 }
@@ -656,8 +658,7 @@ fn second_instance_exits_with_distinct_singleton_code() {
     let shared_path = shared.path().to_path_buf();
 
     // First instance: acquires the lock, prints its handshake, keeps running.
-    let mut first =
-        Sidecar::spawn_in(&shared_path, &[], tempfile::tempdir().unwrap());
+    let mut first = Sidecar::spawn_in(&shared_path, &[], tempfile::tempdir().unwrap());
 
     // Second instance against the SAME data dir: must lose the lock and exit
     // with the distinct code before it ever serves.

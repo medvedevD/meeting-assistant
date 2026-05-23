@@ -7,10 +7,10 @@
 class ApiClient;
 class QTimer;
 
-// Polls `GET /api/v1/jobs/:id` on a QTimer and emits statusChanged. A QML
-// screen sets `api` + `jobId`, calls start(), and reacts to statusChanged;
-// polling auto-stops on a terminal status. Registered as a creatable QML type
-// so a screen can own one poller per tracked job.
+// Polls `GET /api/v1/jobs/:id` on a QTimer and emits `jobUpdated` on each poll.
+// A QML screen sets `api` + `jobId`, calls start(), and reacts to `jobUpdated`
+// (status + decoded job); polling auto-stops on a terminal status. Registered
+// as a creatable QML type so a screen can own one poller per tracked job.
 class JobPoller : public QObject {
     Q_OBJECT
     Q_PROPERTY(ApiClient *api READ api WRITE setApi NOTIFY apiChanged)
@@ -42,8 +42,12 @@ signals:
     void apiChanged();
     void jobIdChanged();
     void intervalMsChanged();
-    // `job` is the full decoded JobResponse object.
+    // `job` is the full decoded JobResponse object. Kept with the original
+    // payload for QML compatibility; `jobUpdated` is emitted on every poll.
     void statusChanged(const QString &status, const QVariant &job);
+    // Emitted on every successful poll with the full decoded JobResponse, so a
+    // QML consumer gets both live progress and the terminal status/`job`.
+    void jobUpdated(const QString &status, const QVariant &job);
     void activeChanged();
     void failed(const QString &error);
 

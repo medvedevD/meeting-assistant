@@ -34,7 +34,11 @@ impl KeyringSecretStore {
             );
         }
         let file_cache = Mutex::new(load_fallback(&fallback_path));
-        Self { keyring_ok, fallback_path, file_cache }
+        Self {
+            keyring_ok,
+            fallback_path,
+            file_cache,
+        }
     }
 
     /// `true` when secrets are persisted in plaintext (keyring unavailable).

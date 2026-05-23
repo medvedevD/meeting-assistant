@@ -1,9 +1,9 @@
-pub mod transcribe;
+pub mod health;
 pub mod jobs;
+pub mod meetings;
 pub mod protocols;
 pub mod recordings;
-pub mod meetings;
 pub mod settings;
 pub mod templates;
-pub mod health;
+pub mod transcribe;
 pub mod version;

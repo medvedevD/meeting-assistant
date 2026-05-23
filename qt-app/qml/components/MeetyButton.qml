@@ -14,6 +14,7 @@ Button {
     property bool large: false
     property string iconName: ""   // optional leading icon
 
+    activeFocusOnTab: true
     readonly property bool _accent: variant === "accent"
     readonly property bool _primary: variant === "primary"
     readonly property bool _ghost: variant === "ghost"
@@ -75,11 +76,13 @@ Button {
         }
         border.width: control._ghost ? 0 : 1
         border.color: {
+            if (control.activeFocus) return Theme.focus
             if (control._accent) return control.hovered ? Theme.accent2 : Theme.accent
             if (control._primary) return control.hovered ? Theme.ink2 : Theme.ink
             return Theme.rule
         }
         opacity: control.enabled ? 1.0 : 0.5
         Behavior on color { ColorAnimation { duration: Theme.durBase } }
+        Behavior on border.color { ColorAnimation { duration: Theme.durBase } }
     }
 }

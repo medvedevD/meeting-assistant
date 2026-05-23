@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::llm::{LlmConfig, ProviderKind};
 
@@ -32,11 +32,26 @@ pub struct PersistedTranscriberPrefs {
     #[serde(default)]
     pub n_threads: u32,
     /// Override path to the Whisper model file. `None` = core default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "empty_string_as_none",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub model_path: Option<String>,
 }
 
 fn default_beam_size() -> u32 { 1 }
+
+fn empty_string_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?
+        .and_then(|value| {
+            let trimmed = value.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_owned())
+        }))
+}
 
 impl Default for PersistedTranscriberPrefs {
     fn default() -> Self {
@@ -250,4 +265,42 @@ fn xdg_data_dir() -> PathBuf {
         .unwrap_or_else(|| {
             PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PersistedTranscriberPrefs;
+
+    #[test]
+    fn transcriber_model_path_empty_string_deserializes_as_none() {
+        let prefs: PersistedTranscriberPrefs = serde_json::from_str(
+            r#"{
+                "language": "ru",
+                "beam_size": 1,
+                "n_threads": 0,
+                "model_path": ""
+            }"#,
+        )
+        .expect("transcriber prefs JSON should parse");
+
+        assert_eq!(prefs.model_path, None);
+    }
+
+    #[test]
+    fn transcriber_model_path_trims_non_empty_value() {
+        let prefs: PersistedTranscriberPrefs = serde_json::from_str(
+            r#"{
+                "language": "ru",
+                "beam_size": 1,
+                "n_threads": 0,
+                "model_path": "  /models/ggml-medium.bin  "
+            }"#,
+        )
+        .expect("transcriber prefs JSON should parse");
+
+        assert_eq!(
+            prefs.model_path.as_deref(),
+            Some("/models/ggml-medium.bin")
+        );
+    }
 }

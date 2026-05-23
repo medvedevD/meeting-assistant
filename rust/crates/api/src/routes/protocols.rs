@@ -1,8 +1,8 @@
+use crate::router::AppState;
 use axum::{extract::State, http::StatusCode, Json};
+use meeting_core::usecases::generate_protocol;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use meeting_core::usecases::generate_protocol;
-use crate::router::AppState;
 
 #[derive(Deserialize)]
 pub struct GenerateRequest {
@@ -36,16 +36,27 @@ pub async fn generate(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok((StatusCode::OK, Json(GenerateResponse { markdown: protocol.markdown })))
+    Ok((
+        StatusCode::OK,
+        Json(GenerateResponse {
+            markdown: protocol.markdown,
+        }),
+    ))
 }
 
 #[cfg(test)]
 mod tests {
-    use axum::{body::Body, http::{Request, StatusCode}};
+    use crate::router::{create_router, AppState};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use http_body_util::BodyExt;
+    use meeting_core::fakes::{
+        FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo,
+        FakeTemplateLoader, FakeTranscriber,
+    };
     use tower::ServiceExt;
-    use meeting_core::fakes::{FakeAudioCapture, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo, FakeJobRepo, FakeTemplateLoader, FakeTranscriber};
-    use crate::router::{AppState, create_router};
 
     fn make_app() -> axum::Router {
         create_router(AppState {
@@ -126,9 +137,10 @@ mod tests {
 
     #[tokio::test]
     async fn uses_template_when_provided() {
-        let templates = FakeTemplateLoader::new([
-            ("1-на-1", "Протокол встречи {meeting_name}.\n{transcript}\n"),
-        ]);
+        let templates = FakeTemplateLoader::new([(
+            "1-на-1",
+            "Протокол встречи {meeting_name}.\n{transcript}\n",
+        )]);
 
         let app = create_router(AppState {
             transcriber: FakeTranscriber::new("fake"),
@@ -173,9 +185,7 @@ mod tests {
         // knows "Ретро"; if the default weren't resolved, the use-case would
         // hit the built-in prompt and the loader would never be consulted —
         // so a 200 here proves the named template was selected.
-        let templates = FakeTemplateLoader::new([
-            ("Ретро", "Ретро-протокол.\n{transcript}\n"),
-        ]);
+        let templates = FakeTemplateLoader::new([("Ретро", "Ретро-протокол.\n{transcript}\n")]);
 
         let app = create_router(AppState {
             transcriber: FakeTranscriber::new("fake"),

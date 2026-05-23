@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use super::meeting::now_unix;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -176,7 +176,11 @@ pub struct JobProgress {
 
 impl JobProgress {
     pub fn new(stage: PipelineStage, sub: impl Into<String>, percent: u8) -> Self {
-        Self { stage, sub: sub.into(), percent }
+        Self {
+            stage,
+            sub: sub.into(),
+            percent,
+        }
     }
 }
 
@@ -254,14 +258,34 @@ mod tests {
 
     #[test]
     fn maps_core_errors_to_classes() {
-        assert_eq!(ErrorClass::from_core_error(&CoreError::ApiAuth("x".into())), ErrorClass::ApiAuth);
-        assert_eq!(ErrorClass::from_core_error(&CoreError::ApiQuota("x".into())), ErrorClass::ApiQuota);
-        assert_eq!(ErrorClass::from_core_error(&CoreError::ApiTimeout("x".into())), ErrorClass::NetworkTimeout);
-        assert_eq!(ErrorClass::from_core_error(&CoreError::Network("x".into())), ErrorClass::NetworkTimeout);
-        assert_eq!(ErrorClass::from_core_error(&CoreError::AudioCorrupt("x".into())), ErrorClass::AudioCorrupt);
-        assert_eq!(ErrorClass::from_core_error(&CoreError::WorkerKilled("x".into())), ErrorClass::WorkerKilled);
         assert_eq!(
-            ErrorClass::from_core_error(&CoreError::Transcription("Модель не найдена или повреждена: ...".into())),
+            ErrorClass::from_core_error(&CoreError::ApiAuth("x".into())),
+            ErrorClass::ApiAuth
+        );
+        assert_eq!(
+            ErrorClass::from_core_error(&CoreError::ApiQuota("x".into())),
+            ErrorClass::ApiQuota
+        );
+        assert_eq!(
+            ErrorClass::from_core_error(&CoreError::ApiTimeout("x".into())),
+            ErrorClass::NetworkTimeout
+        );
+        assert_eq!(
+            ErrorClass::from_core_error(&CoreError::Network("x".into())),
+            ErrorClass::NetworkTimeout
+        );
+        assert_eq!(
+            ErrorClass::from_core_error(&CoreError::AudioCorrupt("x".into())),
+            ErrorClass::AudioCorrupt
+        );
+        assert_eq!(
+            ErrorClass::from_core_error(&CoreError::WorkerKilled("x".into())),
+            ErrorClass::WorkerKilled
+        );
+        assert_eq!(
+            ErrorClass::from_core_error(&CoreError::Transcription(
+                "Модель не найдена или повреждена: ...".into()
+            )),
             ErrorClass::ModelMissing,
         );
         assert_eq!(

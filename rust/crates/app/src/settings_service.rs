@@ -42,7 +42,10 @@ impl AppSettingsService {
             settings.transcriber.n_threads,
         ));
         if let Some(model) = &settings.transcriber.model_path {
-            self.handles.transcriber.set_model_path(PathBuf::from(model)).await;
+            self.handles
+                .transcriber
+                .set_model_path(PathBuf::from(model))
+                .await;
         }
         if let Some(prompts) = &settings.paths.prompts {
             self.handles.templates.set_dir(prompts);
@@ -107,7 +110,8 @@ impl SettingsService for AppSettingsService {
     }
 
     async fn set_secret(&self, provider: String, value: Option<String>) -> Result<(), String> {
-        let kind = ProviderKind::parse(&provider).ok_or_else(|| format!("unknown provider: {provider}"))?;
+        let kind = ProviderKind::parse(&provider)
+            .ok_or_else(|| format!("unknown provider: {provider}"))?;
         self.handles
             .secrets
             .set(kind.as_str(), value.as_deref().unwrap_or(""))
@@ -121,7 +125,8 @@ impl SettingsService for AppSettingsService {
     }
 
     async fn test_provider(&self, provider: String) -> Result<(), String> {
-        let kind = ProviderKind::parse(&provider).ok_or_else(|| format!("unknown provider: {provider}"))?;
+        let kind = ProviderKind::parse(&provider)
+            .ok_or_else(|| format!("unknown provider: {provider}"))?;
         let settings = self.store().load();
         let key = self.handles.secrets.effective_key(kind.as_str());
         if kind.needs_key() && key.is_empty() {

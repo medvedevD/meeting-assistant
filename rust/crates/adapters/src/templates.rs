@@ -1,7 +1,7 @@
+use async_trait::async_trait;
+use meeting_core::{ports::TemplateLoader, CoreError};
 use std::path::PathBuf;
 use std::sync::RwLock;
-use async_trait::async_trait;
-use meeting_core::{CoreError, ports::TemplateLoader};
 
 /// Loads templates from `.md` files in a directory.
 /// File name (without extension) is the template name.
@@ -13,7 +13,9 @@ pub struct FileTemplateLoader {
 
 impl FileTemplateLoader {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: RwLock::new(dir.into()) }
+        Self {
+            dir: RwLock::new(dir.into()),
+        }
     }
 
     fn dir(&self) -> PathBuf {
@@ -50,14 +52,21 @@ impl TemplateLoader for FileTemplateLoader {
             // A missing prompts dir is a misconfiguration, not a fatal error:
             // return no templates so the UI (e.g. the settings window) stays usable.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                tracing::warn!("prompts dir not found: {} — no templates available", dir.display());
+                tracing::warn!(
+                    "prompts dir not found: {} — no templates available",
+                    dir.display()
+                );
                 return Ok(Vec::new());
             }
             Err(e) => return Err(CoreError::Template(e.to_string())),
         };
 
         let mut names = Vec::new();
-        while let Some(entry) = entries.next_entry().await.map_err(|e| CoreError::Template(e.to_string()))? {
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|e| CoreError::Template(e.to_string()))?
+        {
             let path = entry.path();
             if path.extension().map(|e| e == "md").unwrap_or(false) {
                 if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
@@ -185,10 +194,16 @@ mod tests {
     async fn save_then_load_roundtrip() {
         let tmp = setup();
         let loader = FileTemplateLoader::new(tmp.path());
-        loader.save("Ретро", "Сделай ретро-протокол.").await.unwrap();
+        loader
+            .save("Ретро", "Сделай ретро-протокол.")
+            .await
+            .unwrap();
 
         assert!(tmp.path().join("Ретро.md").exists());
-        assert_eq!(loader.load("Ретро").await.unwrap().unwrap(), "Сделай ретро-протокол.");
+        assert_eq!(
+            loader.load("Ретро").await.unwrap().unwrap(),
+            "Сделай ретро-протокол."
+        );
     }
 
     #[tokio::test]

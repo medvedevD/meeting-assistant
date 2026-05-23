@@ -1,14 +1,15 @@
-// Whisper transcriber settings. Edits scr.draft.transcriber {model_path,
-// language, beam_size, n_threads}. (VAD was dropped from the backend DTO in
-// Phase 1, so it is intentionally absent here.)
+// Whisper transcriber settings. Edits scr.draft.transcriber.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import MeetingAssistant
 
 ScrollView {
     id: panel
     property var scr
+    font.family: Theme.fontUi
+    font.pixelSize: Theme.fsBody
     clip: true
     contentWidth: availableWidth
 
@@ -37,89 +38,97 @@ ScrollView {
 
     ColumnLayout {
         width: panel.availableWidth
-        spacing: 16
+        spacing: 0
 
-        Label {
-            Layout.margins: 16
-            Layout.bottomMargin: 0
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: 32
+            Layout.rightMargin: 32
+            Layout.topMargin: 32
             text: qsTr("Транскрипция")
-            font.pixelSize: 18
-            font.bold: true
+            font.family: Theme.fontSerif
+            font.pixelSize: 26
+            font.weight: Theme.wMedium
+            font.letterSpacing: 0
+            color: Theme.ink
+        }
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: 32
+            Layout.rightMargin: 32
+            Layout.topMargin: 4
+            Layout.bottomMargin: 28
+            text: qsTr("Whisper работает локально на вашем устройстве. Аудио никогда не покидает компьютер.")
+            wrapMode: Text.WordWrap
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            color: Theme.ink3
         }
 
-        GroupBox {
-            title: qsTr("Модель")
-            Layout.fillWidth: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 8
-                Label {
-                    text: qsTr("Путь к файлу модели (пусто = модель ядра по умолчанию)")
-                    opacity: 0.7
+        SettingsRow {
+            title: qsTr("Файл модели")
+            help: qsTr("Пусто — использовать модель ядра по умолчанию.")
+            MeetyField {
+                id: modelField
+                Layout.fillWidth: true
+                placeholderText: qsTr("По умолчанию")
+                onEditingFinished: {
+                    var path = text.trim()
+                    panel.t().model_path = path.length > 0 ? path : null
+                    scr.touch()
                 }
-                RowLayout {
-                    Layout.fillWidth: true
-                    TextField {
-                        id: modelField
-                        Layout.fillWidth: true
-                        placeholderText: qsTr("По умолчанию")
-                        onEditingFinished: { panel.t().model_path = text; scr.touch() }
-                    }
-                    Button { text: qsTr("Выбрать…"); onClicked: modelPicker.open() }
-                }
+            }
+            MeetyButton {
+                iconName: "folder"
+                text: qsTr("Выбрать")
+                onClicked: modelPicker.open()
             }
         }
 
-        GroupBox {
-            title: qsTr("Параметры распознавания")
-            Layout.fillWidth: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
-            Layout.bottomMargin: 16
-            GridLayout {
-                anchors.fill: parent
-                columns: 2
-                columnSpacing: 16
-                rowSpacing: 12
-
-                Label { text: qsTr("Язык") }
-                ComboBox {
-                    id: langBox
-                    Layout.fillWidth: true
-                    textRole: "label"
-                    valueRole: "code"
-                    model: [
-                        { code: "auto", label: qsTr("Автоопределение") },
-                        { code: "ru",   label: qsTr("Русский") },
-                        { code: "en",   label: qsTr("Английский") },
-                        { code: "de",   label: qsTr("Немецкий") },
-                        { code: "fr",   label: qsTr("Французский") },
-                        { code: "es",   label: qsTr("Испанский") }
-                    ]
-                    function setValue(code) {
-                        var i = indexOfValue(code)
-                        currentIndex = i >= 0 ? i : 1 // default to ru
-                    }
-                    onActivated: { panel.t().language = currentValue; scr.touch() }
+        SettingsRow {
+            title: qsTr("Язык")
+            help: qsTr("«Автоопределение» выберет язык по содержимому.")
+            MeetyComboBox {
+                id: langBox
+                Layout.fillWidth: true
+                textRole: "label"
+                valueRole: "code"
+                model: [
+                    { code: "auto", label: qsTr("Автоопределение") },
+                    { code: "ru",   label: qsTr("Русский") },
+                    { code: "en",   label: qsTr("Английский") },
+                    { code: "de",   label: qsTr("Немецкий") },
+                    { code: "fr",   label: qsTr("Французский") },
+                    { code: "es",   label: qsTr("Испанский") }
+                ]
+                function setValue(code) {
+                    var i = indexOfValue(code)
+                    currentIndex = i >= 0 ? i : 1
                 }
+                onActivated: { panel.t().language = currentValue; scr.touch() }
+            }
+        }
 
-                Label { text: qsTr("Размер луча (beam size)") }
-                SpinBox {
-                    id: beamSpin
-                    Layout.fillWidth: true
-                    from: 1; to: 8
-                    onValueModified: { panel.t().beam_size = value; scr.touch() }
-                }
+        SettingsRow {
+            title: qsTr("Beam size")
+            help: qsTr("Больше — потенциально точнее, но медленнее.")
+            MeetySpinBox {
+                id: beamSpin
+                Layout.fillWidth: true
+                from: 1; to: 8
+                onValueModified: { panel.t().beam_size = value; scr.touch() }
+            }
+        }
 
-                Label { text: qsTr("Потоки CPU (0 = авто)") }
-                SpinBox {
-                    id: threadsSpin
-                    Layout.fillWidth: true
-                    from: 0; to: 64
-                    onValueModified: { panel.t().n_threads = value; scr.touch() }
-                }
+        SettingsRow {
+            title: qsTr("Потоки CPU")
+            help: qsTr("0 — автоматический выбор.")
+            dividerVisible: false
+            MeetySpinBox {
+                id: threadsSpin
+                Layout.fillWidth: true
+                from: 0; to: 64
+                onValueModified: { panel.t().n_threads = value; scr.touch() }
             }
         }
     }

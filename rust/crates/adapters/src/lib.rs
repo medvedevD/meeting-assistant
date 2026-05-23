@@ -1,5 +1,5 @@
 mod whisper;
-pub use whisper::{LazyWhisperTranscriber, WhisperTranscriber, TranscriberPrefs};
+pub use whisper::{LazyWhisperTranscriber, TranscriberPrefs, WhisperTranscriber};
 
 mod fs_meeting_file_store;
 pub use fs_meeting_file_store::FsMeetingFileStore;
@@ -11,7 +11,7 @@ pub mod secret_store;
 pub use secret_store::KeyringSecretStore;
 
 pub mod db;
-pub use db::{Db, SqliteMeetingRepo, SqliteJobRepo};
+pub use db::{Db, SqliteJobRepo, SqliteMeetingRepo};
 
 mod worker;
 pub use worker::{LiveProgress, Worker};

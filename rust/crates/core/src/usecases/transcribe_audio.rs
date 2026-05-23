@@ -1,6 +1,6 @@
+use crate::{entities::Transcript, ports::Transcriber, CoreError};
 use std::path::Path;
 use std::sync::Arc;
-use crate::{CoreError, entities::Transcript, ports::Transcriber};
 
 pub async fn transcribe_audio_file(
     transcriber: Arc<dyn Transcriber>,
@@ -63,7 +63,9 @@ mod tests {
                 Ok(Self { path, file })
             }
 
-            pub fn path(&self) -> &std::path::Path { &self.path }
+            pub fn path(&self) -> &std::path::Path {
+                &self.path
+            }
             pub fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
                 use std::io::Write;
                 self.file.write_all(buf)
@@ -71,7 +73,9 @@ mod tests {
         }
 
         impl Drop for NamedTempFile {
-            fn drop(&mut self) { let _ = fs::remove_file(&self.path); }
+            fn drop(&mut self) {
+                let _ = fs::remove_file(&self.path);
+            }
         }
     }
 }

@@ -1,14 +1,14 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use anyhow::{Context, Result};
-use meeting_core::ports::{
-    AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber,
-};
 use meeting_adapters::{
     build_llm, AnthropicProvider, CpalAudioCapture, Db, FileTemplateLoader, FsMeetingFileStore,
     JsonSettingsStore, KeyringSecretStore, LazyWhisperTranscriber, LiveProgress, SqliteJobRepo,
     SqliteMeetingRepo, SwappableLlm, TranscriberPrefs, WhisperTranscriber, Worker,
 };
+use meeting_core::ports::{
+    AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber,
+};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Concrete handles the composition layer keeps so it can apply settings
 /// changes at runtime (hot-swap LLM, update transcriber prefs/model, swap
@@ -49,14 +49,24 @@ impl Container {
         let meeting_repo = Arc::new(SqliteMeetingRepo(Arc::clone(&db)));
         let job_repo = Arc::new(SqliteJobRepo(Arc::clone(&db)));
 
-        let api_key = std::env::var("ANTHROPIC_API_KEY")
-            .context("ANTHROPIC_API_KEY is not set")?;
+        let api_key = std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY is not set")?;
         let llm = Arc::new(AnthropicProvider::new(api_key));
         let templates = Arc::new(FileTemplateLoader::new(prompts_dir));
         let audio_capture = Arc::new(CpalAudioCapture::new());
         let file_store: Arc<dyn MeetingFileStore> = Arc::new(FsMeetingFileStore);
 
-        Ok(Self { transcriber, meeting_repo, job_repo, llm, templates, audio_capture, file_store, recordings_dir, progress: Arc::new(dashmap::DashMap::new()), settings_handles: None })
+        Ok(Self {
+            transcriber,
+            meeting_repo,
+            job_repo,
+            llm,
+            templates,
+            audio_capture,
+            file_store,
+            recordings_dir,
+            progress: Arc::new(dashmap::DashMap::new()),
+            settings_handles: None,
+        })
     }
 
     /// Sidecar wiring — mirrors the `ffi/app_core.rs` adapter graph rather than
@@ -93,10 +103,16 @@ impl Container {
 
         // Effective paths: a settings override wins over the passed default. (db
         // and recordings overrides are restart-required and applied at boot.)
-        let model = settings.transcriber.model_path.clone()
+        let model = settings
+            .transcriber
+            .model_path
+            .clone()
             .map(PathBuf::from)
             .unwrap_or_else(|| model_path.to_path_buf());
-        let prompts = settings.paths.prompts.clone()
+        let prompts = settings
+            .paths
+            .prompts
+            .clone()
             .map(PathBuf::from)
             .unwrap_or_else(|| prompts_dir.to_path_buf());
 
@@ -150,7 +166,10 @@ impl Container {
     /// graceful shutdown (worker finishes current job then exits).
     pub fn spawn_worker(
         &self,
-    ) -> (tokio::task::JoinHandle<()>, tokio::sync::oneshot::Sender<()>) {
+    ) -> (
+        tokio::task::JoinHandle<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         let worker = Worker::new(
             Arc::clone(&self.job_repo),
@@ -205,4 +224,3 @@ fn xdg_data_dir() -> PathBuf {
             PathBuf::from(home).join(".local/share")
         })
 }
-

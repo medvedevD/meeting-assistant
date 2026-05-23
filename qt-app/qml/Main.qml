@@ -6,10 +6,11 @@ import MeetingAssistant
 
 ApplicationWindow {
     id: root
-    width: 900
-    height: 620
+    width: 1120
+    height: 820
     visible: true
     title: qsTr("Meeting Assistant")
+    color: Theme.paper
 
     // qt-redesign Phase-1 sign-off: MEETY_THEME_GALLERY=1 shows the token
     // gallery instead of the app shell. Dev-only; never reached in production.
@@ -35,25 +36,44 @@ ApplicationWindow {
         }
 
         // ── 0: starting / restarting ─────────────────────────────────────────
-        ColumnLayout {
-            spacing: 16
-            Item { Layout.fillHeight: true }
-            BusyIndicator {
-                running: true
-                Layout.alignment: Qt.AlignHCenter
+        Rectangle {
+            color: Theme.paper
+
+            ColumnLayout {
+                anchors.centerIn: parent
+                width: Math.min(parent.width - 64, 420)
+                spacing: 16
+
+                MeetyWordmark {
+                    size: 40
+                    Layout.alignment: Qt.AlignHCenter
+                }
+                BusyIndicator {
+                    running: true
+                    Layout.alignment: Qt.AlignHCenter
+                }
+                Text {
+                    Layout.fillWidth: true
+                    text: sidecar.stateText
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    font.family: Theme.fontSerif
+                    font.pixelSize: Theme.fsTitle
+                    font.weight: Theme.wMedium
+                    color: Theme.ink
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: sidecar.state === SidecarManager.Restarting
+                    text: qsTr("Ядро остановилось неожиданно и перезапускается…")
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    lineHeight: 1.35
+                    font.family: Theme.fontUi
+                    font.pixelSize: Theme.fsBodyLg
+                    color: Theme.ink3
+                }
             }
-            Label {
-                text: sidecar.stateText
-                font.pixelSize: 18
-                Layout.alignment: Qt.AlignHCenter
-            }
-            Label {
-                visible: sidecar.state === SidecarManager.Restarting
-                text: qsTr("The core stopped unexpectedly and is being restarted…")
-                opacity: 0.7
-                Layout.alignment: Qt.AlignHCenter
-            }
-            Item { Layout.fillHeight: true }
         }
 
         // ── 1: ready (the real app — section-04 screens) ────────────────────
@@ -70,25 +90,35 @@ ApplicationWindow {
         closePolicy: Popup.NoAutoClose
         anchors.centerIn: parent
         width: 460
-        title: qsTr("Incompatible components")
+        title: qsTr("Несовместимые компоненты")
         visible: sidecar.state === SidecarManager.Incompatible
         standardButtons: Dialog.NoButton
+        background: Rectangle {
+            radius: Theme.rLg
+            color: Theme.paper
+            border.width: 1
+            border.color: Theme.rule
+        }
 
         ColumnLayout {
             anchors.fill: parent
             spacing: 12
-            Label {
+            Text {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
-                text: qsTr("Components are incompatible — please update.\n\n"
-                           + "The interface speaks protocol %1, but the core "
-                           + "only supports protocols %2–%3.")
+                lineHeight: 1.35
+                font.family: Theme.fontUi
+                font.pixelSize: Theme.fsBodyLg
+                color: Theme.ink2
+                text: qsTr("Компоненты несовместимы — обновите приложение.\n\n"
+                           + "Интерфейс использует протокол %1, а ядро "
+                           + "поддерживает только %2–%3.")
                       .arg(sidecar.clientProtocol)
                       .arg(sidecar.serverMinProtocol)
                       .arg(sidecar.serverProtocol)
             }
-            Button {
-                text: qsTr("Quit")
+            MeetyButton {
+                text: qsTr("Закрыть")
                 Layout.alignment: Qt.AlignRight
                 onClicked: Qt.quit()
             }
@@ -103,22 +133,32 @@ ApplicationWindow {
         closePolicy: Popup.NoAutoClose
         anchors.centerIn: parent
         width: 460
-        title: qsTr("Cannot start")
+        title: qsTr("Не удалось запустить")
         visible: sidecar.state === SidecarManager.Failed
         standardButtons: Dialog.NoButton
+        background: Rectangle {
+            radius: Theme.rLg
+            color: Theme.paper
+            border.width: 1
+            border.color: Theme.rule
+        }
 
         ColumnLayout {
             anchors.fill: parent
             spacing: 12
-            Label {
+            Text {
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
+                lineHeight: 1.35
+                font.family: Theme.fontUi
+                font.pixelSize: Theme.fsBodyLg
+                color: Theme.ink2
                 text: sidecar.lastError.length > 0
                       ? sidecar.lastError
-                      : qsTr("The core failed to start.")
+                      : qsTr("Ядро не запустилось.")
             }
-            Button {
-                text: qsTr("Quit")
+            MeetyButton {
+                text: qsTr("Закрыть")
                 Layout.alignment: Qt.AlignRight
                 onClicked: Qt.quit()
             }

@@ -31,9 +31,9 @@ QtObject {
         source: "qrc:/fonts/JetBrainsMono-Variable.ttf"
     }
 
-    readonly property string fontUi: "Geist"
-    readonly property string fontSerif: "Newsreader"
-    readonly property string fontMono: "JetBrains Mono"
+    readonly property string fontUi: _ui.name.length > 0 ? _ui.name : "Geist"
+    readonly property string fontSerif: _serif.name.length > 0 ? _serif.name : "Newsreader"
+    readonly property string fontMono: _mono.name.length > 0 ? _mono.name : "JetBrains Mono"
 
     // weights (variable fonts cover the range)
     readonly property int wRegular: Font.Normal      // 400
@@ -61,6 +61,8 @@ QtObject {
     readonly property color accent2: "#B84221"    // hover
     readonly property color accentTint: "#FFE3D8" // soft fill
     readonly property color accentInk: "#FFFFFF"  // on-accent text
+    readonly property color focus: theme.ink3
+    readonly property color focusTint: theme.paper3
 
     readonly property color rec: "#DF202E"        // recording dot
     readonly property color ok: "#2E9052"
@@ -76,6 +78,7 @@ QtObject {
     readonly property int rowPy: 10
     readonly property int gap: 16
     readonly property int sidebarWidth: 268
+    readonly property int sidebarCompactWidth: 88
 
     // ── type scale (px sizes used across the design) ───────────────────────────
     readonly property int fsMicro: 11      // section labels, meta

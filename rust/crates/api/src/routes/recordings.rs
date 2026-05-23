@@ -1,12 +1,15 @@
+use crate::router::AppState;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     Json,
 };
+use meeting_core::{
+    ports::CaptureSource,
+    usecases::{start_recording, stop_recording},
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use meeting_core::{ports::CaptureSource, usecases::{start_recording, stop_recording}};
-use crate::router::AppState;
 
 #[derive(Deserialize)]
 pub struct StartRequest {
@@ -83,15 +86,21 @@ pub async fn stop(
 
 #[cfg(test)]
 mod tests {
-    use axum::{body::Body, http::{Request, StatusCode}};
+    use crate::router::{create_router, AppState};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use http_body_util::BodyExt;
-    use std::path::PathBuf;
-    use tower::ServiceExt;
     use meeting_core::{
-        fakes::{FakeAudioCapture, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo, FakeJobRepo, FakeTemplateLoader, FakeTranscriber},
+        fakes::{
+            FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo,
+            FakeTemplateLoader, FakeTranscriber,
+        },
         ports::{AudioCapture, CaptureSource},
     };
-    use crate::router::{AppState, create_router};
+    use std::path::PathBuf;
+    use tower::ServiceExt;
 
     fn make_app_with(
         capture: std::sync::Arc<FakeAudioCapture>,
@@ -135,7 +144,10 @@ mod tests {
     async fn start_returns_201_with_meeting_id() {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
-        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+        let app = make_app_with(
+            std::sync::Arc::clone(&capture),
+            std::sync::Arc::clone(&repo),
+        );
 
         let response = post_start(app, serde_json::json!({ "name": "Планёрка" })).await;
 
@@ -149,7 +161,10 @@ mod tests {
     async fn start_activates_capture_session() {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
-        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+        let app = make_app_with(
+            std::sync::Arc::clone(&capture),
+            std::sync::Arc::clone(&repo),
+        );
 
         let response = post_start(app, serde_json::json!({ "name": "1-на-1" })).await;
         let json = body_json(response).await;
@@ -161,20 +176,29 @@ mod tests {
     async fn start_without_name_uses_default() {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
-        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+        let app = make_app_with(
+            std::sync::Arc::clone(&capture),
+            std::sync::Arc::clone(&repo),
+        );
 
         let response = post_start(app, serde_json::json!({})).await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
         let json = body_json(response).await;
-        assert!(json["name"].as_str().map(|s| !s.is_empty()).unwrap_or(false));
+        assert!(json["name"]
+            .as_str()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false));
     }
 
     #[tokio::test]
     async fn start_with_source_system_passes_system_to_adapter() {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
-        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+        let app = make_app_with(
+            std::sync::Arc::clone(&capture),
+            std::sync::Arc::clone(&repo),
+        );
 
         let response = post_start(app, serde_json::json!({ "source": "system" })).await;
 
@@ -186,7 +210,10 @@ mod tests {
     async fn start_with_source_mixed_passes_mixed_to_adapter() {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
-        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+        let app = make_app_with(
+            std::sync::Arc::clone(&capture),
+            std::sync::Arc::clone(&repo),
+        );
 
         let response = post_start(app, serde_json::json!({ "source": "mixed" })).await;
 
@@ -198,7 +225,10 @@ mod tests {
     async fn start_without_source_defaults_to_mic() {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
-        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+        let app = make_app_with(
+            std::sync::Arc::clone(&capture),
+            std::sync::Arc::clone(&repo),
+        );
 
         let response = post_start(app, serde_json::json!({})).await;
 
@@ -210,9 +240,16 @@ mod tests {
     async fn start_with_echo_cancel_true_passes_true_to_adapter() {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
-        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+        let app = make_app_with(
+            std::sync::Arc::clone(&capture),
+            std::sync::Arc::clone(&repo),
+        );
 
-        let response = post_start(app, serde_json::json!({ "source": "mixed", "echo_cancel": true })).await;
+        let response = post_start(
+            app,
+            serde_json::json!({ "source": "mixed", "echo_cancel": true }),
+        )
+        .await;
 
         assert_eq!(response.status(), StatusCode::CREATED);
         assert_eq!(capture.last_echo_cancel(), Some(true));
@@ -222,7 +259,10 @@ mod tests {
     async fn start_without_echo_cancel_defaults_to_false() {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
-        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+        let app = make_app_with(
+            std::sync::Arc::clone(&capture),
+            std::sync::Arc::clone(&repo),
+        );
 
         let response = post_start(app, serde_json::json!({ "source": "mixed" })).await;
 
@@ -236,7 +276,10 @@ mod tests {
     async fn stop_returns_200_and_deactivates() {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
-        let app = make_app_with(std::sync::Arc::clone(&capture), std::sync::Arc::clone(&repo));
+        let app = make_app_with(
+            std::sync::Arc::clone(&capture),
+            std::sync::Arc::clone(&repo),
+        );
 
         let start_resp = post_start(app.clone(), serde_json::json!({ "name": "Дейлик" })).await;
         let start_json = body_json(start_resp).await;

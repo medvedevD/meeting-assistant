@@ -1,20 +1,23 @@
-use std::path::PathBuf;
-use std::sync::Arc;
+use crate::container::{
+    default_db_path, default_model_path, default_prompts_dir, default_recordings_dir, Container,
+};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use meeting_core::{
     ports::CaptureSource,
     usecases::{
-        generate_protocol, get_job_status, list_meetings,
-        start_recording, stop_recording, submit_transcription_job, transcribe_audio_file,
+        generate_protocol, get_job_status, list_meetings, start_recording, stop_recording,
+        submit_transcription_job, transcribe_audio_file,
     },
 };
-use crate::container::{
-    Container, default_db_path, default_model_path, default_prompts_dir, default_recordings_dir,
-};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(name = "meeting-assistant", about = "Meeting transcription and protocol generator")]
+#[command(
+    name = "meeting-assistant",
+    about = "Meeting transcription and protocol generator"
+)]
 pub struct Cli {
     #[arg(long, env = "MEETING_ASSISTANT_MODEL")]
     model: Option<PathBuf>,
@@ -132,8 +135,13 @@ impl Cli {
                 }
             }
 
-            Command::Generate { transcript_path, template, name } => {
-                let transcript = tokio::fs::read_to_string(&transcript_path).await
+            Command::Generate {
+                transcript_path,
+                template,
+                name,
+            } => {
+                let transcript = tokio::fs::read_to_string(&transcript_path)
+                    .await
                     .map_err(|e| anyhow::anyhow!("cannot read {:?}: {e}", transcript_path))?;
                 let protocol = generate_protocol(
                     Arc::clone(&container.llm),
@@ -146,11 +154,15 @@ impl Cli {
                 print!("{}", protocol.markdown);
             }
 
-            Command::RecordStart { name, source, echo_cancel } => {
+            Command::RecordStart {
+                name,
+                source,
+                echo_cancel,
+            } => {
                 let capture_source = match source.as_str() {
                     "system" => CaptureSource::System,
-                    "mixed"  => CaptureSource::Mixed,
-                    _        => CaptureSource::Mic,
+                    "mixed" => CaptureSource::Mixed,
+                    _ => CaptureSource::Mic,
                 };
                 let meeting = start_recording(
                     Arc::clone(&container.audio_capture),
@@ -162,7 +174,10 @@ impl Cli {
                 )
                 .await?;
                 println!("{}", meeting.id);
-                eprintln!("Recording started ({source}). Press Ctrl+C or run `record-stop {}` to stop.", meeting.id);
+                eprintln!(
+                    "Recording started ({source}). Press Ctrl+C or run `record-stop {}` to stop.",
+                    meeting.id
+                );
             }
 
             Command::RecordStop { id } => {
@@ -181,8 +196,17 @@ impl Cli {
                     println!("No meetings yet.");
                 } else {
                     for m in &meetings {
-                        let transcript_mark = if m.transcript_text.is_some() { "✓" } else { " " };
-                        println!("[{transcript_mark}] {} | {} | {}", m.id, m.name, m.audio_path.display());
+                        let transcript_mark = if m.transcript_text.is_some() {
+                            "✓"
+                        } else {
+                            " "
+                        };
+                        println!(
+                            "[{transcript_mark}] {} | {} | {}",
+                            m.id,
+                            m.name,
+                            m.audio_path.display()
+                        );
                     }
                 }
             }

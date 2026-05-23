@@ -6,7 +6,10 @@ use std::thread;
 
 use async_trait::async_trait;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use meeting_core::{CoreError, ports::{AudioCapture, CaptureSource}};
+use meeting_core::{
+    ports::{AudioCapture, CaptureSource},
+    CoreError,
+};
 
 struct Session {
     stop_tx: std::sync::mpsc::SyncSender<()>,
@@ -19,7 +22,9 @@ pub struct CpalAudioCapture {
 
 impl CpalAudioCapture {
     pub fn new() -> Self {
-        Self { sessions: Mutex::new(HashMap::new()) }
+        Self {
+            sessions: Mutex::new(HashMap::new()),
+        }
     }
 }
 
@@ -138,8 +143,12 @@ fn find_pulseaudio_monitor() -> Result<String, String> {
     }
 
     // Fallback: first .monitor source in the list.
-    let idx = find_monitor_device(&names)
-        .ok_or_else(|| format!("no monitor source found via pactl (sources: {})", names.join(", ")))?;
+    let idx = find_monitor_device(&names).ok_or_else(|| {
+        format!(
+            "no monitor source found via pactl (sources: {})",
+            names.join(", ")
+        )
+    })?;
 
     Ok(names[idx].to_string())
 }
@@ -224,25 +233,37 @@ fn record_single(
 // ── System audio (platform-specific) ─────────────────────────────────────────
 
 #[cfg(target_os = "linux")]
-fn record_system(output_path: PathBuf, stop_rx: std::sync::mpsc::Receiver<()>) -> Result<(), String> {
+fn record_system(
+    output_path: PathBuf,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+) -> Result<(), String> {
     let monitor = find_pulseaudio_monitor()?;
     record_parec(&monitor, output_path, stop_rx)
 }
 
 #[cfg(target_os = "windows")]
-fn record_system(output_path: PathBuf, stop_rx: std::sync::mpsc::Receiver<()>) -> Result<(), String> {
+fn record_system(
+    output_path: PathBuf,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+) -> Result<(), String> {
     let device = find_wasapi_output_device()?;
     record_single(device, output_path, stop_rx)
 }
 
 /// macOS system audio via ScreenCaptureKit (audio-only). See `sck_capture`.
 #[cfg(target_os = "macos")]
-fn record_system(output_path: PathBuf, stop_rx: std::sync::mpsc::Receiver<()>) -> Result<(), String> {
+fn record_system(
+    output_path: PathBuf,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+) -> Result<(), String> {
     super::sck_capture::record_system(output_path, stop_rx)
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-fn record_system(_output_path: PathBuf, _stop_rx: std::sync::mpsc::Receiver<()>) -> Result<(), String> {
+fn record_system(
+    _output_path: PathBuf,
+    _stop_rx: std::sync::mpsc::Receiver<()>,
+) -> Result<(), String> {
     Err("system audio capture is not yet supported on this platform".to_string())
 }
 
@@ -275,7 +296,8 @@ fn record_parec(
 
     let mut child = std::process::Command::new("parec")
         .args([
-            "--device", source_name,
+            "--device",
+            source_name,
             "--format=float32le",
             "--channels=2",
             "--rate=48000",
@@ -326,7 +348,11 @@ fn record_parec(
 /// (cpal uses 44100 Hz, parec uses 48000 Hz) and lock contention. After both
 /// captures finish, ffmpeg mixes them into `output_path` and temp files are deleted.
 #[cfg(target_os = "linux")]
-fn record_mixed(output_path: PathBuf, stop_rx: std::sync::mpsc::Receiver<()>, echo_cancel: bool) -> Result<(), String> {
+fn record_mixed(
+    output_path: PathBuf,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+    echo_cancel: bool,
+) -> Result<(), String> {
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -349,18 +375,25 @@ fn record_mixed(output_path: PathBuf, stop_rx: std::sync::mpsc::Receiver<()>, ec
         record_single(mic, mic_path, mic_stop_rx)
     });
 
-    let sys_thread = thread::spawn(move || {
-        record_parec(&monitor_name, sys_path, sys_stop_rx)
-    });
+    let sys_thread = thread::spawn(move || record_parec(&monitor_name, sys_path, sys_stop_rx));
 
     let _ = stop_rx.recv();
     let _ = mic_stop_tx.send(());
     let _ = sys_stop_tx.send(());
 
-    mic_thread.join().map_err(|_| "mic thread panicked".to_string())??;
-    sys_thread.join().map_err(|_| "sys thread panicked".to_string())??;
+    mic_thread
+        .join()
+        .map_err(|_| "mic thread panicked".to_string())??;
+    sys_thread
+        .join()
+        .map_err(|_| "sys thread panicked".to_string())??;
 
-    ffmpeg_mix(&mic_tmp, &sys_tmp, &output_path, &build_mix_filter(echo_cancel))?;
+    ffmpeg_mix(
+        &mic_tmp,
+        &sys_tmp,
+        &output_path,
+        &build_mix_filter(echo_cancel),
+    )?;
 
     let _ = std::fs::remove_file(&mic_tmp);
     let _ = std::fs::remove_file(&sys_tmp);
@@ -429,9 +462,12 @@ fn ffmpeg_mix(a: &PathBuf, b: &PathBuf, out: &PathBuf, filter: &str) -> Result<(
     let status = std::process::Command::new("ffmpeg")
         .args([
             "-y",
-            "-i", a.to_str().unwrap(),
-            "-i", b.to_str().unwrap(),
-            "-filter_complex", filter,
+            "-i",
+            a.to_str().unwrap(),
+            "-i",
+            b.to_str().unwrap(),
+            "-filter_complex",
+            filter,
             out.to_str().unwrap(),
         ])
         .stdout(std::process::Stdio::null())
@@ -451,7 +487,11 @@ fn ffmpeg_mix(a: &PathBuf, b: &PathBuf, out: &PathBuf, filter: &str) -> Result<(
 /// (`build_mix_filter_macos`). The two backends run on independent audio
 /// clocks; the resample-to-PTS in the mix filter aligns them.
 #[cfg(target_os = "macos")]
-fn record_mixed(output_path: PathBuf, stop_rx: std::sync::mpsc::Receiver<()>, echo_cancel: bool) -> Result<(), String> {
+fn record_mixed(
+    output_path: PathBuf,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+    echo_cancel: bool,
+) -> Result<(), String> {
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -471,18 +511,26 @@ fn record_mixed(output_path: PathBuf, stop_rx: std::sync::mpsc::Receiver<()>, ec
         record_single(mic, mic_path, mic_stop_rx)
     });
 
-    let sys_thread = thread::spawn(move || {
-        super::sck_capture::record_system(sys_path, sys_stop_rx)
-    });
+    let sys_thread =
+        thread::spawn(move || super::sck_capture::record_system(sys_path, sys_stop_rx));
 
     let _ = stop_rx.recv();
     let _ = mic_stop_tx.send(());
     let _ = sys_stop_tx.send(());
 
-    mic_thread.join().map_err(|_| "mic thread panicked".to_string())??;
-    sys_thread.join().map_err(|_| "sys thread panicked".to_string())??;
+    mic_thread
+        .join()
+        .map_err(|_| "mic thread panicked".to_string())??;
+    sys_thread
+        .join()
+        .map_err(|_| "sys thread panicked".to_string())??;
 
-    ffmpeg_mix(&mic_tmp, &sys_tmp, &output_path, &build_mix_filter_macos(echo_cancel))?;
+    ffmpeg_mix(
+        &mic_tmp,
+        &sys_tmp,
+        &output_path,
+        &build_mix_filter_macos(echo_cancel),
+    )?;
 
     let _ = std::fs::remove_file(&mic_tmp);
     let _ = std::fs::remove_file(&sys_tmp);
@@ -491,12 +539,20 @@ fn record_mixed(output_path: PathBuf, stop_rx: std::sync::mpsc::Receiver<()>, ec
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-fn record_mixed(_output_path: PathBuf, _stop_rx: std::sync::mpsc::Receiver<()>, _echo_cancel: bool) -> Result<(), String> {
+fn record_mixed(
+    _output_path: PathBuf,
+    _stop_rx: std::sync::mpsc::Receiver<()>,
+    _echo_cancel: bool,
+) -> Result<(), String> {
     Err("mixed audio capture is not yet supported on this platform".to_string())
 }
 
 #[cfg(target_os = "windows")]
-fn record_mixed(output_path: PathBuf, stop_rx: std::sync::mpsc::Receiver<()>, _echo_cancel: bool) -> Result<(), String> {
+fn record_mixed(
+    output_path: PathBuf,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+    _echo_cancel: bool,
+) -> Result<(), String> {
     // On Windows, WASAPI loopback captures both mic and system via the output device.
     let device = find_wasapi_output_device()?;
     record_single(device, output_path, stop_rx)
@@ -567,7 +623,9 @@ mod tests {
         let path = dir.path().join("mic.wav");
         let cap = CpalAudioCapture::new();
 
-        cap.start_session("s1", &path, CaptureSource::Mic, false).await.unwrap();
+        cap.start_session("s1", &path, CaptureSource::Mic, false)
+            .await
+            .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         cap.stop_session("s1").await.unwrap();
 
@@ -582,7 +640,9 @@ mod tests {
         let path = dir.path().join("system.wav");
         let cap = CpalAudioCapture::new();
 
-        cap.start_session("s2", &path, CaptureSource::System, false).await.unwrap();
+        cap.start_session("s2", &path, CaptureSource::System, false)
+            .await
+            .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         cap.stop_session("s2").await.unwrap();
 
@@ -598,7 +658,9 @@ mod tests {
         let path = dir.path().join("mixed.wav");
         let cap = CpalAudioCapture::new();
 
-        cap.start_session("s3", &path, CaptureSource::Mixed, false).await.unwrap();
+        cap.start_session("s3", &path, CaptureSource::Mixed, false)
+            .await
+            .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         cap.stop_session("s3").await.unwrap();
 
@@ -618,7 +680,10 @@ mod tests {
     #[test]
     fn mix_filter_without_aec_does_not_contain_anlms() {
         let f = build_mix_filter(false);
-        assert!(!f.contains("anlms"), "unexpected anlms in non-AEC filter: {f}");
+        assert!(
+            !f.contains("anlms"),
+            "unexpected anlms in non-AEC filter: {f}"
+        );
     }
 
     #[test]
@@ -630,8 +695,14 @@ mod tests {
     #[test]
     fn mix_filter_with_aec_still_contains_highpass_and_dynaudnorm() {
         let f = build_mix_filter(true);
-        assert!(f.contains("highpass=f=80"), "missing highpass in AEC filter: {f}");
-        assert!(f.contains("dynaudnorm"), "missing dynaudnorm in AEC filter: {f}");
+        assert!(
+            f.contains("highpass=f=80"),
+            "missing highpass in AEC filter: {f}"
+        );
+        assert!(
+            f.contains("dynaudnorm"),
+            "missing dynaudnorm in AEC filter: {f}"
+        );
     }
 
     // ── build_mix_filter_macos — pure function (clock-drift compensation) ────
@@ -661,10 +732,16 @@ mod tests {
     #[test]
     fn macos_mix_filter_aec_splits_system_pad_for_reuse() {
         let f = build_mix_filter_macos(true);
-        assert!(f.contains("anlms=order=512"), "AEC must subtract system: {f}");
+        assert!(
+            f.contains("anlms=order=512"),
+            "AEC must subtract system: {f}"
+        );
         // A filter-graph pad cannot be consumed twice; the system track is
         // needed by both anlms and amix, so it must be asplit.
-        assert!(f.contains("asplit=2"), "system pad must be split for reuse: {f}");
+        assert!(
+            f.contains("asplit=2"),
+            "system pad must be split for reuse: {f}"
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -724,8 +801,16 @@ mod tests {
         let sys_secs = sys_frames as f64 / sys_rate as f64;
         let mic_secs = mic_frames as f64 / mic_rate as f64;
         let drift_ms = (sys_secs - mic_secs) * 1000.0;
-        let drift_ppm = if wall > 0.0 { drift_ms / 1000.0 / wall * 1e6 } else { 0.0 };
-        let proj_60min_ms = if wall > 0.0 { drift_ms / wall * 3600.0 } else { 0.0 };
+        let drift_ppm = if wall > 0.0 {
+            drift_ms / 1000.0 / wall * 1e6
+        } else {
+            0.0
+        };
+        let proj_60min_ms = if wall > 0.0 {
+            drift_ms / wall * 3600.0
+        } else {
+            0.0
+        };
 
         println!("──── macOS mic↔system clock-drift spike ────");
         println!("wall window:        {wall:.3} s");

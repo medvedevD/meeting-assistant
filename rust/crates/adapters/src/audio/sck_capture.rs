@@ -178,8 +178,14 @@ fn write_buffer_list(w: &mut WavWriter<BufWriter<File>>, list: &AudioBufferList)
 
     // Planar: buffer 0 = left, buffer 1 = right (further buffers ignored —
     // the output spec is stereo).
-    let left = list.get(0).map(|b| bytes_as_f32(b.data())).unwrap_or_default();
-    let right = list.get(1).map(|b| bytes_as_f32(b.data())).unwrap_or_default();
+    let left = list
+        .get(0)
+        .map(|b| bytes_as_f32(b.data()))
+        .unwrap_or_default();
+    let right = list
+        .get(1)
+        .map(|b| bytes_as_f32(b.data()))
+        .unwrap_or_default();
     let frames = left.len().min(right.len());
     for i in 0..frames {
         let _ = w.write_sample(left[i]);
@@ -197,9 +203,7 @@ pub fn record_system(output_path: PathBuf, stop_rx: Receiver<()>) -> Result<(), 
 
     let content = SCShareableContent::get().map_err(map_err)?;
     let displays = content.displays();
-    let display = displays
-        .first()
-        .ok_or_else(permission_guidance)?;
+    let display = displays.first().ok_or_else(permission_guidance)?;
 
     // The filter must reference a content source for ScreenCaptureKit to
     // start, but we register no screen output, so no frames are captured.
@@ -235,7 +239,9 @@ pub fn record_system(output_path: PathBuf, stop_rx: Receiver<()>) -> Result<(), 
     // ONLY an audio handler — never a Screen handler. This is the structural
     // guarantee that no screen frames are ever requested or delivered.
     stream.add_output_handler(
-        AudioSink { writer: Arc::clone(&writer) },
+        AudioSink {
+            writer: Arc::clone(&writer),
+        },
         SCStreamOutputType::Audio,
     );
 

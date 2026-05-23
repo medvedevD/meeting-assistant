@@ -7,6 +7,7 @@ import MeetingAssistant
 
 Switch {
     id: control
+    activeFocusOnTab: true
     padding: 0
     spacing: 0
     implicitWidth: 32
@@ -17,6 +18,8 @@ Switch {
         height: 18
         radius: 9
         color: control.checked ? Theme.accent : Theme.rule2
+        border.width: control.activeFocus ? 1 : 0
+        border.color: Theme.focus
         Behavior on color { ColorAnimation { duration: Theme.durBase } }
 
         Rectangle {

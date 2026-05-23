@@ -1,6 +1,9 @@
+use crate::{
+    ports::{MeetingFileStore, MeetingRepo},
+    CoreError,
+};
 use std::path::Path;
 use std::sync::Arc;
-use crate::{CoreError, ports::{MeetingFileStore, MeetingRepo}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeleteMode {
@@ -85,7 +88,11 @@ mod tests {
         let after = mr.find_by_id(&m.id).await.unwrap().unwrap();
         assert!(after.audio_path.as_os_str().is_empty());
         assert_eq!(after.transcript_text.as_deref(), Some("kept"));
-        assert!(fs.removed_files.lock().unwrap().contains(&PathBuf::from("/rec/x/audio.wav")));
+        assert!(fs
+            .removed_files
+            .lock()
+            .unwrap()
+            .contains(&PathBuf::from("/rec/x/audio.wav")));
     }
 
     #[tokio::test]

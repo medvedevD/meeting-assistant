@@ -1,5 +1,5 @@
+use crate::{entities::Job, CoreError};
 use async_trait::async_trait;
-use crate::{CoreError, entities::Job};
 
 #[async_trait]
 pub trait JobRepo: Send + Sync {

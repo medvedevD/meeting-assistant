@@ -1,15 +1,16 @@
 // Templates CRUD (Phase 2 backend). List + body editor with New/Save/Rename/
 // Delete over REST (/api/v1/templates*). The "default template" selector writes
-// to scr.draft.default_template and is persisted by the screen's global Save
-// (it is part of the settings document, decision #7 clears it server-side if
-// the referenced template is deleted).
+// to scr.draft.default_template and is persisted by the screen's global Save.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import MeetingAssistant
 
 ScrollView {
     id: panel
     property var scr
+    font.family: Theme.fontUi
+    font.pixelSize: Theme.fsBody
     clip: true
     contentWidth: availableWidth
 
@@ -23,6 +24,8 @@ ScrollView {
         return ""
     }
     function names() { return templates.map(function (t) { return t.name }) }
+    function selectedBody() { return bodyOf(selected) }
+    function isDefault(name) { return (scr.draft.default_template || "") === name }
 
     function refresh() { listReq.get("/api/v1/templates") }
     Component.onCompleted: refresh()
@@ -70,7 +73,7 @@ ScrollView {
         anchors.centerIn: Overlay.overlay
         modal: true
         title: mode === "new" ? qsTr("Новый шаблон") : qsTr("Переименовать шаблон")
-        property string mode: "new"   // "new" | "rename"
+        property string mode: "new"
         standardButtons: Dialog.Ok | Dialog.Cancel
         onAccepted: {
             var n = nameInput.text.trim()
@@ -83,7 +86,7 @@ ScrollView {
             if (mode === "new") panel.selected = n
         }
         ColumnLayout {
-            TextField {
+            MeetyField {
                 id: nameInput
                 Layout.preferredWidth: 320
                 placeholderText: qsTr("Имя шаблона")
@@ -91,113 +94,298 @@ ScrollView {
         }
     }
 
-    RowLayout {
+    ColumnLayout {
         width: panel.availableWidth
-        height: panel.height
         spacing: 0
 
-        // ── template list ────────────────────────────────────────────────
-        ColumnLayout {
-            Layout.preferredWidth: 200
-            Layout.fillHeight: true
-            spacing: 0
-            Label {
-                Layout.margins: 12
-                text: qsTr("Шаблоны")
-                font.pixelSize: 16
-                font.bold: true
-            }
-            ListView {
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: 32
+            Layout.rightMargin: 32
+            Layout.topMargin: 32
+            text: qsTr("Шаблоны")
+            font.family: Theme.fontSerif
+            font.pixelSize: 26
+            font.weight: Theme.wMedium
+            font.letterSpacing: 0
+            color: Theme.ink
+        }
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: 32
+            Layout.rightMargin: 32
+            Layout.topMargin: 4
+            Layout.bottomMargin: 28
+            text: qsTr("Каждый шаблон — это инструкция для модели. Можно редактировать prompt и добавлять свои.")
+            wrapMode: Text.WordWrap
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            color: Theme.ink3
+        }
+
+        SettingsRow {
+            title: qsTr("Шаблон по умолчанию")
+            help: qsTr("Используется при генерации протокола, если шаблон не выбран явно.")
+            MeetyComboBox {
+                id: defaultBox
                 Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
-                model: panel.templates
-                ScrollBar.vertical: ScrollBar {}
-                delegate: ItemDelegate {
-                    required property var modelData
-                    width: ListView.view.width
-                    text: modelData.name
-                    highlighted: panel.selected === modelData.name
-                    onClicked: panel.select(modelData.name)
+                property var opts: []
+                model: opts
+                function sync() {
+                    opts = [qsTr("(встроенный)")].concat(panel.names())
+                    var cur = scr.draft.default_template || ""
+                    var idx = cur.length ? opts.indexOf(cur) : 0
+                    currentIndex = idx >= 0 ? idx : 0
                 }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.margins: 8
-                Button {
-                    text: qsTr("Новый")
-                    onClicked: { nameDialog.mode = "new"; nameInput.text = ""; nameDialog.open() }
+                onActivated: {
+                    scr.draft.default_template = currentIndex === 0 ? null : currentText
+                    scr.touch()
                 }
-                Button {
-                    text: qsTr("Переименовать")
-                    enabled: panel.selected.length > 0
-                    onClicked: { nameDialog.mode = "rename"; nameInput.text = panel.selected; nameDialog.open() }
+                Component.onCompleted: sync()
+                Connections {
+                    target: panel
+                    function onTemplatesChanged() { defaultBox.sync() }
+                }
+                Connections {
+                    target: scr
+                    function onReseeded() { defaultBox.sync() }
                 }
             }
         }
 
-        ToolSeparator { Layout.fillHeight: true }
-
-        // ── editor + default selector ────────────────────────────────────
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            Layout.margins: 12
+        RowLayout {
+            Layout.leftMargin: 32
+            Layout.rightMargin: 32
+            Layout.topMargin: 16
+            Layout.bottomMargin: 16
             spacing: 10
+            MeetyButton {
+                iconName: "plus"
+                text: qsTr("Новый шаблон")
+                onClicked: { nameDialog.mode = "new"; nameInput.text = ""; nameDialog.open() }
+            }
+            MeetyButton {
+                variant: "ghost"
+                iconName: "edit"
+                text: qsTr("Переименовать")
+                enabled: panel.selected.length > 0
+                onClicked: { nameDialog.mode = "rename"; nameInput.text = panel.selected; nameDialog.open() }
+            }
+        }
 
-            RowLayout {
-                Layout.fillWidth: true
-                Label { text: qsTr("Шаблон по умолчанию:"); opacity: 0.7 }
-                ComboBox {
-                    id: defaultBox
-                    Layout.fillWidth: true
-                    property var opts: [qsTr("(встроенный)")].concat(panel.names())
-                    model: opts
-                    function sync() {
-                        var cur = (scr.draft.default_template || "")
-                        var idx = cur.length ? opts.indexOf(cur) : 0
-                        currentIndex = idx >= 0 ? idx : 0
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.leftMargin: 32
+            Layout.rightMargin: 32
+            implicitHeight: templateList.implicitHeight + 8
+            radius: Theme.rMd
+            color: Theme.paperSub
+            border.width: 1
+            border.color: Theme.rule
+
+            ColumnLayout {
+                id: templateList
+                anchors.fill: parent
+                anchors.margins: 4
+                spacing: 4
+
+                Repeater {
+                    model: panel.templates
+                    delegate: Rectangle {
+                        required property var modelData
+                        readonly property bool active: panel.selected === modelData.name
+                        Layout.fillWidth: true
+                        implicitHeight: 64
+                        radius: Theme.rSm
+                        color: active ? Theme.paper
+                             : cardMouse.containsMouse ? Theme.paper3 : "transparent"
+                        border.width: active ? 1 : 0
+                        border.color: Theme.rule
+
+                        Rectangle {
+                            visible: parent.active
+                            x: 4; y: 12
+                            width: 2
+                            height: parent.height - 24
+                            radius: 1
+                            color: Theme.accent
+                        }
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 14
+                            anchors.rightMargin: 14
+                            spacing: 14
+                            Rectangle {
+                                Layout.preferredWidth: 36
+                                Layout.preferredHeight: 36
+                                radius: Theme.rMd
+                                color: parent.parent.active ? Theme.accentTint : Theme.paper3
+                                MeetyIcon {
+                                    anchors.centerIn: parent
+                                    name: "doc"
+                                    size: 16
+                                    color: parent.parent.active ? Theme.accent2 : Theme.ink2
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.name
+                                        elide: Text.ElideRight
+                                        font.family: Theme.fontUi
+                                        font.pixelSize: Theme.fsBodyLg
+                                        font.weight: Theme.wSemiBold
+                                        color: Theme.ink
+                                    }
+                                    MeetyTag {
+                                        visible: panel.isDefault(modelData.name)
+                                        text: qsTr("По умолчанию")
+                                    }
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: qsTr("%1 символов prompt").arg((modelData.body || "").length)
+                                    elide: Text.ElideRight
+                                    font.family: Theme.fontUi
+                                    font.pixelSize: Theme.fsSmall
+                                    color: Theme.ink3
+                                }
+                            }
+                            Text {
+                                text: (modelData.body || "").split(/\r?\n/).length
+                                font.family: Theme.fontMono
+                                font.pixelSize: Theme.fsSmall
+                                color: Theme.ink3
+                            }
+                        }
+                        MouseArea {
+                            id: cardMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: panel.select(modelData.name)
+                        }
                     }
-                    onModelChanged: sync()
-                    onActivated: {
-                        scr.draft.default_template = currentIndex === 0 ? null : currentText
-                        scr.touch()
-                    }
-                    Component.onCompleted: sync()
-                    Connections { target: scr; function onReseeded() { defaultBox.sync() } }
                 }
             }
+        }
 
-            Label {
-                text: panel.selected.length ? panel.selected : qsTr("Выберите шаблон")
-                font.bold: true
-            }
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                clip: true
+        Item { Layout.preferredHeight: 16 }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.leftMargin: 32
+            Layout.rightMargin: 32
+            Layout.bottomMargin: 80
+            implicitHeight: 420
+            radius: Theme.rMd
+            color: Theme.paperSub
+            border.width: 1
+            border.color: Theme.rule
+            clip: true
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 0
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 16
+                    Layout.rightMargin: 16
+                    Layout.topMargin: 14
+                    Layout.bottomMargin: 12
+                    spacing: 10
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Text {
+                            Layout.fillWidth: true
+                            text: panel.selected.length ? panel.selected : qsTr("Выберите шаблон")
+                            font.family: Theme.fontUi
+                            font.pixelSize: Theme.fsBodyLg
+                            font.weight: Theme.wSemiBold
+                            color: Theme.ink
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: qsTr("Этот текст отправляется в LLM вместе с транскрипцией")
+                            font.family: Theme.fontUi
+                            font.pixelSize: Theme.fsSmall
+                            color: Theme.ink3
+                            elide: Text.ElideRight
+                        }
+                    }
+                    MeetyButton {
+                        variant: "ghost"
+                        iconName: "trash"
+                        text: qsTr("Удалить")
+                        enabled: panel.selected.length > 0
+                        onClicked: delReq.del("/api/v1/templates/" + encodeURIComponent(panel.selected))
+                    }
+                    MeetyButton {
+                        variant: "ghost"
+                        iconName: "check"
+                        text: qsTr("Сохранить шаблон")
+                        enabled: panel.selected.length > 0
+                        onClicked: saveReq.put("/api/v1/templates/" + encodeURIComponent(panel.selected),
+                                               { "body": editor.text })
+                    }
+                }
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: Theme.rule
+                }
+
                 TextArea {
                     id: editor
-                    wrapMode: TextEdit.Wrap
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    enabled: panel.selected.length > 0
                     selectByMouse: true
-                    enabled: panel.selected.length > 0
+                    wrapMode: TextEdit.Wrap
                     placeholderText: qsTr("Текст шаблона (Markdown)")
+                    font.family: Theme.fontMono
+                    font.pixelSize: Theme.fsSmall
+                    color: Theme.ink2
+                    selectedTextColor: Theme.ink
+                    selectionColor: Theme.accentTint
+                    background: Rectangle { color: Theme.paperSub }
+                    leftPadding: 20
+                    rightPadding: 20
+                    topPadding: 16
+                    bottomPadding: 16
                 }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Label { Layout.fillWidth: true; opacity: 0.7; font.pixelSize: 12; text: panel.status }
-                Button {
-                    text: qsTr("Удалить")
-                    enabled: panel.selected.length > 0
-                    onClicked: delReq.del("/api/v1/templates/" + encodeURIComponent(panel.selected))
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: Theme.rule
                 }
-                Button {
-                    text: qsTr("Сохранить шаблон")
-                    highlighted: true
-                    enabled: panel.selected.length > 0
-                    onClicked: saveReq.put("/api/v1/templates/" + encodeURIComponent(panel.selected),
-                                           { "body": editor.text })
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 14
+                    Layout.rightMargin: 14
+                    Layout.topMargin: 10
+                    Layout.bottomMargin: 10
+                    spacing: 8
+                    MeetyTag { mono: true; text: "{meeting_name}" }
+                    MeetyTag { mono: true; text: "{transcript}" }
+                    Text {
+                        Layout.fillWidth: true
+                        text: panel.status.length > 0 ? panel.status : qsTr("подставляются автоматически")
+                        horizontalAlignment: Text.AlignRight
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsSmall
+                        color: Theme.ink4
+                        elide: Text.ElideRight
+                    }
                 }
             }
         }

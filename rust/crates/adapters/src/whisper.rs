@@ -1,12 +1,12 @@
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use async_trait::async_trait;
 use meeting_core::{
-    CoreError,
     entities::{PipelineStage, Segment, Transcript},
     ports::{ProgressSink, Transcriber},
+    CoreError,
 };
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 /// A progress sink that discards reports — used by the non-progress path.
@@ -29,12 +29,20 @@ pub struct TranscriberPrefs {
     pub n_threads: u32,
 }
 
-fn default_language() -> String { "ru".to_string() }
-fn default_beam_size() -> u32 { 1 }
+fn default_language() -> String {
+    "ru".to_string()
+}
+fn default_beam_size() -> u32 {
+    1
+}
 
 impl TranscriberPrefs {
     pub fn new(language: impl Into<String>, beam_size: u32, n_threads: u32) -> Self {
-        Self { language: language.into(), beam_size, n_threads }
+        Self {
+            language: language.into(),
+            beam_size,
+            n_threads,
+        }
     }
 }
 
@@ -46,15 +54,20 @@ pub struct WhisperTranscriber {
 
 impl WhisperTranscriber {
     pub fn new(model_path: &Path) -> anyhow::Result<Self> {
-        let path = model_path.to_str()
+        let path = model_path
+            .to_str()
             .ok_or_else(|| anyhow::anyhow!("model path is not valid UTF-8"))?;
         let t = std::time::Instant::now();
         let ctx = WhisperContext::new_with_params(path, WhisperContextParameters::default())
             .map_err(|e| anyhow::anyhow!("failed to load whisper model from {path}: {e}"))?;
-        let model_name = model_path.file_name()
+        let model_name = model_path
+            .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or(path);
-        bench_log(&format!("model_loaded  model={model_name} load_ms={}", t.elapsed().as_millis()));
+        bench_log(&format!(
+            "model_loaded  model={model_name} load_ms={}",
+            t.elapsed().as_millis()
+        ));
         Ok(Self { ctx: Arc::new(ctx) })
     }
 }
@@ -95,22 +108,33 @@ fn run_whisper(
 
     on_progress(PipelineStage::DecodingAudio, 0);
     let t = std::time::Instant::now();
-    let samples = load_wav_as_mono_f32(audio_path)
-        .map_err(|e| CoreError::Transcription(e.to_string()))?;
+    let samples =
+        load_wav_as_mono_f32(audio_path).map_err(|e| CoreError::Transcription(e.to_string()))?;
     let audio_duration_s = samples.len() as f64 / WHISPER_SAMPLE_RATE as f64;
-    bench_log(&format!("audio_loaded  duration_s={audio_duration_s:.1} load_ms={}", t.elapsed().as_millis()));
+    bench_log(&format!(
+        "audio_loaded  duration_s={audio_duration_s:.1} load_ms={}",
+        t.elapsed().as_millis()
+    ));
 
-    let mut state = ctx.create_state()
+    let mut state = ctx
+        .create_state()
         .map_err(|e| CoreError::Transcription(e.to_string()))?;
 
     let strategy = if prefs.beam_size <= 1 {
         SamplingStrategy::Greedy { best_of: 1 }
     } else {
-        SamplingStrategy::BeamSearch { beam_size: prefs.beam_size as i32, patience: -1.0 }
+        SamplingStrategy::BeamSearch {
+            beam_size: prefs.beam_size as i32,
+            patience: -1.0,
+        }
     };
     let mut params = FullParams::new(strategy);
 
-    let lang = if prefs.language == "auto" { None } else { Some(prefs.language.as_str()) };
+    let lang = if prefs.language == "auto" {
+        None
+    } else {
+        Some(prefs.language.as_str())
+    };
     params.set_language(lang);
     let threads = if prefs.n_threads == 0 {
         num_cpus::get_physical() as i32
@@ -134,7 +158,8 @@ fn run_whisper(
     }
 
     let t = std::time::Instant::now();
-    state.full(params, &samples)
+    state
+        .full(params, &samples)
         .map_err(|e| CoreError::Transcription(e.to_string()))?;
     let infer_ms = t.elapsed().as_millis();
     let rtf = infer_ms as f64 / 1000.0 / audio_duration_s;
@@ -144,18 +169,26 @@ fn run_whisper(
     let mut full_text = String::new();
 
     for seg in state.as_iter() {
-        let text = seg.to_str_lossy()
+        let text = seg
+            .to_str_lossy()
             .map_err(|e| CoreError::Transcription(e.to_string()))?;
         // whisper timestamps are in centiseconds → convert to ms (clamp negatives to 0)
         let start_ms = seg.start_timestamp().max(0) as u64 * 10;
         let end_ms = seg.end_timestamp().max(0) as u64 * 10;
 
         full_text.push_str(&text);
-        segments.push(Segment { start_ms, end_ms, text: text.trim().to_string() });
+        segments.push(Segment {
+            start_ms,
+            end_ms,
+            text: text.trim().to_string(),
+        });
     }
 
     let detected_lang = prefs.language.clone();
-    bench_log(&format!("transcription_complete  total_ms={}", t_total.elapsed().as_millis()));
+    bench_log(&format!(
+        "transcription_complete  total_ms={}",
+        t_total.elapsed().as_millis()
+    ));
 
     Ok(Transcript {
         text: full_text.trim().to_string(),
@@ -172,9 +205,7 @@ fn load_wav_as_mono_f32(path: &Path) -> anyhow::Result<Vec<f32>> {
     let spec = reader.spec();
 
     let samples_f32: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => {
-            reader.samples::<f32>().collect::<Result<_, _>>()?
-        }
+        hound::SampleFormat::Float => reader.samples::<f32>().collect::<Result<_, _>>()?,
         hound::SampleFormat::Int => {
             let samples_i16: Vec<i16> = reader.samples::<i16>().collect::<Result<_, _>>()?;
             let mut out = vec![0f32; samples_i16.len()];
@@ -209,13 +240,16 @@ fn load_wav_as_mono_f32(path: &Path) -> anyhow::Result<Vec<f32>> {
 fn bench_log(msg: &str) {
     use std::io::Write;
     let base = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    let path = std::path::Path::new(&base)
-        .join(".local/share/meeting-assistant/transcription.log");
+    let path = std::path::Path::new(&base).join(".local/share/meeting-assistant/transcription.log");
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         let _ = writeln!(f, "[{ts}] {msg}");
     }
 }
@@ -243,7 +277,11 @@ pub(crate) struct LazyState {
 
 impl Default for LazyState {
     fn default() -> Self {
-        Self { runner: None, active_count: 0, unload_handle: None }
+        Self {
+            runner: None,
+            active_count: 0,
+            unload_handle: None,
+        }
     }
 }
 
@@ -280,19 +318,33 @@ impl LazyWhisperTranscriber {
     /// Does NOT load the model — loading is deferred to first transcription.
     pub fn new(model_path: PathBuf, prefs: TranscriberPrefs) -> Self {
         let factory: RunnerFactory = Arc::new(|path: &Path| {
-            let path_str = path.to_str()
+            let path_str = path
+                .to_str()
                 .ok_or_else(|| CoreError::Transcription("model path is not valid UTF-8".into()))?;
             let t = std::time::Instant::now();
-            let ctx = WhisperContext::new_with_params(path_str, WhisperContextParameters::default())
-                .map_err(|e| CoreError::Transcription(format!("Модель не найдена или повреждена: {e}")))?;
-            let model_name = path.file_name().and_then(|n| n.to_str()).unwrap_or(path_str);
-            bench_log(&format!("model_loaded  model={model_name} load_ms={}", t.elapsed().as_millis()));
+            let ctx =
+                WhisperContext::new_with_params(path_str, WhisperContextParameters::default())
+                    .map_err(|e| {
+                        CoreError::Transcription(format!("Модель не найдена или повреждена: {e}"))
+                    })?;
+            let model_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(path_str);
+            bench_log(&format!(
+                "model_loaded  model={model_name} load_ms={}",
+                t.elapsed().as_millis()
+            ));
             Ok(Arc::new(RealWhisperRunner { ctx: Arc::new(ctx) }) as Arc<dyn WhisperRunner>)
         });
         Self::new_with_factory(model_path, factory, prefs)
     }
 
-    pub(crate) fn new_with_factory(model_path: PathBuf, factory: RunnerFactory, prefs: TranscriberPrefs) -> Self {
+    pub(crate) fn new_with_factory(
+        model_path: PathBuf,
+        factory: RunnerFactory,
+        prefs: TranscriberPrefs,
+    ) -> Self {
         Self {
             model_path: std::sync::RwLock::new(model_path),
             factory,
@@ -440,7 +492,11 @@ mod tests {
             if self.fail_run {
                 return Err(CoreError::Transcription("fake run error".into()));
             }
-            Ok(Transcript { text: "ok".into(), segments: vec![], language: "en".into() })
+            Ok(Transcript {
+                text: "ok".into(),
+                segments: vec![],
+                language: "en".into(),
+            })
         }
     }
 
@@ -465,7 +521,10 @@ mod tests {
         })
     }
 
-    fn factory_conditional(load_count: Arc<AtomicUsize>, should_fail: Arc<AtomicBool>) -> RunnerFactory {
+    fn factory_conditional(
+        load_count: Arc<AtomicUsize>,
+        should_fail: Arc<AtomicBool>,
+    ) -> RunnerFactory {
         Arc::new(move |_path| {
             load_count.fetch_add(1, Ordering::SeqCst);
             if should_fail.load(Ordering::SeqCst) {
@@ -479,7 +538,9 @@ mod tests {
         Path::new("/fake/audio.wav")
     }
 
-    fn default_prefs() -> TranscriberPrefs { TranscriberPrefs::default() }
+    fn default_prefs() -> TranscriberPrefs {
+        TranscriberPrefs::default()
+    }
 
     // TC-001: первый вызов загружает модель
     #[tokio::test]
@@ -569,7 +630,10 @@ mod tests {
         tokio::time::advance(Duration::from_secs(100)).await;
         tokio::task::yield_now().await;
 
-        assert!(t.ctx_is_loaded().await, "ctx должен быть загружен через 100с после последнего вызова");
+        assert!(
+            t.ctx_is_loaded().await,
+            "ctx должен быть загружен через 100с после последнего вызова"
+        );
 
         tokio::time::advance(Duration::from_secs(IDLE_UNLOAD_SECS + 1)).await;
         tokio::task::yield_now().await;
@@ -590,8 +654,14 @@ mod tests {
         assert!(result.is_err());
 
         let state = t.state.lock().await;
-        assert_eq!(state.active_count, 0, "active_count должен быть 0 после ошибки");
-        assert!(state.unload_handle.is_some(), "таймер выгрузки должен быть запущен");
+        assert_eq!(
+            state.active_count, 0,
+            "active_count должен быть 0 после ошибки"
+        );
+        assert!(
+            state.unload_handle.is_some(),
+            "таймер выгрузки должен быть запущен"
+        );
     }
 
     // TC-007: повторный вызов после failed load пробует загрузить снова
@@ -607,11 +677,18 @@ mod tests {
 
         assert!(t.transcribe(audio()).await.is_err());
         assert_eq!(load_count.load(Ordering::SeqCst), 1);
-        assert!(!t.ctx_is_loaded().await, "ctx должен остаться None после ошибки загрузки");
+        assert!(
+            !t.ctx_is_loaded().await,
+            "ctx должен остаться None после ошибки загрузки"
+        );
 
         should_fail.store(false, Ordering::SeqCst);
         assert!(t.transcribe(audio()).await.is_ok());
-        assert_eq!(load_count.load(Ordering::SeqCst), 2, "должна быть повторная попытка загрузки");
+        assert_eq!(
+            load_count.load(Ordering::SeqCst),
+            2,
+            "должна быть повторная попытка загрузки"
+        );
     }
 
     // TC-008: N параллельных завершений → один unload_handle
@@ -629,11 +706,16 @@ mod tests {
                 tokio::spawn(async move { t.transcribe(audio()).await.unwrap() })
             })
             .collect();
-        for h in handles { h.await.unwrap(); }
+        for h in handles {
+            h.await.unwrap();
+        }
 
         let state = t.state.lock().await;
         assert_eq!(state.active_count, 0);
-        assert!(state.unload_handle.is_some(), "должен быть ровно один активный таймер");
+        assert!(
+            state.unload_handle.is_some(),
+            "должен быть ровно один активный таймер"
+        );
     }
 
     // TC-009: Drop при pending-таймере отменяет таймер
@@ -699,11 +781,18 @@ mod tests {
 
         // Сменить путь → runner должен выгрузиться
         t.set_model_path(PathBuf::from("/model-b.bin")).await;
-        assert!(!t.ctx_is_loaded().await, "runner должен быть выгружен после set_model_path");
+        assert!(
+            !t.ctx_is_loaded().await,
+            "runner должен быть выгружен после set_model_path"
+        );
 
         // Следующая транскрипция загружает снова (по новому пути)
         t.transcribe(audio()).await.unwrap();
-        assert_eq!(load_count.load(Ordering::SeqCst), 2, "должна быть загрузка новой модели");
+        assert_eq!(
+            load_count.load(Ordering::SeqCst),
+            2,
+            "должна быть загрузка новой модели"
+        );
     }
 }
 
@@ -712,13 +801,7 @@ fn resample(samples: Vec<f32>, from_rate: u32, to_rate: u32) -> anyhow::Result<V
 
     const CHUNK: usize = 1024;
 
-    let mut resampler = FftFixedIn::<f32>::new(
-        from_rate as usize,
-        to_rate as usize,
-        CHUNK,
-        2,
-        1,
-    )?;
+    let mut resampler = FftFixedIn::<f32>::new(from_rate as usize, to_rate as usize, CHUNK, 2, 1)?;
 
     let ratio = to_rate as f64 / from_rate as f64;
     let mut output = Vec::with_capacity((samples.len() as f64 * ratio) as usize + CHUNK);

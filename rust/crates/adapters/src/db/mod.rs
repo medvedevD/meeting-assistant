@@ -1,21 +1,27 @@
-mod meeting_repo;
 mod job_repo;
+mod meeting_repo;
 
-pub use meeting_repo::SqliteMeetingRepo;
 pub use job_repo::SqliteJobRepo;
+pub use meeting_repo::SqliteMeetingRepo;
 
-use std::path::Path;
-use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use rusqlite::Connection;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 // Each entry is (version, sql). Applied in order; already-applied versions are skipped.
 const MIGRATIONS: &[(i64, &str)] = &[
     (1, include_str!("../../../../migrations/001_initial.sql")),
     (2, include_str!("../../../../migrations/002_protocol.sql")),
     (3, include_str!("../../../../migrations/003_file_paths.sql")),
-    (4, include_str!("../../../../migrations/004_job_template.sql")),
-    (5, include_str!("../../../../migrations/005_job_error_class.sql")),
+    (
+        4,
+        include_str!("../../../../migrations/004_job_template.sql"),
+    ),
+    (
+        5,
+        include_str!("../../../../migrations/005_job_error_class.sql"),
+    ),
 ];
 
 pub struct Db {
@@ -28,15 +34,17 @@ impl Db {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("create db dir {}", parent.display()))?;
         }
-        let conn = Connection::open(path)
-            .with_context(|| format!("open sqlite at {}", path.display()))?;
+        let conn =
+            Connection::open(path).with_context(|| format!("open sqlite at {}", path.display()))?;
 
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
 
         apply_migrations(&conn).context("apply migrations")?;
 
-        Ok(Arc::new(Self { conn: Arc::new(Mutex::new(conn)) }))
+        Ok(Arc::new(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        }))
     }
 
     #[cfg(test)]
@@ -44,7 +52,9 @@ impl Db {
         let conn = Connection::open_in_memory()?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         apply_migrations(&conn)?;
-        Ok(Arc::new(Self { conn: Arc::new(Mutex::new(conn)) }))
+        Ok(Arc::new(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        }))
     }
 }
 

@@ -38,7 +38,9 @@ fn is_allowed(c: char) -> bool {
 /// separators, `.`, `..`, NUL, control chars, etc.).
 pub fn validate_template_name(name: &str) -> Result<(), CoreError> {
     if name.is_empty() {
-        return Err(CoreError::Validation("template name must not be empty".into()));
+        return Err(CoreError::Validation(
+            "template name must not be empty".into(),
+        ));
     }
     if name.chars().count() > MAX_NAME_LEN {
         return Err(CoreError::Validation(format!(
@@ -129,7 +131,16 @@ mod tests {
 
     #[test]
     fn rejects_path_traversal_and_separators() {
-        for bad in ["../../evil", "a/b", "..", ".", "x\\y", "with.dot", "tab\there", ""] {
+        for bad in [
+            "../../evil",
+            "a/b",
+            "..",
+            ".",
+            "x\\y",
+            "with.dot",
+            "tab\there",
+            "",
+        ] {
             assert!(
                 validate_template_name(bad).is_err(),
                 "expected '{bad}' to be rejected"

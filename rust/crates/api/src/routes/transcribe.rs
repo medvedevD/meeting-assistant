@@ -1,13 +1,9 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    Json,
-};
+use crate::router::AppState;
+use axum::{extract::State, http::StatusCode, Json};
+use meeting_core::usecases::transcribe_audio_file;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use meeting_core::usecases::transcribe_audio_file;
-use crate::router::AppState;
 
 #[derive(Deserialize)]
 pub struct TranscribeRequest {
@@ -43,15 +39,21 @@ pub async fn handle(
         // Mirror the worker's persistence policy: write `transcript.md` next to
         // the audio and record the path; fall back to text-only if the file
         // write fails so the transcript is never lost.
-        let meeting = state.meeting_repo
+        let meeting = state
+            .meeting_repo
             .find_by_id(id)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
         let saved_to_file = if let Some(m) = meeting.as_ref() {
-            match state.file_store.write_transcript(&m.meeting_dir, &transcript.text).await {
+            match state
+                .file_store
+                .write_transcript(&m.meeting_dir, &transcript.text)
+                .await
+            {
                 Ok(file_path) => {
-                    state.meeting_repo
+                    state
+                        .meeting_repo
                         .save_transcript_file(id, &transcript.text, &file_path)
                         .await
                         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -67,7 +69,8 @@ pub async fn handle(
         };
 
         if !saved_to_file {
-            state.meeting_repo
+            state
+                .meeting_repo
                 .save_transcript(id, &transcript.text)
                 .await
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -77,27 +80,35 @@ pub async fn handle(
     Ok(Json(TranscribeResponse {
         text: transcript.text,
         language: transcript.language,
-        segments: transcript.segments
+        segments: transcript
+            .segments
             .into_iter()
-            .map(|s| SegmentDto { start_ms: s.start_ms, end_ms: s.end_ms, text: s.text })
+            .map(|s| SegmentDto {
+                start_ms: s.start_ms,
+                end_ms: s.end_ms,
+                text: s.text,
+            })
             .collect(),
     }))
 }
 
 #[cfg(test)]
 mod tests {
-    use axum::{body::Body, http::{Request, StatusCode}};
-    use std::path::PathBuf;
-    use tower::ServiceExt;
+    use crate::router::{create_router, AppState};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use meeting_core::{
         entities::Meeting,
         fakes::{
-            FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore,
-            FakeMeetingRepo, FakeTemplateLoader, FakeTranscriber,
+            FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo,
+            FakeTemplateLoader, FakeTranscriber,
         },
         ports::MeetingRepo,
     };
-    use crate::router::{AppState, create_router};
+    use std::path::PathBuf;
+    use tower::ServiceExt;
 
     #[tokio::test]
     async fn writes_transcript_md_next_to_audio_and_records_path() {
@@ -159,7 +170,10 @@ mod tests {
 
         let saved = repo.find_by_id(&meeting_id).await.unwrap().unwrap();
         assert_eq!(saved.transcript_text.as_deref(), Some("распознанный текст"));
-        assert_eq!(saved.transcript_path, Some(meeting_dir.join("transcript.md")));
+        assert_eq!(
+            saved.transcript_path,
+            Some(meeting_dir.join("transcript.md"))
+        );
 
         let _ = std::fs::remove_dir_all(&meeting_dir);
     }

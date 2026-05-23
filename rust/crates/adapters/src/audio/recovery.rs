@@ -73,7 +73,9 @@ struct WavLayout {
 /// (offset + declared length). Does **not** assume any fixed header size.
 fn parse_wav_layout<R: Read + Seek>(r: &mut R, file_size: u64) -> Result<WavLayout, String> {
     if file_size < 12 {
-        return Err(format!("file too small for a RIFF header ({file_size} bytes)"));
+        return Err(format!(
+            "file too small for a RIFF header ({file_size} bytes)"
+        ));
     }
 
     let mut riff = [0u8; 12];
@@ -203,7 +205,10 @@ pub async fn run_recovery(meetings_dir: &Path, repo: &dyn MeetingRepo) -> Recove
     let entries = match std::fs::read_dir(meetings_dir) {
         Ok(e) => e,
         Err(e) => {
-            tracing::warn!("recovery: cannot read meetings dir {}: {e}", meetings_dir.display());
+            tracing::warn!(
+                "recovery: cannot read meetings dir {}: {e}",
+                meetings_dir.display()
+            );
             return report;
         }
     };
@@ -256,10 +261,7 @@ pub async fn run_recovery(meetings_dir: &Path, repo: &dyn MeetingRepo) -> Recove
                 }
             }
             Err(e) => {
-                tracing::warn!(
-                    "recovery: lookup failed for {}: {e}",
-                    audio_path.display()
-                );
+                tracing::warn!("recovery: lookup failed for {}: {e}", audio_path.display());
             }
         }
     }

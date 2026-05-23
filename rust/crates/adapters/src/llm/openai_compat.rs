@@ -101,14 +101,28 @@ struct ChatResponse {
 
 #[async_trait]
 impl LlmProvider for OpenAiCompatProvider {
-    async fn generate(&self, transcript: &str, instructions: Option<&str>) -> Result<String, CoreError> {
+    async fn generate(
+        &self,
+        transcript: &str,
+        instructions: Option<&str>,
+    ) -> Result<String, CoreError> {
         let mut messages = Vec::new();
         if let Some(instr) = instructions {
-            messages.push(ChatMessage { role: "system", content: instr });
+            messages.push(ChatMessage {
+                role: "system",
+                content: instr,
+            });
         }
-        messages.push(ChatMessage { role: "user", content: transcript });
+        messages.push(ChatMessage {
+            role: "user",
+            content: transcript,
+        });
 
-        let body = ChatRequest { model: &self.model, max_tokens: self.max_tokens, messages };
+        let body = ChatRequest {
+            model: &self.model,
+            max_tokens: self.max_tokens,
+            messages,
+        };
         let url = format!("{}/chat/completions", self.base_url);
 
         let resp = self
@@ -123,7 +137,10 @@ impl LlmProvider for OpenAiCompatProvider {
             return Err(classify_http(&self.label, status, &text));
         }
 
-        let parsed: ChatResponse = resp.json().await.map_err(|e| CoreError::Llm(e.to_string()))?;
+        let parsed: ChatResponse = resp
+            .json()
+            .await
+            .map_err(|e| CoreError::Llm(e.to_string()))?;
         let text = parsed
             .choices
             .into_iter()
@@ -153,7 +170,10 @@ mod tests {
             .await;
 
         let provider = OpenAiCompatProvider::new("OpenAI", "k", "gpt-4o", 4096, server.uri());
-        let out = provider.generate("transcript", Some("be brief")).await.unwrap();
+        let out = provider
+            .generate("transcript", Some("be brief"))
+            .await
+            .unwrap();
         assert_eq!(out, "# Protocol");
     }
 
@@ -217,8 +237,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let provider =
-            OpenAiCompatProvider::new("Ollama", "", "llama3.1:8b", 4096, server.uri());
+        let provider = OpenAiCompatProvider::new("Ollama", "", "llama3.1:8b", 4096, server.uri());
         let out = provider.generate("transcript", None).await.unwrap();
         assert_eq!(out, "# Оллама");
     }

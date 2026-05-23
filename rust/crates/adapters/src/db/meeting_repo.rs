@@ -1,27 +1,25 @@
+use super::Db;
+use async_trait::async_trait;
+use meeting_core::{entities::Meeting, ports::MeetingRepo, CoreError};
+use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use async_trait::async_trait;
-use rusqlite::OptionalExtension;
-use meeting_core::{CoreError, entities::Meeting, ports::MeetingRepo};
-use super::Db;
 
 pub struct SqliteMeetingRepo(pub Arc<Db>);
 
 fn row_to_meeting(row: &rusqlite::Row) -> rusqlite::Result<Meeting> {
     let audio_path = PathBuf::from(row.get::<_, String>(2)?);
-    let meeting_dir = audio_path.parent()
-        .map(PathBuf::from)
-        .unwrap_or_default();
+    let meeting_dir = audio_path.parent().map(PathBuf::from).unwrap_or_default();
     Ok(Meeting {
-        id:              row.get(0)?,
-        name:            row.get(1)?,
+        id: row.get(0)?,
+        name: row.get(1)?,
         audio_path,
         meeting_dir,
         transcript_text: row.get(3)?,
-        protocol_text:   row.get(4)?,
+        protocol_text: row.get(4)?,
         transcript_path: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
-        protocol_path:   row.get::<_, Option<String>>(6)?.map(PathBuf::from),
-        created_at:      row.get(7)?,
+        protocol_path: row.get::<_, Option<String>>(6)?.map(PathBuf::from),
+        created_at: row.get(7)?,
     })
 }
 
@@ -126,7 +124,12 @@ impl MeetingRepo for SqliteMeetingRepo {
         Ok(())
     }
 
-    async fn save_transcript_file(&self, id: &str, text: &str, path: &Path) -> Result<(), CoreError> {
+    async fn save_transcript_file(
+        &self,
+        id: &str,
+        text: &str,
+        path: &Path,
+    ) -> Result<(), CoreError> {
         let db = Arc::clone(&self.0);
         let id = id.to_string();
         let text = text.to_string();
@@ -249,7 +252,10 @@ impl MeetingRepo for SqliteMeetingRepo {
             let mut conn = db.conn.lock().unwrap();
             let tx = conn.transaction()?;
             // jobs reference meetings(id); remove children first to satisfy FK.
-            tx.execute("DELETE FROM jobs WHERE meeting_id=?1", rusqlite::params![id])?;
+            tx.execute(
+                "DELETE FROM jobs WHERE meeting_id=?1",
+                rusqlite::params![id],
+            )?;
             tx.execute("DELETE FROM meetings WHERE id=?1", rusqlite::params![id])?;
             tx.commit()
         })
@@ -293,9 +299,9 @@ impl MeetingRepo for SqliteMeetingRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
-    use meeting_core::entities::Meeting;
     use crate::db::Db;
+    use meeting_core::entities::Meeting;
+    use std::path::PathBuf;
 
     fn make_repo() -> SqliteMeetingRepo {
         let db = Db::open_in_memory().unwrap();
@@ -338,7 +344,9 @@ mod tests {
         let m = Meeting::new("Встреча".to_string(), PathBuf::from("/audio/x.wav"));
         repo.save(&m).await.unwrap();
         let path = PathBuf::from("/meetings/2026-05-10_14-30_abc/transcript.md");
-        repo.save_transcript_file(&m.id, "Привет мир", &path).await.unwrap();
+        repo.save_transcript_file(&m.id, "Привет мир", &path)
+            .await
+            .unwrap();
 
         let found = repo.find_by_id(&m.id).await.unwrap().unwrap();
         assert_eq!(found.transcript_text.as_deref(), Some("Привет мир"));
@@ -351,7 +359,9 @@ mod tests {
         let m = Meeting::new("Встреча".to_string(), PathBuf::from("/audio/x.wav"));
         repo.save(&m).await.unwrap();
         let path = PathBuf::from("/meetings/2026-05-10_14-30_abc/protocol.md");
-        repo.save_protocol_file(&m.id, "# Протокол", &path).await.unwrap();
+        repo.save_protocol_file(&m.id, "# Протокол", &path)
+            .await
+            .unwrap();
 
         let found = repo.find_by_id(&m.id).await.unwrap().unwrap();
         assert_eq!(found.protocol_text.as_deref(), Some("# Протокол"));
@@ -412,8 +422,12 @@ mod tests {
         let repo = make_repo();
         let m = Meeting::new("Встреча".to_string(), PathBuf::from("/audio/x.wav"));
         repo.save(&m).await.unwrap();
-        repo.save_transcript_file(&m.id, "t", &PathBuf::from("/d/transcript.md")).await.unwrap();
-        repo.save_protocol_file(&m.id, "p", &PathBuf::from("/d/protocol.md")).await.unwrap();
+        repo.save_transcript_file(&m.id, "t", &PathBuf::from("/d/transcript.md"))
+            .await
+            .unwrap();
+        repo.save_protocol_file(&m.id, "p", &PathBuf::from("/d/protocol.md"))
+            .await
+            .unwrap();
 
         repo.clear_transcript(&m.id).await.unwrap();
         repo.clear_protocol(&m.id).await.unwrap();

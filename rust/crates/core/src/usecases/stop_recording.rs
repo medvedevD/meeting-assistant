@@ -1,9 +1,9 @@
-use std::sync::Arc;
 use crate::{
-    CoreError,
     entities::Meeting,
     ports::{AudioCapture, MeetingRepo},
+    CoreError,
 };
+use std::sync::Arc;
 
 /// Stop an active recording session and return the persisted `Meeting`.
 ///
@@ -25,12 +25,12 @@ pub async fn stop_recording(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use crate::{
         entities::Meeting,
         fakes::{FakeAudioCapture, FakeMeetingRepo},
         ports::{CaptureSource, MeetingRepo},
     };
+    use std::path::PathBuf;
 
     async fn seeded_repo(name: &str) -> (Arc<FakeMeetingRepo>, Meeting) {
         let repo = FakeMeetingRepo::new();
@@ -46,7 +46,12 @@ mod tests {
 
         // Simulate an active session
         capture
-            .start_session(&meeting.id, std::path::Path::new("/tmp/r.wav"), CaptureSource::Mic, false)
+            .start_session(
+                &meeting.id,
+                std::path::Path::new("/tmp/r.wav"),
+                CaptureSource::Mic,
+                false,
+            )
             .await
             .unwrap();
 
@@ -86,7 +91,12 @@ mod tests {
 
         // manually activate a session that has no DB record
         capture
-            .start_session(id, std::path::Path::new("/tmp/x.wav"), CaptureSource::Mic, false)
+            .start_session(
+                id,
+                std::path::Path::new("/tmp/x.wav"),
+                CaptureSource::Mic,
+                false,
+            )
             .await
             .unwrap();
 

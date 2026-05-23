@@ -15,7 +15,9 @@ pub struct SwappableLlm {
 
 impl SwappableLlm {
     pub fn new(initial: Arc<dyn LlmProvider>) -> Self {
-        Self { current: RwLock::new(initial) }
+        Self {
+            current: RwLock::new(initial),
+        }
     }
 
     /// Replace the active provider. Requests already in flight keep the
@@ -27,7 +29,11 @@ impl SwappableLlm {
 
 #[async_trait]
 impl LlmProvider for SwappableLlm {
-    async fn generate(&self, transcript: &str, instructions: Option<&str>) -> Result<String, CoreError> {
+    async fn generate(
+        &self,
+        transcript: &str,
+        instructions: Option<&str>,
+    ) -> Result<String, CoreError> {
         // Clone the Arc and drop the guard before awaiting (the guard is not Send).
         let provider = { self.current.read().unwrap().clone() };
         provider.generate(transcript, instructions).await

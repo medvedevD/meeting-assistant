@@ -1,13 +1,16 @@
-use std::sync::Arc;
 use dashmap::DashMap;
-use tokio::time::{Duration, sleep};
-use tracing::{error, info, warn};
 use meeting_core::{
-    CoreError,
     entities::{meeting::now_unix, ErrorClass, JobProgress, Meeting, PipelineStage},
-    ports::{JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, ProgressSink, TemplateLoader, Transcriber},
+    ports::{
+        JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, ProgressSink, TemplateLoader,
+        Transcriber,
+    },
     usecases::generate_protocol,
+    CoreError,
 };
+use std::sync::Arc;
+use tokio::time::{sleep, Duration};
+use tracing::{error, info, warn};
 
 const MAX_ATTEMPTS: u32 = 5;
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
@@ -49,13 +52,23 @@ impl Worker {
         templates: Arc<dyn TemplateLoader>,
         progress: LiveProgress,
     ) -> Self {
-        Self { job_repo, meeting_repo, transcriber, file_store, llm, templates, progress }
+        Self {
+            job_repo,
+            meeting_repo,
+            transcriber,
+            file_store,
+            llm,
+            templates,
+            progress,
+        }
     }
 
     /// Publish a coarse stage (percent 0) to the live-progress table.
     fn set_stage(&self, job_id: &str, stage: PipelineStage) {
-        self.progress
-            .insert(job_id.to_string(), JobProgress::new(stage, stage_sub(stage), 0));
+        self.progress.insert(
+            job_id.to_string(),
+            JobProgress::new(stage, stage_sub(stage), 0),
+        );
     }
 
     /// Drop the live-progress entry once a job reaches a terminal state; the
@@ -109,9 +122,16 @@ impl Worker {
             Ok(None) => {
                 let now = now_unix();
                 error!(job_id = %job.id, "meeting not found — failing permanently");
-                let _ = self.job_repo.mark_permanently_failed(
-                    &job.id, "meeting not found", None, job.attempts + 1, now,
-                ).await;
+                let _ = self
+                    .job_repo
+                    .mark_permanently_failed(
+                        &job.id,
+                        "meeting not found",
+                        None,
+                        job.attempts + 1,
+                        now,
+                    )
+                    .await;
                 self.clear_progress(&job.id);
                 return;
             }
@@ -148,7 +168,10 @@ impl Worker {
         let map = Arc::clone(&self.progress);
         let id = job_id.to_string();
         Arc::new(move |stage: PipelineStage, percent: u8| {
-            map.insert(id.clone(), JobProgress::new(stage, stage_sub(stage), percent));
+            map.insert(
+                id.clone(),
+                JobProgress::new(stage, stage_sub(stage), percent),
+            );
         })
     }
 
@@ -165,9 +188,14 @@ impl Worker {
             .transcribe_with_progress(&meeting.audio_path, sink)
             .await?;
         self.set_stage(&job.id, PipelineStage::WritingTranscript);
-        match self.file_store.write_transcript(&meeting.meeting_dir, &transcript.text).await {
+        match self
+            .file_store
+            .write_transcript(&meeting.meeting_dir, &transcript.text)
+            .await
+        {
             Ok(path) => {
-                if let Err(e) = self.meeting_repo
+                if let Err(e) = self
+                    .meeting_repo
                     .save_transcript_file(&meeting.id, &transcript.text, &path)
                     .await
                 {
@@ -176,7 +204,11 @@ impl Worker {
             }
             Err(e) => {
                 warn!(job_id = %job.id, "write transcript.md failed: {e}");
-                if let Err(e) = self.meeting_repo.save_transcript(&meeting.id, &transcript.text).await {
+                if let Err(e) = self
+                    .meeting_repo
+                    .save_transcript(&meeting.id, &transcript.text)
+                    .await
+                {
                     warn!(job_id = %job.id, "save_transcript fallback failed: {e}");
                 }
             }
@@ -206,9 +238,14 @@ impl Worker {
         )
         .await?;
 
-        match self.file_store.write_protocol(&meeting.meeting_dir, &protocol.markdown).await {
+        match self
+            .file_store
+            .write_protocol(&meeting.meeting_dir, &protocol.markdown)
+            .await
+        {
             Ok(path) => {
-                if let Err(e) = self.meeting_repo
+                if let Err(e) = self
+                    .meeting_repo
                     .save_protocol_file(&meeting.id, &protocol.markdown, &path)
                     .await
                 {
@@ -217,7 +254,11 @@ impl Worker {
             }
             Err(e) => {
                 warn!(job_id = %job.id, "write protocol.md failed: {e}");
-                if let Err(e) = self.meeting_repo.save_protocol(&meeting.id, &protocol.markdown).await {
+                if let Err(e) = self
+                    .meeting_repo
+                    .save_protocol(&meeting.id, &protocol.markdown)
+                    .await
+                {
                     warn!(job_id = %job.id, "save_protocol fallback failed: {e}");
                 }
             }
@@ -243,7 +284,10 @@ impl Worker {
             let backoff_secs = 10i64 * (1 << attempts.min(10));
             let retry_after = now + backoff_secs;
             warn!(job_id = %job.id, attempts, backoff_secs, "job failed, will retry");
-            let _ = self.job_repo.reset_for_retry(&job.id, &msg, attempts, retry_after, now).await;
+            let _ = self
+                .job_repo
+                .reset_for_retry(&job.id, &msg, attempts, retry_after, now)
+                .await;
             // Re-queued; live progress will be re-established on next claim.
             self.clear_progress(&job.id);
         }

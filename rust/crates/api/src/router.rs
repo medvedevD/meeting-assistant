@@ -1,3 +1,4 @@
+use axum::routing::put;
 use axum::{
     extract::{Request, State},
     http::{header, StatusCode},
@@ -6,15 +7,14 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use axum::routing::put;
 use dashmap::DashMap;
-use serde::Serialize;
-use std::path::PathBuf;
-use std::sync::Arc;
 use meeting_core::entities::JobProgress;
 use meeting_core::ports::{
     AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber,
 };
+use serde::Serialize;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Live, in-memory job-progress table keyed by job id. Shared with the worker
 /// (the writer); the `GET /jobs/:id` handler reads it. Never persisted
@@ -32,7 +32,9 @@ pub type DefaultTemplateFn = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 pub fn no_default_template() -> DefaultTemplateFn {
     Arc::new(|| None)
 }
-use crate::routes::{transcribe, jobs, protocols, recordings, meetings, settings, templates, health, version};
+use crate::routes::{
+    health, jobs, meetings, protocols, recordings, settings, templates, transcribe, version,
+};
 use crate::settings_service::SettingsService;
 use crate::template_service::TemplateService;
 
@@ -87,13 +89,19 @@ pub fn create_server_router(
     let token: Arc<str> = Arc::from(auth_token.as_str());
 
     let api = api_routes()
-        .route_layer(middleware::from_fn_with_state(token.clone(), require_bearer))
+        .route_layer(middleware::from_fn_with_state(
+            token.clone(),
+            require_bearer,
+        ))
         .with_state(Arc::new(state));
 
     // Settings routes carry their own state (the SettingsService), kept off
     // AppState so existing route tests stay untouched. Same bearer gate.
     let settings = settings_routes()
-        .route_layer(middleware::from_fn_with_state(token.clone(), require_bearer))
+        .route_layer(middleware::from_fn_with_state(
+            token.clone(),
+            require_bearer,
+        ))
         .with_state(settings_service);
 
     // Template routes follow the same separate-state pattern (the
@@ -126,7 +134,10 @@ fn api_routes() -> Router<Arc<AppState>> {
         .route("/api/v1/meetings/import", post(meetings::import))
         .route("/api/v1/meetings/scan", get(meetings::scan))
         .route("/api/v1/meetings/:id/reprocess", post(meetings::reprocess))
-        .route("/api/v1/meetings/:id", axum::routing::delete(meetings::delete))
+        .route(
+            "/api/v1/meetings/:id",
+            get(meetings::get).delete(meetings::delete),
+        )
 }
 
 fn settings_routes() -> Router<Arc<dyn SettingsService>> {
@@ -141,7 +152,9 @@ fn template_routes() -> Router<Arc<dyn TemplateService>> {
         .route("/api/v1/templates", get(templates::list))
         .route(
             "/api/v1/templates/:name",
-            get(templates::get).put(templates::put).delete(templates::delete),
+            get(templates::get)
+                .put(templates::put)
+                .delete(templates::delete),
         )
         .route("/api/v1/templates/:name/rename", post(templates::rename))
 }
@@ -187,12 +200,12 @@ mod tests {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use http_body_util::BodyExt;
-    use std::path::PathBuf;
-    use tower::ServiceExt;
     use meeting_core::fakes::{
         FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo,
         FakeTemplateLoader, FakeTranscriber,
     };
+    use std::path::PathBuf;
+    use tower::ServiceExt;
 
     const TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -205,7 +218,11 @@ mod tests {
         async fn update(&self, _body: serde_json::Value) -> Result<serde_json::Value, String> {
             Ok(serde_json::json!({}))
         }
-        async fn set_secret(&self, _provider: String, _value: Option<String>) -> Result<(), String> {
+        async fn set_secret(
+            &self,
+            _provider: String,
+            _value: Option<String>,
+        ) -> Result<(), String> {
             Ok(())
         }
         async fn test_provider(&self, _provider: String) -> Result<(), String> {
@@ -244,8 +261,8 @@ mod tests {
                 audio_capture: FakeAudioCapture::new(),
                 file_store: FakeMeetingFileStore::new(),
                 recordings_dir: PathBuf::from("/tmp"),
-            progress: std::sync::Arc::new(dashmap::DashMap::new()),
-            default_template: super::no_default_template(),
+                progress: std::sync::Arc::new(dashmap::DashMap::new()),
+                default_template: super::no_default_template(),
             },
             Arc::new(FakeSettings),
             Arc::new(FakeTemplates),
@@ -335,7 +352,12 @@ mod tests {
     #[tokio::test]
     async fn health_needs_no_auth() {
         let resp = server()
-            .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
@@ -347,7 +369,12 @@ mod tests {
     #[tokio::test]
     async fn version_needs_no_auth_and_carries_protocol_range() {
         let resp = server()
-            .oneshot(Request::builder().uri("/version").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri("/version")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);

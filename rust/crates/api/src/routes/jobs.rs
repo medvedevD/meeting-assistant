@@ -1,16 +1,16 @@
+use crate::router::AppState;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     Json,
 };
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::sync::Arc;
 use meeting_core::{
     entities::{Job, JobProgress},
     usecases::{get_job_status, submit_transcription_job},
 };
-use crate::router::AppState;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct SubmitRequest {
@@ -87,11 +87,17 @@ pub async fn status(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::{Request, StatusCode}};
+    use crate::router::{create_router, AppState};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use http_body_util::BodyExt;
+    use meeting_core::fakes::{
+        FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo,
+        FakeTemplateLoader, FakeTranscriber,
+    };
     use tower::ServiceExt;
-    use meeting_core::fakes::{FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo, FakeTemplateLoader, FakeTranscriber};
-    use crate::router::{AppState, create_router};
 
     fn make_app() -> axum::Router {
         create_router(AppState {
@@ -227,7 +233,9 @@ mod tests {
 
         let failed = Job::new_transcribe("m2".into());
         jr.enqueue(&failed).await.unwrap();
-        jr.mark_permanently_failed(&failed.id, "boom", Some("api_auth"), 5, 1).await.unwrap();
+        jr.mark_permanently_failed(&failed.id, "boom", Some("api_auth"), 5, 1)
+            .await
+            .unwrap();
 
         let app = create_router(AppState {
             transcriber: FakeTranscriber::new("fake"),
@@ -245,7 +253,12 @@ mod tests {
         // Active job: live progress merged in.
         let resp = app
             .clone()
-            .oneshot(Request::builder().uri(format!("/api/v1/jobs/{}", active.id)).body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/jobs/{}", active.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         let json = body_json(resp).await;
@@ -255,7 +268,12 @@ mod tests {
 
         // Failed job: error_class from DB, no live progress.
         let resp = app
-            .oneshot(Request::builder().uri(format!("/api/v1/jobs/{}", failed.id)).body(Body::empty()).unwrap())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/jobs/{}", failed.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         let json = body_json(resp).await;

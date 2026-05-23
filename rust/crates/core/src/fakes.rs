@@ -1,12 +1,15 @@
+use crate::{
+    entities::{Job, JobStatus, Meeting, Segment, Transcript},
+    ports::{
+        AudioCapture, CaptureSource, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo,
+        TemplateLoader, Transcriber,
+    },
+    CoreError,
+};
+use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use async_trait::async_trait;
-use crate::{
-    CoreError,
-    entities::{Job, JobStatus, Meeting, Transcript, Segment},
-    ports::{AudioCapture, CaptureSource, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber},
-};
 
 // ── FakeTranscriber ──────────────────────────────────────────────────────────
 
@@ -25,7 +28,11 @@ impl Transcriber for FakeTranscriber {
     async fn transcribe(&self, _audio_path: &Path) -> Result<Transcript, CoreError> {
         Ok(Transcript {
             text: self.text.clone(),
-            segments: vec![Segment { start_ms: 0, end_ms: 1000, text: self.text.clone() }],
+            segments: vec![Segment {
+                start_ms: 0,
+                end_ms: 1000,
+                text: self.text.clone(),
+            }],
             language: "ru".to_string(),
         })
     }
@@ -52,11 +59,21 @@ impl MeetingRepo for FakeMeetingRepo {
     }
 
     async fn find_by_id(&self, id: &str) -> Result<Option<Meeting>, CoreError> {
-        Ok(self.store.lock().unwrap().iter().find(|m| m.id == id).cloned())
+        Ok(self
+            .store
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|m| m.id == id)
+            .cloned())
     }
 
     async fn find_by_audio_path(&self, path: &Path) -> Result<Option<Meeting>, CoreError> {
-        Ok(self.store.lock().unwrap().iter()
+        Ok(self
+            .store
+            .lock()
+            .unwrap()
+            .iter()
             .filter(|m| m.audio_path == PathBuf::from(path))
             .last()
             .cloned())
@@ -82,7 +99,12 @@ impl MeetingRepo for FakeMeetingRepo {
         }
     }
 
-    async fn save_transcript_file(&self, id: &str, text: &str, path: &Path) -> Result<(), CoreError> {
+    async fn save_transcript_file(
+        &self,
+        id: &str,
+        text: &str,
+        path: &Path,
+    ) -> Result<(), CoreError> {
         let mut store = self.store.lock().unwrap();
         if let Some(m) = store.iter_mut().find(|m| m.id == id) {
             m.transcript_text = Some(text.to_string());
@@ -186,13 +208,19 @@ impl FakeMeetingFileStore {
 impl MeetingFileStore for FakeMeetingFileStore {
     async fn write_transcript(&self, dir: &Path, text: &str) -> Result<PathBuf, CoreError> {
         let path = dir.join("transcript.md");
-        self.written.lock().unwrap().push((path.clone(), text.to_string()));
+        self.written
+            .lock()
+            .unwrap()
+            .push((path.clone(), text.to_string()));
         Ok(path)
     }
 
     async fn write_protocol(&self, dir: &Path, text: &str) -> Result<PathBuf, CoreError> {
         let path = dir.join("protocol.md");
-        self.written.lock().unwrap().push((path.clone(), text.to_string()));
+        self.written
+            .lock()
+            .unwrap()
+            .push((path.clone(), text.to_string()));
         Ok(path)
     }
 
@@ -205,7 +233,11 @@ impl MeetingFileStore for FakeMeetingFileStore {
         Ok(dir.join(name))
     }
 
-    async fn list_audio_files(&self, _dir: &Path, _max_depth: usize) -> Result<Vec<PathBuf>, CoreError> {
+    async fn list_audio_files(
+        &self,
+        _dir: &Path,
+        _max_depth: usize,
+    ) -> Result<Vec<PathBuf>, CoreError> {
         Ok(self.audio_files.lock().unwrap().clone())
     }
 
@@ -241,7 +273,13 @@ impl JobRepo for FakeJobRepo {
     }
 
     async fn find_by_id(&self, id: &str) -> Result<Option<Job>, CoreError> {
-        Ok(self.store.lock().unwrap().iter().find(|j| j.id == id).cloned())
+        Ok(self
+            .store
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|j| j.id == id)
+            .cloned())
     }
 
     async fn claim_pending(&self, now_ts: i64) -> Result<Option<Job>, CoreError> {
@@ -327,13 +365,19 @@ pub struct FakeLlmProvider {
 
 impl FakeLlmProvider {
     pub fn new(response: impl Into<String>) -> Arc<Self> {
-        Arc::new(Self { response: response.into() })
+        Arc::new(Self {
+            response: response.into(),
+        })
     }
 }
 
 #[async_trait]
 impl LlmProvider for FakeLlmProvider {
-    async fn generate(&self, _transcript: &str, _instructions: Option<&str>) -> Result<String, CoreError> {
+    async fn generate(
+        &self,
+        _transcript: &str,
+        _instructions: Option<&str>,
+    ) -> Result<String, CoreError> {
         Ok(self.response.clone())
     }
 }
@@ -345,16 +389,23 @@ pub struct FakeTemplateLoader {
 }
 
 impl FakeTemplateLoader {
-    pub fn new(templates: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>) -> Arc<Self> {
+    pub fn new(
+        templates: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             templates: Mutex::new(
-                templates.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
+                templates
+                    .into_iter()
+                    .map(|(k, v)| (k.into(), v.into()))
+                    .collect(),
             ),
         })
     }
 
     pub fn empty() -> Arc<Self> {
-        Arc::new(Self { templates: Mutex::new(HashMap::new()) })
+        Arc::new(Self {
+            templates: Mutex::new(HashMap::new()),
+        })
     }
 }
 
@@ -369,7 +420,10 @@ impl TemplateLoader for FakeTemplateLoader {
     }
 
     async fn save(&self, name: &str, body: &str) -> Result<(), CoreError> {
-        self.templates.lock().unwrap().insert(name.to_string(), body.to_string());
+        self.templates
+            .lock()
+            .unwrap()
+            .insert(name.to_string(), body.to_string());
         Ok(())
     }
 
@@ -428,14 +482,19 @@ impl AudioCapture for FakeAudioCapture {
         echo_cancel: bool,
     ) -> Result<(), CoreError> {
         self.active.lock().unwrap().insert(session_id.to_string());
-        self.started.lock().unwrap().push((session_id.to_string(), source, echo_cancel));
+        self.started
+            .lock()
+            .unwrap()
+            .push((session_id.to_string(), source, echo_cancel));
         Ok(())
     }
 
     async fn stop_session(&self, session_id: &str) -> Result<(), CoreError> {
         let removed = self.active.lock().unwrap().remove(session_id);
         if !removed {
-            return Err(CoreError::Recording(format!("session not found: {session_id}")));
+            return Err(CoreError::Recording(format!(
+                "session not found: {session_id}"
+            )));
         }
         self.stopped.lock().unwrap().push(session_id.to_string());
         Ok(())

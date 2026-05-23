@@ -7,6 +7,8 @@ pub struct Protocol {
 
 impl Protocol {
     pub fn new(markdown: impl Into<String>) -> Self {
-        Self { markdown: markdown.into() }
+        Self {
+            markdown: markdown.into(),
+        }
     }
 }

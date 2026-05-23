@@ -1,9 +1,4 @@
-// LLM provider settings. All five providers are persisted at once (decision
-// #1); the active one is selected here. Per-provider model is an editable
-// ComboBox (common models + free entry, decision #6); Ollama populates its list
-// from `<base_url-host>/api/tags`. API keys never live in `draft` — they go
-// straight to the keyring via SettingsStore.setSecret (decision #4); the panel
-// only sees `has_key`. "Проверить ключ" probes via POST /settings/test.
+// LLM provider settings. Edits draft.llm; secrets go through SettingsStore.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -12,12 +7,16 @@ import MeetingAssistant
 ScrollView {
     id: panel
     property var scr
+    font.family: Theme.fontUi
+    font.pixelSize: Theme.fsBody
     clip: true
     contentWidth: availableWidth
 
-    // Provider id currently being edited (mirrors draft.llm.active).
     property string provider: "anthropic"
     readonly property bool keyless: provider === "ollama"
+    property bool keyVisible: false
+    readonly property bool hasProviderKey: (SettingsStore.snapshot,
+                                            SettingsStore.providerCfg(provider).has_key)
 
     readonly property var providers: [
         { id: "anthropic", label: "Anthropic (Claude)" },
@@ -43,7 +42,6 @@ ScrollView {
 
     function loadProvider() {
         var c = cfg()
-        // editable ComboBox: seed list + current text
         var list = (commonModels[provider] || []).slice()
         if (c.model && list.indexOf(c.model) === -1) list.unshift(c.model)
         modelBox.model = list
@@ -51,7 +49,18 @@ ScrollView {
         maxTokensSpin.value = c.max_tokens || 4096
         baseUrlField.text = c.base_url || ""
         keyField.text = ""
+        keyVisible = false
         if (keyless) fetchOllamaTags()
+    }
+
+    function maskedKeyLabel() {
+        switch (provider) {
+        case "anthropic": return "sk-ant-api03-" + "•".repeat(36)
+        case "openai": return "sk-" + "•".repeat(42)
+        case "gemini": return "AIza" + "•".repeat(34)
+        case "mistral": return "•".repeat(40)
+        default: return "•".repeat(40)
+        }
     }
 
     function load() {
@@ -63,15 +72,12 @@ ScrollView {
     Component.onCompleted: load()
     Connections { target: scr; function onReseeded() { panel.load() } }
 
-    // Ollama model discovery — query the local daemon directly (keyless, no
-    // sidecar route). Derives the host from the configured base_url.
     function fetchOllamaTags() {
         var base = (cfg().base_url || "http://localhost:11434/v1")
         var host = base.replace(/\/v1\/?$/, "").replace(/\/$/, "")
         var xhr = new XMLHttpRequest()
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== XMLHttpRequest.DONE) return
-            if (xhr.status !== 200) return
+            if (xhr.readyState !== XMLHttpRequest.DONE || xhr.status !== 200) return
             try {
                 var data = JSON.parse(xhr.responseText)
                 var names = (data.models || []).map(function (m) { return m.name })
@@ -80,7 +86,7 @@ ScrollView {
                 if (cur && names.indexOf(cur) === -1) names.unshift(cur)
                 modelBox.model = names
                 modelBox.editText = cur || names[0]
-            } catch (e) { /* leave the common-model fallback in place */ }
+            } catch (e) {}
         }
         xhr.open("GET", host + "/api/tags")
         xhr.send()
@@ -88,25 +94,39 @@ ScrollView {
 
     ColumnLayout {
         width: panel.availableWidth
-        spacing: 16
+        spacing: 0
 
-        Label {
-            Layout.margins: 16
-            Layout.bottomMargin: 0
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: 32
+            Layout.rightMargin: 32
+            Layout.topMargin: 32
             text: qsTr("LLM-провайдер")
-            font.pixelSize: 18
-            font.bold: true
+            font.family: Theme.fontSerif
+            font.pixelSize: 26
+            font.weight: Theme.wMedium
+            font.letterSpacing: 0
+            color: Theme.ink
+        }
+        Text {
+            Layout.fillWidth: true
+            Layout.leftMargin: 32
+            Layout.rightMargin: 32
+            Layout.topMargin: 4
+            Layout.bottomMargin: 28
+            text: qsTr("meety использует большую модель для превращения транскрипта в структурированный протокол.")
+            wrapMode: Text.WordWrap
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            color: Theme.ink3
         }
 
-        GroupBox {
-            title: qsTr("Активный провайдер")
-            Layout.fillWidth: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
-            ComboBox {
+        SettingsRow {
+            title: qsTr("Провайдер")
+            help: qsTr("Активная модель для генерации протоколов.")
+            MeetyComboBox {
                 id: providerBox
-                anchors.left: parent.left
-                anchors.right: parent.right
+                Layout.fillWidth: true
                 textRole: "label"
                 valueRole: "id"
                 model: panel.providers
@@ -119,153 +139,188 @@ ScrollView {
             }
         }
 
-        GroupBox {
-            title: qsTr("Параметры провайдера")
-            Layout.fillWidth: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 12
+        SettingsRow {
+            title: qsTr("Модель")
+            help: qsTr("Можно выбрать популярную модель или ввести название вручную.")
+            MeetyComboBox {
+                id: modelBox
+                Layout.fillWidth: true
+                editable: true
+                onAccepted: { panel.cfg().model = editText; scr.touch() }
+                onActivated: { panel.cfg().model = currentText; scr.touch() }
+                onEditTextChanged: { panel.cfg().model = editText; scr.touch() }
+            }
+        }
 
-                Label { text: qsTr("Модель"); opacity: 0.7 }
-                ComboBox {
-                    id: modelBox
-                    Layout.fillWidth: true
-                    editable: true
-                    onAccepted: { panel.cfg().model = editText; scr.touch() }
-                    onActivated: { panel.cfg().model = currentText; scr.touch() }
-                    // also capture free-text edits that don't fire onAccepted
-                    Component.onCompleted: editText = panel.cfg().model || ""
-                    onEditTextChanged: { panel.cfg().model = editText; scr.touch() }
-                }
+        SettingsRow {
+            title: qsTr("Макс. токенов")
+            help: qsTr("Лимит ответа модели для одного протокола.")
+            MeetySpinBox {
+                id: maxTokensSpin
+                Layout.fillWidth: true
+                from: 256; to: 200000; stepSize: 256
+                editable: true
+                onValueModified: { panel.cfg().max_tokens = value; scr.touch() }
+            }
+        }
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: qsTr("Макс. токенов"); Layout.fillWidth: true }
-                    SpinBox {
-                        id: maxTokensSpin
-                        from: 256; to: 200000; stepSize: 256
-                        editable: true
-                        onValueModified: { panel.cfg().max_tokens = value; scr.touch() }
-                    }
-                }
-
-                Label { text: qsTr("Базовый URL (пусто = стандартный)"); opacity: 0.7 }
-                TextField {
-                    id: baseUrlField
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("По умолчанию для провайдера")
-                    onEditingFinished: {
-                        panel.cfg().base_url = text.trim().length ? text.trim() : null
-                        scr.touch()
-                    }
+        SettingsRow {
+            title: qsTr("Базовый URL")
+            help: qsTr("Оставьте пустым, чтобы использовать стандартный endpoint провайдера.")
+            MeetyField {
+                id: baseUrlField
+                Layout.fillWidth: true
+                placeholderText: qsTr("По умолчанию для провайдера")
+                onEditingFinished: {
+                    panel.cfg().base_url = text.trim().length ? text.trim() : null
+                    scr.touch()
                 }
             }
         }
 
-        GroupBox {
-            title: qsTr("API-ключ")
-            Layout.fillWidth: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
-            Layout.bottomMargin: 16
+        SettingsRow {
             visible: !panel.keyless
+            title: qsTr("API-ключ")
+            contentMaximumWidth: 760
+            help: panel.hasProviderKey
+                  ? qsTr("Хранится в системном Keychain. Введите новый, чтобы заменить.")
+                  : qsTr("Ключ не задан.")
             ColumnLayout {
-                anchors.fill: parent
-                spacing: 10
+                Layout.fillWidth: true
+                spacing: 8
 
-                Label {
+                Rectangle {
                     Layout.fillWidth: true
-                    wrapMode: Text.WordWrap
-                    opacity: 0.7
-                    // depend on SettingsStore.snapshot so has_key updates live
-                    text: (SettingsStore.snapshot,
-                           SettingsStore.providerCfg(panel.provider).has_key)
-                          ? qsTr("Ключ сохранён. Введите новый, чтобы заменить.")
-                          : qsTr("Ключ не задан.")
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    TextField {
-                        id: keyField
-                        Layout.fillWidth: true
-                        echoMode: TextInput.Password
-                        placeholderText: qsTr("Вставьте API-ключ")
-                    }
-                    Button {
-                        text: qsTr("Сохранить ключ")
-                        enabled: keyField.text.trim().length > 0
-                        onClicked: SettingsStore.setSecret(
-                            panel.provider, keyField.text.trim(),
-                            function (ok, e) {
-                                keyResult.text = ok ? qsTr("Ключ сохранён")
-                                                    : qsTr("Ошибка: %1").arg(e)
-                                if (ok) keyField.text = ""
-                            })
-                    }
-                    Button {
-                        text: qsTr("Удалить")
-                        enabled: (SettingsStore.snapshot,
-                                  SettingsStore.providerCfg(panel.provider).has_key)
-                        onClicked: SettingsStore.setSecret(
-                            panel.provider, null,
-                            function (ok, e) {
-                                keyResult.text = ok ? qsTr("Ключ удалён")
-                                                    : qsTr("Ошибка: %1").arg(e)
-                            })
-                    }
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Button {
-                        id: testBtn
-                        text: qsTr("Проверить ключ")
-                        onClicked: {
-                            keyResult.text = qsTr("Проверка…")
-                            SettingsStore.testProvider(
-                                panel.provider,
-                                function (ok, e) {
-                                    keyResult.text = ok
-                                        ? qsTr("✓ Ключ работает")
-                                        : qsTr("✗ %1").arg(e)
-                                })
+                    implicitHeight: 38
+                    radius: Theme.rMd
+                    color: Theme.paper
+                    border.width: 1
+                    border.color: keyField.activeFocus ? Theme.ink3 : Theme.rule
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 4
+                        spacing: 6
+
+                        TextField {
+                            id: keyField
+                            Layout.fillWidth: true
+                            background: null
+                            text: panel.hasProviderKey && !activeFocus ? panel.maskedKeyLabel() : ""
+                            echoMode: panel.keyVisible ? TextInput.Normal : TextInput.Password
+                            readOnly: panel.hasProviderKey && !activeFocus
+                            selectByMouse: true
+                            font.family: Theme.fontUi
+                            font.pixelSize: Theme.fsBodyLg
+                            color: readOnly ? Theme.ink3 : Theme.ink
+                            placeholderText: panel.hasProviderKey
+                                             ? qsTr("Введите новый ключ, чтобы заменить сохранённый")
+                                             : qsTr("Вставьте API-ключ")
+                            placeholderTextColor: Theme.ink4
+                            selectionColor: Theme.accentTint
+                            selectedTextColor: Theme.ink
+                            onActiveFocusChanged: {
+                                if (activeFocus && panel.hasProviderKey && text === panel.maskedKeyLabel())
+                                    text = ""
+                            }
+                        }
+                        MeetyIconButton {
+                            iconName: panel.keyVisible ? "eye-off" : "eye"
+                            iconSize: 15
+                            enabled: keyField.text.length > 0
+                            onClicked: panel.keyVisible = !panel.keyVisible
+                            MeetyToolTip {
+                                text: panel.keyVisible ? qsTr("Скрыть ключ") : qsTr("Показать ключ")
+                                visible: parent.hovered
+                            }
                         }
                     }
-                    Label {
-                        id: keyResult
-                        Layout.fillWidth: true
-                        wrapMode: Text.WordWrap
-                        opacity: 0.8
-                    }
+                }
+
+                MeetyButton {
+                    Layout.alignment: Qt.AlignRight
+                    text: panel.hasProviderKey ? qsTr("Заменить") : qsTr("Сохранить")
+                    enabled: keyField.text.trim().length > 0
+                             && keyField.text !== panel.maskedKeyLabel()
+                    onClicked: SettingsStore.setSecret(
+                        panel.provider, keyField.text.trim(),
+                        function (ok, e) {
+                            keyResult.text = ok ? qsTr("Ключ сохранён")
+                                                : qsTr("Ошибка: %1").arg(e)
+                            if (ok) {
+                                keyField.text = ""
+                                panel.keyVisible = false
+                            }
+                        })
                 }
             }
         }
 
-        // Ollama: keyless connectivity test.
-        GroupBox {
-            title: qsTr("Подключение")
-            Layout.fillWidth: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
-            Layout.bottomMargin: 16
-            visible: panel.keyless
-            RowLayout {
-                anchors.fill: parent
-                Button {
-                    text: qsTr("Проверить подключение")
-                    onClicked: {
-                        ollamaResult.text = qsTr("Проверка…")
-                        SettingsStore.testProvider(
-                            "ollama",
-                            function (ok, e) {
-                                ollamaResult.text = ok
-                                    ? qsTr("✓ Ollama доступна")
-                                    : qsTr("✗ %1").arg(e)
-                            })
-                    }
+        SettingsRow {
+            visible: !panel.keyless
+            title: qsTr("Проверка ключа")
+            help: qsTr("Быстрый запрос к выбранному провайдеру.")
+            dividerVisible: false
+            MeetyButton {
+                text: qsTr("Проверить ключ")
+                enabled: panel.hasProviderKey || keyField.text.trim().length > 0
+                onClicked: {
+                    keyResult.text = qsTr("Проверка…")
+                    SettingsStore.testProvider(
+                        panel.provider,
+                        function (ok, e) {
+                            keyResult.text = ok
+                                ? qsTr("Ключ работает")
+                                : qsTr("%1").arg(e)
+                        })
                 }
-                Label { id: ollamaResult; Layout.fillWidth: true; opacity: 0.8 }
+            }
+            MeetyButton {
+                variant: "ghost"
+                text: qsTr("Удалить")
+                enabled: panel.hasProviderKey
+                onClicked: SettingsStore.setSecret(
+                    panel.provider, null,
+                    function (ok, e) {
+                        keyResult.text = ok ? qsTr("Ключ удалён")
+                                            : qsTr("Ошибка: %1").arg(e)
+                    })
+            }
+            Text {
+                id: keyResult
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                font.family: Theme.fontUi
+                font.pixelSize: Theme.fsBody
+                color: Theme.ink3
+            }
+        }
+
+        SettingsRow {
+            visible: panel.keyless
+            title: qsTr("Подключение")
+            help: qsTr("Ollama работает локально и не требует API-ключа.")
+            dividerVisible: false
+            MeetyButton {
+                text: qsTr("Проверить подключение")
+                onClicked: {
+                    ollamaResult.text = qsTr("Проверка…")
+                    SettingsStore.testProvider(
+                        "ollama",
+                        function (ok, e) {
+                            ollamaResult.text = ok
+                                ? qsTr("Ollama доступна")
+                                : qsTr("%1").arg(e)
+                        })
+                }
+            }
+            Text {
+                id: ollamaResult
+                Layout.fillWidth: true
+                font.family: Theme.fontUi
+                font.pixelSize: Theme.fsBody
+                color: Theme.ink3
             }
         }
     }

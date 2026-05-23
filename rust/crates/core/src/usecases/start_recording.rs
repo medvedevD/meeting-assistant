@@ -1,10 +1,10 @@
+use crate::{
+    entities::{now_unix, Meeting},
+    ports::{AudioCapture, CaptureSource, MeetingRepo},
+    CoreError,
+};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use crate::{
-    CoreError,
-    entities::{Meeting, now_unix},
-    ports::{AudioCapture, CaptureSource, MeetingRepo},
-};
 
 /// Start a new recording session.
 ///
@@ -27,21 +27,31 @@ pub async fn start_recording(
     let meeting_dir = meetings_dir.join(&slug);
 
     // Create meeting directory immediately so the file is accessible on disk.
-    std::fs::create_dir_all(&meeting_dir)
-        .map_err(|e| CoreError::Storage(format!("cannot create meeting dir {}: {e}", meeting_dir.display())))?;
+    std::fs::create_dir_all(&meeting_dir).map_err(|e| {
+        CoreError::Storage(format!(
+            "cannot create meeting dir {}: {e}",
+            meeting_dir.display()
+        ))
+    })?;
 
     let audio_path = meeting_dir.join("recording.wav");
-    let meeting = Meeting { meeting_dir, audio_path: audio_path.clone(), ..meeting };
+    let meeting = Meeting {
+        meeting_dir,
+        audio_path: audio_path.clone(),
+        ..meeting
+    };
 
-    capture.start_session(&meeting.id, &audio_path, source, echo_cancel).await?;
+    capture
+        .start_session(&meeting.id, &audio_path, source, echo_cancel)
+        .await?;
     meeting_repo.save(&meeting).await?;
     Ok(meeting)
 }
 
 fn slug_from_meeting(ts: i64, uuid_prefix: &str) -> String {
-    let mins  = ts / 60 % 60;
+    let mins = ts / 60 % 60;
     let hours = ts / 3600 % 24;
-    let days  = ts / 86400;
+    let days = ts / 86400;
     let (y, m, d) = epoch_to_ymd(days);
     format!("{y:04}-{m:02}-{d:02}_{hours:02}-{mins:02}_{uuid_prefix}")
 }
@@ -72,8 +82,8 @@ fn epoch_to_ymd(days: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use crate::fakes::{FakeAudioCapture, FakeMeetingRepo};
+    use std::path::PathBuf;
 
     fn meetings_dir() -> PathBuf {
         PathBuf::from("/tmp/meetings")
@@ -102,10 +112,19 @@ mod tests {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
 
-        let meeting = start(Arc::clone(&capture), Arc::clone(&repo), Some("Планёрка"), CaptureSource::Mic).await;
+        let meeting = start(
+            Arc::clone(&capture),
+            Arc::clone(&repo),
+            Some("Планёрка"),
+            CaptureSource::Mic,
+        )
+        .await;
 
         assert_eq!(meeting.name, "Планёрка");
-        assert_eq!(meeting.audio_path, meeting.meeting_dir.join("recording.wav"));
+        assert_eq!(
+            meeting.audio_path,
+            meeting.meeting_dir.join("recording.wav")
+        );
         assert!(meeting.audio_path.starts_with(&meetings_dir()));
     }
 
@@ -114,7 +133,13 @@ mod tests {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
 
-        let meeting = start(Arc::clone(&capture), Arc::clone(&repo), None, CaptureSource::Mic).await;
+        let meeting = start(
+            Arc::clone(&capture),
+            Arc::clone(&repo),
+            None,
+            CaptureSource::Mic,
+        )
+        .await;
 
         assert!(meeting.meeting_dir.starts_with(&meetings_dir()));
     }
@@ -124,7 +149,13 @@ mod tests {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
 
-        let meeting = start(Arc::clone(&capture), Arc::clone(&repo), None, CaptureSource::Mic).await;
+        let meeting = start(
+            Arc::clone(&capture),
+            Arc::clone(&repo),
+            None,
+            CaptureSource::Mic,
+        )
+        .await;
 
         assert!(capture.is_active(&meeting.id));
         let started = capture.started.lock().unwrap();
@@ -136,7 +167,13 @@ mod tests {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
 
-        let meeting = start(Arc::clone(&capture), Arc::clone(&repo), Some("1-on-1"), CaptureSource::Mic).await;
+        let meeting = start(
+            Arc::clone(&capture),
+            Arc::clone(&repo),
+            Some("1-on-1"),
+            CaptureSource::Mic,
+        )
+        .await;
 
         let found = repo.find_by_id(&meeting.id).await.unwrap();
         assert!(found.is_some());
@@ -148,7 +185,13 @@ mod tests {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
 
-        let meeting = start(Arc::clone(&capture), Arc::clone(&repo), None, CaptureSource::Mic).await;
+        let meeting = start(
+            Arc::clone(&capture),
+            Arc::clone(&repo),
+            None,
+            CaptureSource::Mic,
+        )
+        .await;
 
         assert!(!meeting.name.is_empty());
     }
@@ -160,7 +203,13 @@ mod tests {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
 
-        start(Arc::clone(&capture), Arc::clone(&repo), None, CaptureSource::System).await;
+        start(
+            Arc::clone(&capture),
+            Arc::clone(&repo),
+            None,
+            CaptureSource::System,
+        )
+        .await;
 
         assert_eq!(capture.last_source(), Some(CaptureSource::System));
     }
@@ -170,7 +219,13 @@ mod tests {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
 
-        start(Arc::clone(&capture), Arc::clone(&repo), None, CaptureSource::Mixed).await;
+        start(
+            Arc::clone(&capture),
+            Arc::clone(&repo),
+            None,
+            CaptureSource::Mixed,
+        )
+        .await;
 
         assert_eq!(capture.last_source(), Some(CaptureSource::Mixed));
     }
@@ -180,7 +235,13 @@ mod tests {
         let capture = FakeAudioCapture::new();
         let repo = FakeMeetingRepo::new();
 
-        start(Arc::clone(&capture), Arc::clone(&repo), None, CaptureSource::default()).await;
+        start(
+            Arc::clone(&capture),
+            Arc::clone(&repo),
+            None,
+            CaptureSource::default(),
+        )
+        .await;
 
         assert_eq!(capture.last_source(), Some(CaptureSource::Mic));
     }

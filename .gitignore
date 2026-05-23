@@ -18,7 +18,6 @@ legacy/.redis.log
 
 # Локальные данные Claude Code
 .claude/
-CLAUDE.md
 ARCHITECTURE.md
 1on1-guide.md
 

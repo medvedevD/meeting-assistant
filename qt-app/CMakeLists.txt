@@ -110,9 +110,11 @@ qt_add_qml_module(meeting-assistant-qt
         qml/SettingsStore.qml
         qml/Request.qml
         qml/screens/MeetingListScreen.qml
+        qml/screens/WelcomeScreen.qml
         qml/screens/NewRecordingScreen.qml
         qml/screens/GenerateProtocolScreen.qml
         qml/screens/MeetingDetailScreen.qml
+        qml/screens/MeetingNoProtocolScreen.qml
         qml/screens/SettingsScreen.qml
         qml/screens/DiagnosticsScreen.qml
         qml/screens/settings/WhisperPanel.qml
@@ -122,7 +124,9 @@ qt_add_qml_module(meeting-assistant-qt
         qml/screens/settings/RecordingPanel.qml
         qml/components/PipelineProgress.qml
         qml/components/MeetyButton.qml
+        qml/components/MeetyComboBox.qml
         qml/components/MeetyField.qml
+        qml/components/MeetySpinBox.qml
         qml/components/MeetySwitch.qml
         qml/components/MeetySegmented.qml
         qml/components/MeetyTag.qml
@@ -130,9 +134,11 @@ qt_add_qml_module(meeting-assistant-qt
         qml/components/MeetySectionLabel.qml
         qml/components/MeetyMenu.qml
         qml/components/MeetyMenuItem.qml
+        qml/components/MeetyToolTip.qml
         qml/components/MeetyIcon.qml
         qml/components/MeetyIconButton.qml
         qml/components/MeetyWordmark.qml
+        qml/components/SettingsRow.qml
         qml/components/ProtocolDocument.qml
         qml/theme/Theme.qml
         qml/theme/ThemeGallery.qml

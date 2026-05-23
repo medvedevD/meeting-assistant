@@ -1,5 +1,9 @@
+use crate::{
+    entities::Protocol,
+    ports::{LlmProvider, TemplateLoader},
+    CoreError,
+};
 use std::sync::Arc;
-use crate::{CoreError, entities::Protocol, ports::{LlmProvider, TemplateLoader}};
 
 fn build_message(template: &str, transcript: &str, meeting_name: Option<&str>) -> String {
     let with_transcript = template.replace("{transcript}", transcript);
@@ -31,9 +35,7 @@ pub async fn generate_protocol(
         },
     };
 
-    let markdown = llm
-        .generate(&message, None)
-        .await?;
+    let markdown = llm.generate(&message, None).await?;
 
     Ok(Protocol::new(markdown))
 }

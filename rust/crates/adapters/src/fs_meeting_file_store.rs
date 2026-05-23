@@ -1,42 +1,56 @@
-use std::path::{Path, PathBuf};
 use async_trait::async_trait;
-use meeting_core::{CoreError, ports::MeetingFileStore};
+use meeting_core::{ports::MeetingFileStore, CoreError};
+use std::path::{Path, PathBuf};
 
 pub struct FsMeetingFileStore;
 
 #[async_trait]
 impl MeetingFileStore for FsMeetingFileStore {
     async fn write_transcript(&self, dir: &Path, text: &str) -> Result<PathBuf, CoreError> {
-        tokio::fs::create_dir_all(dir).await
+        tokio::fs::create_dir_all(dir)
+            .await
             .map_err(|e| CoreError::Storage(e.to_string()))?;
         let path = dir.join("transcript.md");
-        tokio::fs::write(&path, text).await
+        tokio::fs::write(&path, text)
+            .await
             .map_err(|e| CoreError::Storage(e.to_string()))?;
         Ok(path)
     }
 
     async fn write_protocol(&self, dir: &Path, text: &str) -> Result<PathBuf, CoreError> {
-        tokio::fs::create_dir_all(dir).await
+        tokio::fs::create_dir_all(dir)
+            .await
             .map_err(|e| CoreError::Storage(e.to_string()))?;
         let path = dir.join("protocol.md");
-        tokio::fs::write(&path, text).await
+        tokio::fs::write(&path, text)
+            .await
             .map_err(|e| CoreError::Storage(e.to_string()))?;
         Ok(path)
     }
 
     async fn import_audio(&self, dir: &Path, source: &Path) -> Result<PathBuf, CoreError> {
-        let name = source
-            .file_name()
-            .ok_or_else(|| CoreError::Validation(format!("source has no file name: {}", source.display())))?;
-        tokio::fs::create_dir_all(dir).await
+        let name = source.file_name().ok_or_else(|| {
+            CoreError::Validation(format!("source has no file name: {}", source.display()))
+        })?;
+        tokio::fs::create_dir_all(dir)
+            .await
             .map_err(|e| CoreError::Storage(e.to_string()))?;
         let dest = dir.join(name);
-        tokio::fs::copy(source, &dest).await
-            .map_err(|e| CoreError::Storage(format!("copy {} → {}: {e}", source.display(), dest.display())))?;
+        tokio::fs::copy(source, &dest).await.map_err(|e| {
+            CoreError::Storage(format!(
+                "copy {} → {}: {e}",
+                source.display(),
+                dest.display()
+            ))
+        })?;
         Ok(dest)
     }
 
-    async fn list_audio_files(&self, dir: &Path, max_depth: usize) -> Result<Vec<PathBuf>, CoreError> {
+    async fn list_audio_files(
+        &self,
+        dir: &Path,
+        max_depth: usize,
+    ) -> Result<Vec<PathBuf>, CoreError> {
         // Bounded breadth-first walk; early-stop once we have plenty of
         // candidates so a huge tree never stalls the scan.
         const HARD_CAP: usize = 500;

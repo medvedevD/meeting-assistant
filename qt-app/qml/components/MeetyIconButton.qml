@@ -9,13 +9,18 @@ AbstractButton {
     property string iconName: ""
     property int iconSize: 16
 
+    activeFocusOnTab: true
     implicitWidth: 32
     implicitHeight: 32
     hoverEnabled: true
 
     background: Rectangle {
         radius: Theme.rMd
-        color: control.hovered ? Theme.paper3 : "transparent"
+        readonly property color idleFill: Qt.rgba(Theme.paper3.r, Theme.paper3.g, Theme.paper3.b, 0)
+        color: control.activeFocus ? Theme.focusTint
+             : control.hovered ? Theme.paper3 : idleFill
+        border.width: control.activeFocus ? 1 : 0
+        border.color: Theme.focus
         Behavior on color { ColorAnimation { duration: Theme.durBase } }
     }
 
@@ -24,7 +29,7 @@ AbstractButton {
             anchors.centerIn: parent
             name: control.iconName
             size: control.iconSize
-            color: control.hovered ? Theme.ink : Theme.ink3
+            color: control.activeFocus || control.hovered ? Theme.ink : Theme.ink3
         }
     }
 }

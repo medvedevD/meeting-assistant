@@ -1,11 +1,9 @@
+use crate::router::AppState;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
-use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::sync::Arc;
 use meeting_core::{
     usecases::{
         delete_meeting, import_audio, list_meetings, regenerate_protocol, reprocess_transcribe,
@@ -13,7 +11,9 @@ use meeting_core::{
     },
     CoreError,
 };
-use crate::router::AppState;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Serialize)]
 pub struct MeetingItem {
@@ -43,6 +43,42 @@ pub async fn list(
         .collect();
 
     Ok(Json(items))
+}
+
+// ── Detail (single meeting, incl. persisted protocol) ───────────────────────
+
+#[derive(Serialize)]
+pub struct MeetingDetail {
+    pub id: String,
+    pub name: String,
+    pub audio_path: String,
+    pub has_transcript: bool,
+    pub created_at: i64,
+    /// Persisted protocol markdown, when one has been generated. This is the
+    /// readback the client uses to render a protocol after a restart (the
+    /// in-session client cache no longer stands in for it).
+    pub protocol: Option<String>,
+}
+
+pub async fn get(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<MeetingDetail>, (StatusCode, String)> {
+    let meeting = state
+        .meeting_repo
+        .find_by_id(&id)
+        .await
+        .map_err(map_core_err)?
+        .ok_or((StatusCode::NOT_FOUND, "meeting not found".into()))?;
+
+    Ok(Json(MeetingDetail {
+        has_transcript: meeting.transcript_text.is_some(),
+        protocol: meeting.protocol_text.filter(|t| !t.is_empty()),
+        id: meeting.id,
+        name: meeting.name,
+        audio_path: meeting.audio_path.display().to_string(),
+        created_at: meeting.created_at,
+    }))
 }
 
 // ── Import ─────────────────────────────────────────────────────────────────
@@ -110,7 +146,10 @@ pub async fn import(
     .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ConflictResponse { existing_id: String::new(), error: e.to_string() }),
+            Json(ConflictResponse {
+                existing_id: String::new(),
+                error: e.to_string(),
+            }),
         )
     })?;
 
@@ -174,12 +213,14 @@ pub async fn reprocess(
     Json(req): Json<ReprocessRequest>,
 ) -> Result<(StatusCode, Json<JobIdResponse>), (StatusCode, String)> {
     let job = match req.kind.as_str() {
-        "transcribe" => reprocess_transcribe(
-            Arc::clone(&state.meeting_repo),
-            Arc::clone(&state.job_repo),
-            &id,
-        )
-        .await,
+        "transcribe" => {
+            reprocess_transcribe(
+                Arc::clone(&state.meeting_repo),
+                Arc::clone(&state.job_repo),
+                &id,
+            )
+            .await
+        }
         "protocol" => {
             // Decision #3: resolve the configured default template in the API
             // layer before the job is enqueued, so the worker's use-case call
@@ -194,7 +235,10 @@ pub async fn reprocess(
             .await
         }
         other => {
-            return Err((StatusCode::BAD_REQUEST, format!("unknown reprocess kind '{other}'")));
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("unknown reprocess kind '{other}'"),
+            ));
         }
     }
     .map_err(map_core_err)?;
@@ -219,7 +263,10 @@ pub async fn delete(
         Some("audio") => DeleteMode::AudioOnly,
         Some("full") | None => DeleteMode::Full,
         Some(other) => {
-            return Err((StatusCode::BAD_REQUEST, format!("unknown delete mode '{other}'")));
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("unknown delete mode '{other}'"),
+            ));
         }
     };
 
@@ -246,16 +293,22 @@ fn map_core_err(e: CoreError) -> (StatusCode, String) {
 
 #[cfg(test)]
 mod tests {
-    use axum::{body::Body, http::{Request, StatusCode}};
+    use crate::router::{create_router, AppState};
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
     use http_body_util::BodyExt;
-    use std::path::PathBuf;
-    use tower::ServiceExt;
     use meeting_core::{
         entities::Meeting,
-        fakes::{FakeAudioCapture, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo, FakeJobRepo, FakeTemplateLoader, FakeTranscriber},
+        fakes::{
+            FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo,
+            FakeTemplateLoader, FakeTranscriber,
+        },
         ports::MeetingRepo,
     };
-    use crate::router::{AppState, create_router};
+    use std::path::PathBuf;
+    use tower::ServiceExt;
 
     fn make_app(repo: std::sync::Arc<FakeMeetingRepo>) -> axum::Router {
         create_router(AppState {
@@ -347,6 +400,73 @@ mod tests {
         assert_eq!(json[0]["has_transcript"], true);
     }
 
+    #[tokio::test]
+    async fn get_returns_persisted_protocol() {
+        let repo = FakeMeetingRepo::new();
+        let m = Meeting::new("Ретро".to_string(), PathBuf::from("/c.wav"));
+        repo.save(&m).await.unwrap();
+        repo.save_transcript(&m.id, "текст").await.unwrap();
+        repo.save_protocol(&m.id, "# Протокол").await.unwrap();
+        let app = make_app(std::sync::Arc::clone(&repo));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(&format!("/api/v1/meetings/{}", m.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = body_json(response).await;
+        assert_eq!(json["protocol"], "# Протокол");
+        assert_eq!(json["has_transcript"], true);
+    }
+
+    #[tokio::test]
+    async fn get_without_protocol_returns_null() {
+        let repo = FakeMeetingRepo::new();
+        let m = Meeting::new("Без протокола".to_string(), PathBuf::from("/d.wav"));
+        repo.save(&m).await.unwrap();
+        let app = make_app(std::sync::Arc::clone(&repo));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(&format!("/api/v1/meetings/{}", m.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = body_json(response).await;
+        assert!(json["protocol"].is_null());
+    }
+
+    #[tokio::test]
+    async fn get_unknown_meeting_returns_404() {
+        let app = make_app(FakeMeetingRepo::new());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/meetings/does-not-exist")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
     // ── Phase 3: import / scan / reprocess / delete ─────────────────────────
 
     fn make_app_full(
@@ -368,7 +488,11 @@ mod tests {
         })
     }
 
-    async fn post_json(app: axum::Router, uri: &str, body: serde_json::Value) -> axum::response::Response {
+    async fn post_json(
+        app: axum::Router,
+        uri: &str,
+        body: serde_json::Value,
+    ) -> axum::response::Response {
         app.oneshot(
             Request::builder()
                 .method("POST")
@@ -500,7 +624,11 @@ mod tests {
         let after = repo.find_by_id(&m.id).await.unwrap().unwrap();
         assert!(after.audio_path.as_os_str().is_empty());
         assert_eq!(after.transcript_text.as_deref(), Some("kept"));
-        assert!(fs.removed_files.lock().unwrap().contains(&PathBuf::from("/recordings/x/audio.wav")));
+        assert!(fs
+            .removed_files
+            .lock()
+            .unwrap()
+            .contains(&PathBuf::from("/recordings/x/audio.wav")));
     }
 
     #[tokio::test]

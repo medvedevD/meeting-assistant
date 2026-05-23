@@ -1,5 +1,9 @@
+use crate::{
+    entities::Job,
+    ports::{JobRepo, MeetingRepo},
+    CoreError,
+};
 use std::sync::Arc;
-use crate::{CoreError, entities::Job, ports::{JobRepo, MeetingRepo}};
 
 /// Regenerate the protocol for an existing meeting from its stored transcript,
 /// optionally with a different template. Clears the old protocol and enqueues a

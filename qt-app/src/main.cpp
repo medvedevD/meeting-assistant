@@ -3,6 +3,8 @@
 #include "SidecarManager.h"
 
 #include <QGuiApplication>
+#include <QFont>
+#include <QFontDatabase>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -13,6 +15,25 @@ int main(int argc, char *argv[]) {
     QGuiApplication::setApplicationName(QStringLiteral("Meeting Assistant"));
     QGuiApplication::setOrganizationName(QStringLiteral("meeting-assistant"));
     QGuiApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+
+    auto loadFont = [](const QString &path) -> QString {
+        const int id = QFontDatabase::addApplicationFont(path);
+        if (id < 0) {
+            qWarning("Failed to load bundled font: %s", qPrintable(path));
+            return {};
+        }
+        const QStringList families = QFontDatabase::applicationFontFamilies(id);
+        return families.isEmpty() ? QString{} : families.first();
+    };
+    const QString uiFont = loadFont(QStringLiteral(":/fonts/Geist-Variable.ttf"));
+    loadFont(QStringLiteral(":/fonts/Newsreader-Variable.ttf"));
+    loadFont(QStringLiteral(":/fonts/Newsreader-Italic-Variable.ttf"));
+    loadFont(QStringLiteral(":/fonts/JetBrainsMono-Variable.ttf"));
+    if (!uiFont.isEmpty()) {
+        QFont appFont(uiFont);
+        QGuiApplication::setFont(appFont);
+        qInfo("Application UI font: %s", qPrintable(uiFont));
+    }
 
     // Fusion enforcement (suspenders; the compiled-in :/qtquickcontrols2.conf
     // is the belt). Must be set after QGuiApplication and before the QML engine
@@ -55,6 +76,11 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty(
         QStringLiteral("themeGalleryEnabled"),
         qEnvironmentVariableIsSet("MEETY_THEME_GALLERY"));
+    // Dev-only: FIRST_RUN=1 ./run-qt.sh forces the welcome/first-run surface
+    // while the script also isolates XDG data/config from the real profile.
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("firstRunPreviewEnabled"),
+        qEnvironmentVariableIsSet("FIRST_RUN"));
 
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,

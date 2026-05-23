@@ -19,7 +19,10 @@ pub struct AppTemplateService {
 
 impl AppTemplateService {
     pub fn new(templates: Arc<dyn TemplateLoader>, settings_store: Arc<JsonSettingsStore>) -> Self {
-        Self { templates, settings_store }
+        Self {
+            templates,
+            settings_store,
+        }
     }
 }
 
@@ -36,23 +39,34 @@ fn map_err(e: CoreError) -> TemplateError {
 #[async_trait]
 impl TemplateService for AppTemplateService {
     async fn list(&self) -> Result<Vec<TemplateDto>, TemplateError> {
-        let items = usecases::list_templates(&self.templates).await.map_err(map_err)?;
+        let items = usecases::list_templates(&self.templates)
+            .await
+            .map_err(map_err)?;
         Ok(items
             .into_iter()
-            .map(|t| TemplateDto { name: t.name, body: t.body })
+            .map(|t| TemplateDto {
+                name: t.name,
+                body: t.body,
+            })
             .collect())
     }
 
     async fn get(&self, name: &str) -> Result<String, TemplateError> {
-        usecases::get_template(&self.templates, name).await.map_err(map_err)
+        usecases::get_template(&self.templates, name)
+            .await
+            .map_err(map_err)
     }
 
     async fn save(&self, name: &str, body: &str) -> Result<(), TemplateError> {
-        usecases::save_template(&self.templates, name, body).await.map_err(map_err)
+        usecases::save_template(&self.templates, name, body)
+            .await
+            .map_err(map_err)
     }
 
     async fn delete(&self, name: &str) -> Result<Option<String>, TemplateError> {
-        usecases::delete_template(&self.templates, name).await.map_err(map_err)?;
+        usecases::delete_template(&self.templates, name)
+            .await
+            .map_err(map_err)?;
 
         // Decision #7: if the deleted template was the configured default, clear
         // the reference (the app falls back to the built-in default) and tell
@@ -75,7 +89,9 @@ impl TemplateService for AppTemplateService {
     }
 
     async fn rename(&self, old: &str, new: &str) -> Result<(), TemplateError> {
-        usecases::rename_template(&self.templates, old, new).await.map_err(map_err)?;
+        usecases::rename_template(&self.templates, old, new)
+            .await
+            .map_err(map_err)?;
 
         // Keep `default_template` pointing at the renamed file so the user's
         // default is not silently lost.

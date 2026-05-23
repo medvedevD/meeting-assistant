@@ -1,8 +1,7 @@
 // MeetingListViewModel reimplemented client-side (audit: thin client, no core
-// change). Owns the meeting-list state machine + an in-session protocol cache
-// that stands in for the missing `protocolLoad` route (audit: scoped
-// reimplement — cross-restart persisted-protocol view is a flagged future
-// core/API route).
+// change). Owns the meeting-list state machine. The protocol is read back from
+// the backend (GET /api/v1/meetings/:id) by MeetingDetailScreen, so there is no
+// longer a client-side protocol cache.
 import QtQuick
 
 QtObject {
@@ -12,19 +11,6 @@ QtObject {
     property string status: "loading"
     property var meetings: []
     property string errorMessage: ""
-
-    // meetingId -> markdown, populated by GenerateProtocolScreen this session.
-    property var protocolCache: ({})
-
-    function protocolFor(id) {
-        return protocolCache.hasOwnProperty(id) ? protocolCache[id] : ""
-    }
-
-    function cacheProtocol(id, markdown) {
-        var c = protocolCache
-        c[id] = markdown
-        protocolCache = c // reassign so bindings re-evaluate
-    }
 
     function meetingById(id) {
         for (var i = 0; i < meetings.length; ++i)

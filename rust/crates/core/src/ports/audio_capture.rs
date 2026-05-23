@@ -1,7 +1,7 @@
-use std::path::Path;
+use crate::CoreError;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use crate::CoreError;
+use std::path::Path;
 
 /// Which audio source(s) to capture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

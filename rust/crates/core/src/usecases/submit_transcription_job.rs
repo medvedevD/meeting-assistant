@@ -1,6 +1,10 @@
+use crate::{
+    entities::{Job, Meeting},
+    ports::{JobRepo, MeetingRepo},
+    CoreError,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
-use crate::{CoreError, entities::{Job, Meeting}, ports::{JobRepo, MeetingRepo}};
 
 pub async fn submit_transcription_job(
     meeting_repo: Arc<dyn MeetingRepo>,
@@ -26,7 +30,10 @@ pub async fn submit_transcription_job(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{entities::JobStatus, fakes::{FakeJobRepo, FakeMeetingRepo}};
+    use crate::{
+        entities::JobStatus,
+        fakes::{FakeJobRepo, FakeMeetingRepo},
+    };
 
     #[tokio::test]
     async fn creates_meeting_and_job() {

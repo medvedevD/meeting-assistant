@@ -105,7 +105,11 @@ struct GenerateContentResponse {
 
 #[async_trait]
 impl LlmProvider for GeminiProvider {
-    async fn generate(&self, transcript: &str, instructions: Option<&str>) -> Result<String, CoreError> {
+    async fn generate(
+        &self,
+        transcript: &str,
+        instructions: Option<&str>,
+    ) -> Result<String, CoreError> {
         let mut parts = Vec::new();
         if let Some(instr) = instructions {
             parts.push(Part { text: instr });
@@ -114,7 +118,9 @@ impl LlmProvider for GeminiProvider {
 
         let body = GenerateContentRequest {
             contents: vec![Content { parts }],
-            generation_config: GenerationConfig { max_output_tokens: self.max_tokens },
+            generation_config: GenerationConfig {
+                max_output_tokens: self.max_tokens,
+            },
         };
 
         let url = format!(
@@ -135,8 +141,10 @@ impl LlmProvider for GeminiProvider {
             return Err(classify_http("Gemini", status, &text));
         }
 
-        let parsed: GenerateContentResponse =
-            resp.json().await.map_err(|e| CoreError::Llm(e.to_string()))?;
+        let parsed: GenerateContentResponse = resp
+            .json()
+            .await
+            .map_err(|e| CoreError::Llm(e.to_string()))?;
         let text = parsed
             .candidates
             .into_iter()
@@ -168,7 +176,10 @@ mod tests {
             .await;
 
         let provider = GeminiProvider::new("k", "gemini-2.5-pro", 4096, server.uri());
-        let out = provider.generate("transcript", Some("be brief")).await.unwrap();
+        let out = provider
+            .generate("transcript", Some("be brief"))
+            .await
+            .unwrap();
         assert_eq!(out, "# Protocol");
     }
 

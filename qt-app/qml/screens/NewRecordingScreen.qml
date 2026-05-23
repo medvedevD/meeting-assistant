@@ -20,6 +20,7 @@ Page {
     property string recId: ""
     property string recName: ""
     property int elapsed: 0
+    property int visualTick: 0
     property string errorMsg: ""
     // Meeting to open once the refreshed list contains it (import is async).
     property string pendingOpenId: ""
@@ -45,7 +46,23 @@ Page {
     function fmt(s) {
         var m = Math.floor(s / 60)
         var sec = s % 60
-        return m + ":" + (sec < 10 ? "0" : "") + sec
+        return (m < 10 ? "0" : "") + m + ":" + (sec < 10 ? "0" : "") + sec
+    }
+
+    function sourceIndex() {
+        if (source === "mic") return 0
+        if (source === "system") return 1
+        return 2
+    }
+
+    function sourceLabel() {
+        if (source === "mic") return qsTr("Микрофон")
+        if (source === "system") return qsTr("Система")
+        return qsTr("Оба источника")
+    }
+
+    function setSourceIndex(index) {
+        source = index === 0 ? "mic" : (index === 1 ? "system" : "mixed")
     }
 
     function start(name) {
@@ -121,6 +138,7 @@ Page {
             scr.recId = j.id
             scr.recName = j.name
             scr.elapsed = 0
+            scr.visualTick = 0
             scr.st = "recording"
         }
         onFail: function (s, e) {
@@ -151,6 +169,12 @@ Page {
         interval: 1000
         repeat: true
         onTriggered: scr.elapsed += 1
+    }
+    Timer {
+        running: scr.st === "recording"
+        interval: 100
+        repeat: true
+        onTriggered: scr.visualTick += 1
     }
 
     Dialog {
@@ -221,7 +245,7 @@ Page {
             Label {
                 Layout.fillWidth: true
                 visible: scanDialog.errorText.length > 0
-                color: scr.palette.toolTipText
+                color: Theme.rec
                 wrapMode: Text.WordWrap
                 text: scanDialog.errorText
             }
@@ -266,23 +290,7 @@ Page {
         }
     }
 
-    header: ToolBar {
-        RowLayout {
-            anchors.fill: parent
-            ToolButton {
-                text: qsTr("‹ Назад")
-                enabled: scr.st === "idle" || scr.st === "error"
-                onClicked: scr.shell.showList()
-            }
-            Label {
-                text: qsTr("Новая запись")
-                font.bold: true
-                Layout.fillWidth: true
-                horizontalAlignment: Text.AlignHCenter
-            }
-            Item { Layout.preferredWidth: 64 }
-        }
-    }
+    background: Rectangle { color: Theme.paper }
 
     // ── idle (with drag&drop overlay) ─────────────────────────────────────────
     Item {
@@ -291,134 +299,366 @@ Page {
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 32
-            spacing: 20
-
-            TextField {
-                id: nameField
-                Layout.fillWidth: true
-                placeholderText: qsTr("Название встречи")
-            }
-
-            Label { text: qsTr("Источник звука"); opacity: 0.7 }
-            RowLayout {
-                spacing: 16
-                ButtonGroup { id: srcGroup }
-                RadioButton {
-                    text: qsTr("Микрофон"); ButtonGroup.group: srcGroup
-                    checked: scr.source === "mic"
-                    onCheckedChanged: if (checked) scr.source = "mic"
-                }
-                RadioButton {
-                    text: qsTr("Система"); ButtonGroup.group: srcGroup
-                    checked: scr.source === "system"
-                    onCheckedChanged: if (checked) scr.source = "system"
-                }
-                RadioButton {
-                    text: qsTr("Оба"); ButtonGroup.group: srcGroup
-                    checked: scr.source === "mixed"
-                    onCheckedChanged: if (checked) scr.source = "mixed"
-                }
-            }
+            spacing: 0
 
             RowLayout {
                 Layout.fillWidth: true
-                ColumnLayout {
+                Layout.leftMargin: 24
+                Layout.rightMargin: 24
+                Layout.topMargin: 16
+                Layout.bottomMargin: 16
+                spacing: 12
+
+                MeetyButton {
+                    variant: "ghost"
+                    iconName: "arrow-left"
+                    text: qsTr("Назад")
+                    onClicked: scr.shell.showList()
+                }
+                Text {
                     Layout.fillWidth: true
-                    Label { text: qsTr("Подавление эха") }
-                    Label {
-                        text: qsTr("Рекомендуется при записи через микрофон")
-                        opacity: 0.6
-                        font.pixelSize: 11
-                    }
-                }
-                Switch {
-                    checked: scr.echoCancel
-                    onToggled: scr.echoCancel = checked
+                    text: qsTr("Новая запись")
+                    font.family: Theme.fontSerif
+                    font.pixelSize: Theme.fsTitle
+                    font.weight: Theme.wMedium
+                    font.letterSpacing: Theme.tracking(Theme.fsTitle, -0.02)
+                    color: Theme.ink
+                    elide: Text.ElideRight
                 }
             }
 
-            // drop zone
-            Rectangle {
+            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.rule }
+
+            ScrollView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                radius: 8
-                color: dropArea.containsDrag ? scr.palette.highlight : "transparent"
-                opacity: dropArea.containsDrag ? 0.2 : 1.0
-                border.width: 1
-                border.color: scr.palette.mid
-                Label {
-                    anchors.centerIn: parent
-                    opacity: 0.6
-                    horizontalAlignment: Text.AlignHCenter
-                    text: qsTr("Перетащите сюда аудиофайл,\nчтобы импортировать")
-                }
-                DropArea {
-                    id: dropArea
-                    anchors.fill: parent
-                    keys: ["text/uri-list"]
-                    onDropped: function (drop) {
-                        if (drop.hasUrls && drop.urls.length > 0) {
-                            scr.importPath(drop.urls[0].toString().replace(/^file:\/\//, ""), true)
-                            drop.accept()
+                clip: true
+                contentWidth: availableWidth
+                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                ColumnLayout {
+                    width: Math.min(640, parent.width - 64)
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 0
+
+                    Item { Layout.preferredHeight: 40 }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Готовы записать?")
+                        font.family: Theme.fontSerif
+                        font.pixelSize: Theme.fsH1
+                        font.weight: Theme.wMedium
+                        font.letterSpacing: Theme.tracking(Theme.fsH1, -0.02)
+                        color: Theme.ink
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.bottomMargin: 28
+                        text: qsTr("Дайте встрече название — остальное meety сделает сам.")
+                        font.family: Theme.fontSerif
+                        font.pixelSize: 16
+                        font.italic: true
+                        color: Theme.ink2
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.bottomMargin: 8
+                        text: qsTr("Название встречи")
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsSmall
+                        font.weight: Theme.wSemiBold
+                        color: Theme.ink3
+                    }
+                    MeetyField {
+                        id: nameField
+                        Layout.fillWidth: true
+                        placeholderText: qsTr("Например, «Дейлик с командой Платформы»")
+                    }
+
+                    Item { Layout.preferredHeight: 18 }
+
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.bottomMargin: 8
+                        text: qsTr("Источник звука")
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsSmall
+                        font.weight: Theme.wSemiBold
+                        color: Theme.ink3
+                    }
+                    MeetySegmented {
+                        Layout.fillWidth: true
+                        model: [qsTr("Микрофон"), qsTr("Система"), qsTr("Оба")]
+                        currentIndex: scr.sourceIndex()
+                        onActivated: function (index) { scr.setSourceIndex(index) }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        Layout.bottomMargin: 18
+                        text: qsTr("Запись системного звука требует разрешения «Запись экрана» в macOS — meety записывает только звук.")
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsSmall
+                        color: Theme.ink3
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.rule }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 14
+                        Layout.bottomMargin: 14
+                        spacing: 16
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Text {
+                                Layout.fillWidth: true
+                                text: qsTr("Подавление эха")
+                                font.family: Theme.fontUi
+                                font.pixelSize: Theme.fsBodyLg
+                                font.weight: Theme.wMedium
+                                color: Theme.ink
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: qsTr("Рекомендуется при записи через микрофон.")
+                                font.family: Theme.fontUi
+                                font.pixelSize: Theme.fsSmall
+                                color: Theme.ink3
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                        MeetySwitch {
+                            checked: scr.echoCancel
+                            onToggled: scr.echoCancel = checked
                         }
                     }
-                }
-            }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.rule }
 
-            Button {
-                Layout.fillWidth: true
-                text: qsTr("Начать запись")
-                highlighted: true
-                onClicked: scr.start(nameField.text)
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Button {
-                    Layout.fillWidth: true
-                    text: qsTr("Импорт файла…")
-                    onClicked: filePicker.open()
-                }
-                Button {
-                    Layout.fillWidth: true
-                    text: qsTr("Из папки…")
-                    onClicked: scanDialog.openScan()
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 16
+                        Layout.bottomMargin: 18
+                        implicitHeight: 118
+                        radius: Theme.rLg
+                        color: dropArea.containsDrag ? Theme.accentTint : Theme.paperSub
+                        border.width: 1.5
+                        border.color: dropArea.containsDrag || dropMouse.containsMouse
+                                      ? Theme.accent : Theme.rule2
+
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            width: parent.width - 56
+                            spacing: 4
+                            Text {
+                                Layout.fillWidth: true
+                                text: qsTr("Перетащите аудиофайл сюда")
+                                horizontalAlignment: Text.AlignHCenter
+                                font.family: Theme.fontUi
+                                font.pixelSize: Theme.fsBodyLg
+                                font.weight: Theme.wSemiBold
+                                color: Theme.ink
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: qsTr("wav · mp3 · m4a · flac · ogg — meety импортирует и поставит в очередь на транскрипцию")
+                                horizontalAlignment: Text.AlignHCenter
+                                wrapMode: Text.WordWrap
+                                font.family: Theme.fontUi
+                                font.pixelSize: Theme.fsBody
+                                color: Theme.ink3
+                            }
+                        }
+                        MouseArea {
+                            id: dropMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: filePicker.open()
+                        }
+                        DropArea {
+                            id: dropArea
+                            anchors.fill: parent
+                            keys: ["text/uri-list"]
+                            onDropped: function (drop) {
+                                if (drop.hasUrls && drop.urls.length > 0) {
+                                    scr.importPath(drop.urls[0].toString().replace(/^file:\/\//, ""), true)
+                                    drop.accept()
+                                }
+                            }
+                        }
+                    }
+
+                    MeetyButton {
+                        Layout.fillWidth: true
+                        variant: "accent"
+                        large: true
+                        iconName: "mic"
+                        text: qsTr("Начать запись")
+                        onClicked: scr.start(nameField.text)
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 10
+                        spacing: 10
+                        MeetyButton {
+                            Layout.fillWidth: true
+                            iconName: "doc"
+                            text: qsTr("Импорт файла…")
+                            onClicked: filePicker.open()
+                        }
+                        MeetyButton {
+                            Layout.fillWidth: true
+                            iconName: "folder"
+                            text: qsTr("Из папки…")
+                            onClicked: scanDialog.openScan()
+                        }
+                    }
+
+                    Item { Layout.preferredHeight: 60 }
                 }
             }
         }
     }
 
     // ── recording ───────────────────────────────────────────────────────────
-    ColumnLayout {
+    Item {
         visible: scr.st === "recording"
-        anchors.centerIn: parent
-        spacing: 16
-        Label {
-            Layout.alignment: Qt.AlignHCenter
-            text: qsTr("●  ЗАПИСЬ")
-            color: scr.palette.toolTipText
-            SequentialAnimation on opacity {
-                running: scr.st === "recording"
-                loops: Animation.Infinite
-                NumberAnimation { from: 1.0; to: 0.3; duration: 800 }
-                NumberAnimation { from: 0.3; to: 1.0; duration: 800 }
+        anchors.fill: parent
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 0
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: 24
+                Layout.rightMargin: 24
+                Layout.topMargin: 16
+                Layout.bottomMargin: 16
+                spacing: 12
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+                    Rectangle {
+                        width: 8; height: 8; radius: 4
+                        color: Theme.rec
+                        SequentialAnimation on opacity {
+                            running: scr.st === "recording"
+                            loops: Animation.Infinite
+                            NumberAnimation { from: 1.0; to: 0.35; duration: 700 }
+                            NumberAnimation { from: 0.35; to: 1.0; duration: 700 }
+                        }
+                    }
+                    Text {
+                        text: qsTr("Запись")
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsSmall
+                        font.weight: Theme.wSemiBold
+                        font.letterSpacing: Theme.tracking(Theme.fsSmall, 0.18)
+                        color: Theme.rec
+                    }
+                }
+                Text {
+                    text: qsTr("%1 · %2").arg(scr.sourceLabel()).arg(scr.echoCancel ? qsTr("AEC вкл") : qsTr("AEC выкл"))
+                    font.family: Theme.fontMono
+                    font.pixelSize: Theme.fsSmall
+                    color: Theme.ink3
+                }
             }
-        }
-        Label {
-            Layout.alignment: Qt.AlignHCenter
-            text: scr.fmt(scr.elapsed)
-            font.pixelSize: 44
-        }
-        Label {
-            Layout.alignment: Qt.AlignHCenter
-            text: scr.recName
-            opacity: 0.7
-        }
-        Button {
-            Layout.alignment: Qt.AlignHCenter
-            Layout.preferredWidth: 220
-            text: qsTr("Остановить запись")
-            onClicked: scr.stop()
+
+            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.rule }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.leftMargin: 40
+                Layout.rightMargin: 40
+                Layout.topMargin: 24
+                Layout.bottomMargin: 32
+                spacing: 16
+
+                Item {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                }
+
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    spacing: 10
+
+                    Rectangle {
+                        width: 10
+                        height: 10
+                        radius: 5
+                        color: Theme.rec
+                        SequentialAnimation on opacity {
+                            running: scr.st === "recording"
+                            loops: Animation.Infinite
+                            NumberAnimation { from: 1.0; to: 0.35; duration: 700 }
+                            NumberAnimation { from: 0.35; to: 1.0; duration: 700 }
+                        }
+                    }
+                    Text {
+                        text: qsTr("Запись идёт")
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsSmall
+                        font.weight: Theme.wSemiBold
+                        font.letterSpacing: Theme.tracking(Theme.fsSmall, 0.18)
+                        color: Theme.rec
+                    }
+                }
+
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: scr.fmt(scr.elapsed)
+                    font.family: Theme.fontSerif
+                    font.pixelSize: 76
+                    font.weight: Theme.wRegular
+                    font.letterSpacing: Theme.tracking(76, -0.025)
+                    color: Theme.ink
+                    opacity: 0.92 + 0.08 * Math.abs(Math.sin(scr.visualTick / 6.0))
+                }
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.maximumWidth: 520
+                    text: qsTr("«%1»").arg(scr.recName)
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                    font.family: Theme.fontSerif
+                    font.pixelSize: 20
+                    font.italic: true
+                    color: Theme.ink2
+                }
+                Rectangle {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: Math.min(360, parent.width * 0.65)
+                    height: 1
+                    color: Theme.rule
+                }
+                RowLayout {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.topMargin: 4
+                    spacing: 10
+                    MeetyButton {
+                        large: true
+                        iconName: "stop"
+                        variant: "accent"
+                        text: qsTr("Остановить")
+                        onClicked: scr.stop()
+                    }
+                }
+                Item {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                }
+            }
         }
     }
 
@@ -428,10 +668,12 @@ Page {
         anchors.centerIn: parent
         spacing: 16
         BusyIndicator { Layout.alignment: Qt.AlignHCenter; running: true }
-        Label {
+        Text {
             Layout.alignment: Qt.AlignHCenter
             text: scr.st === "importing" ? qsTr("Импорт файла…") : qsTr("Сохранение записи…")
-            opacity: 0.7
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBodyLg
+            color: Theme.ink3
         }
     }
 
@@ -441,14 +683,16 @@ Page {
         anchors.centerIn: parent
         width: Math.min(parent.width - 64, 560)
         spacing: 16
-        Label {
+        Text {
             Layout.fillWidth: true
             text: scr.errorMsg
-            color: scr.palette.toolTipText
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBodyLg
+            color: Theme.rec
             wrapMode: Text.WordWrap
             horizontalAlignment: Text.AlignHCenter
         }
-        Button {
+        MeetyButton {
             Layout.alignment: Qt.AlignHCenter
             text: qsTr("Попробовать снова")
             onClicked: scr.st = "idle"

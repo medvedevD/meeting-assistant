@@ -1,12 +1,12 @@
-use std::sync::Arc;
+use super::Db;
 use async_trait::async_trait;
-use rusqlite::OptionalExtension;
 use meeting_core::{
-    CoreError,
     entities::{ErrorClass, Job, JobKind, JobStatus},
     ports::JobRepo,
+    CoreError,
 };
-use super::Db;
+use rusqlite::OptionalExtension;
+use std::sync::Arc;
 
 pub struct SqliteJobRepo(pub Arc<Db>);
 
@@ -89,16 +89,17 @@ impl JobRepo for SqliteJobRepo {
             let mut conn = db.conn.lock().unwrap();
             let tx = conn.transaction()?;
 
-            let mut job = tx.query_row(
-                &format!(
-                    "SELECT {SELECT_COLS} FROM jobs
+            let mut job = tx
+                .query_row(
+                    &format!(
+                        "SELECT {SELECT_COLS} FROM jobs
                      WHERE status='pending' AND retry_after <= ?1
                      ORDER BY created_at LIMIT 1"
-                ),
-                [now_ts],
-                row_to_job,
-            )
-            .optional()?;
+                    ),
+                    [now_ts],
+                    row_to_job,
+                )
+                .optional()?;
 
             if let Some(ref mut j) = job {
                 tx.execute(
@@ -214,12 +215,12 @@ impl JobRepo for SqliteJobRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+    use crate::db::{Db, SqliteMeetingRepo};
     use meeting_core::{
         entities::{Job, JobStatus, Meeting},
         ports::MeetingRepo,
     };
-    use crate::db::{Db, SqliteMeetingRepo};
+    use std::path::PathBuf;
 
     fn make_repos() -> (SqliteMeetingRepo, SqliteJobRepo) {
         let db = Db::open_in_memory().unwrap();
@@ -309,7 +310,9 @@ mod tests {
         jr.enqueue(&job).await.unwrap();
         jr.claim_pending(i64::MAX).await.unwrap();
 
-        jr.reset_for_retry(&job.id, "timeout", 1, 5000, 1000).await.unwrap();
+        jr.reset_for_retry(&job.id, "timeout", 1, 5000, 1000)
+            .await
+            .unwrap();
         let j = jr.find_by_id(&job.id).await.unwrap().unwrap();
         assert_eq!(j.status, JobStatus::Pending);
         assert_eq!(j.attempts, 1);
@@ -325,12 +328,17 @@ mod tests {
         jr.enqueue(&job).await.unwrap();
         jr.claim_pending(i64::MAX).await.unwrap();
 
-        jr.mark_permanently_failed(&job.id, "crashed", Some("api_auth"), 5, 2000).await.unwrap();
+        jr.mark_permanently_failed(&job.id, "crashed", Some("api_auth"), 5, 2000)
+            .await
+            .unwrap();
         let j = jr.find_by_id(&job.id).await.unwrap().unwrap();
         assert_eq!(j.status, JobStatus::Failed);
         assert_eq!(j.attempts, 5);
         assert_eq!(j.last_error.as_deref(), Some("crashed"));
-        assert_eq!(j.error_class, Some(meeting_core::entities::ErrorClass::ApiAuth));
+        assert_eq!(
+            j.error_class,
+            Some(meeting_core::entities::ErrorClass::ApiAuth)
+        );
     }
 
     #[tokio::test]
@@ -344,7 +352,9 @@ mod tests {
         let pending = jr.find_by_id(&job.id).await.unwrap().unwrap();
         assert!(pending.error_class.is_none());
 
-        jr.mark_permanently_failed(&job.id, "boom", None, 5, 1).await.unwrap();
+        jr.mark_permanently_failed(&job.id, "boom", None, 5, 1)
+            .await
+            .unwrap();
         let failed = jr.find_by_id(&job.id).await.unwrap().unwrap();
         assert!(failed.error_class.is_none());
     }

@@ -17,7 +17,8 @@ Page {
     property bool hasTranscript: false
     property double createdAt: 0
 
-    readonly property string protocol: store ? store.protocolFor(meetingId) : ""
+    // Persisted protocol, loaded from the backend (GET /api/v1/meetings/:id).
+    property string protocol: ""
     readonly property bool hasProtocol: protocol.length > 0
 
     // Active reprocess job (transcribe / protocol). Drives the inline progress.
@@ -26,10 +27,31 @@ Page {
 
     background: Rectangle { color: Theme.paper }
 
+    Component.onCompleted: loadProtocol()
+
+    function loadProtocol() {
+        protocolReq.get("/api/v1/meetings/" + meetingId)
+    }
+
     function reprocess(kind) {
         scr.actionNote = ""
         reprocessReq.post("/api/v1/meetings/" + meetingId + "/reprocess",
                           { "kind": kind })
+    }
+
+    Request {
+        id: protocolReq
+        onOk: function (j) {
+            scr.protocol = (j && j.protocol) ? j.protocol : ""
+            if (!scr.hasProtocol && scr.shell.selectedId === scr.meetingId)
+                scr.shell.showNoProtocol({
+                    "id": scr.meetingId, "name": scr.meetingName,
+                    "audio_path": scr.audioPath,
+                    "has_transcript": scr.hasTranscript,
+                    "created_at": scr.createdAt
+                })
+        }
+        onFail: function (s, e) { scr.actionNote = qsTr("Ошибка: %1").arg(e) }
     }
 
     Request {
@@ -164,8 +186,8 @@ Page {
             MeetyIconButton {
                 Layout.alignment: Qt.AlignTop
                 iconName: "more"
-                ToolTip.text: qsTr("Действия"); ToolTip.visible: hovered
                 onClicked: actionMenu.popup()
+                MeetyToolTip { text: qsTr("Действия"); visible: parent.hovered }
             }
         }
 
@@ -185,13 +207,16 @@ Page {
                 Layout.fillWidth: true
                 PipelineProgress {
                     width: parent ? parent.width : 0
+                    apiClient: api
                     jobId: scr.activeJobId
                     onOpenSettings: scr.shell.showSettings()
                     onFinished: function (status, job) {
                         scr.activeJobId = ""
                         scr.store.refresh()
-                        if (status === "done")
+                        if (status === "done") {
                             scr.actionNote = qsTr("Готово.")
+                            scr.loadProtocol()
+                        }
                     }
                 }
             }
@@ -207,7 +232,6 @@ Page {
         }
 
         // ── body ─────────────────────────────────────────────────────────────
-        // protocol present → editorial markdown render
         ScrollView {
             visible: scr.hasProtocol
             Layout.fillWidth: true
@@ -244,56 +268,6 @@ Page {
                     }
                 }
             }
-        }
-
-        // no protocol → empty state CTA
-        ColumnLayout {
-            visible: !scr.hasProtocol
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 16
-
-            Item { Layout.fillHeight: true }
-            MeetyIcon {
-                Layout.alignment: Qt.AlignHCenter
-                name: "doc"; size: 36; color: Theme.ink4
-            }
-            Text {
-                Layout.alignment: Qt.AlignHCenter
-                text: qsTr("Протокол ещё не сгенерирован")
-                font.family: Theme.fontSerif
-                font.pixelSize: 28
-                font.weight: Theme.wMedium
-                font.letterSpacing: Theme.tracking(28, -0.015)
-                color: Theme.ink
-            }
-            Text {
-                Layout.alignment: Qt.AlignHCenter
-                Layout.maximumWidth: 380
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.WordWrap
-                font.family: Theme.fontUi
-                font.pixelSize: Theme.fsBodyLg
-                color: Theme.ink3
-                text: scr.audioPath.length > 0
-                      ? qsTr("У встречи есть аудиозапись. Запустите транскрипцию и генерацию протокола — это займёт пару минут.")
-                      : qsTr("Запишите встречу, чтобы сгенерировать протокол.")
-            }
-            MeetyButton {
-                visible: scr.audioPath.length > 0
-                Layout.alignment: Qt.AlignHCenter
-                variant: "accent"
-                large: true
-                iconName: "sparkle"
-                text: qsTr("Сгенерировать протокол")
-                onClicked: scr.shell.showGenerate({
-                    "id": scr.meetingId, "name": scr.meetingName,
-                    "audio_path": scr.audioPath,
-                    "has_transcript": scr.hasTranscript,
-                    "created_at": scr.createdAt
-                }, false)
-            }
-            Item { Layout.fillHeight: true }
         }
     }
 }
