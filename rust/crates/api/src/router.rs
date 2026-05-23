@@ -33,10 +33,12 @@ pub fn no_default_template() -> DefaultTemplateFn {
     Arc::new(|| None)
 }
 use crate::routes::{
-    health, jobs, meetings, protocols, recordings, settings, templates, transcribe, version,
+    health, jobs, meetings, protocols, recordings, settings, templates, transcribe,
+    transcription_models, version,
 };
 use crate::settings_service::SettingsService;
 use crate::template_service::TemplateService;
+use crate::transcription_model_service::TranscriptionModelService;
 
 pub struct AppState {
     pub transcriber: Arc<dyn Transcriber>,
@@ -83,6 +85,7 @@ pub fn create_server_router(
     state: AppState,
     settings_service: Arc<dyn SettingsService>,
     template_service: Arc<dyn TemplateService>,
+    transcription_model_service: Arc<dyn TranscriptionModelService>,
     auth_token: String,
     build_version: impl Into<String>,
 ) -> Router {
@@ -107,8 +110,15 @@ pub fn create_server_router(
     // Template routes follow the same separate-state pattern (the
     // TemplateService), for the same reason. Same bearer gate.
     let templates = template_routes()
-        .route_layer(middleware::from_fn_with_state(token, require_bearer))
+        .route_layer(middleware::from_fn_with_state(
+            token.clone(),
+            require_bearer,
+        ))
         .with_state(template_service);
+
+    let transcription_models = transcription_model_routes()
+        .route_layer(middleware::from_fn_with_state(token, require_bearer))
+        .with_state(transcription_model_service);
 
     let meta = Router::new()
         .route("/health", get(health::handle))
@@ -119,7 +129,10 @@ pub fn create_server_router(
             min_protocol: crate::MIN_PROTOCOL_VERSION,
         });
 
-    api.merge(settings).merge(templates).merge(meta)
+    api.merge(settings)
+        .merge(templates)
+        .merge(transcription_models)
+        .merge(meta)
 }
 
 fn api_routes() -> Router<Arc<AppState>> {
@@ -157,6 +170,26 @@ fn template_routes() -> Router<Arc<dyn TemplateService>> {
                 .delete(templates::delete),
         )
         .route("/api/v1/templates/:name/rename", post(templates::rename))
+}
+
+fn transcription_model_routes() -> Router<Arc<dyn TranscriptionModelService>> {
+    Router::new()
+        .route(
+            "/api/v1/transcription-models",
+            get(transcription_models::list),
+        )
+        .route(
+            "/api/v1/transcription-models/:id/install",
+            post(transcription_models::install),
+        )
+        .route(
+            "/api/v1/transcription-models/installations/:job_id",
+            get(transcription_models::installation),
+        )
+        .route(
+            "/api/v1/transcription-models/:id",
+            axum::routing::delete(transcription_models::delete),
+        )
 }
 
 /// Rejects any request to an `/api/*` route that lacks a matching
@@ -250,6 +283,47 @@ mod tests {
         }
     }
 
+    struct FakeTranscriptionModels;
+    #[async_trait::async_trait]
+    impl TranscriptionModelService for FakeTranscriptionModels {
+        async fn list(&self) -> Result<crate::TranscriptionModelsView, crate::ModelServiceError> {
+            Ok(crate::TranscriptionModelsView {
+                models: Vec::new(),
+                selected_model_id: None,
+                active_source: "managed".to_string(),
+                models_dir: "/tmp/models".to_string(),
+            })
+        }
+
+        async fn start_install(
+            &self,
+            _model_id: String,
+        ) -> Result<crate::InstallStarted, crate::ModelServiceError> {
+            Ok(crate::InstallStarted {
+                job_id: "job-1".to_string(),
+            })
+        }
+
+        async fn installation(
+            &self,
+            job_id: String,
+        ) -> Result<crate::InstallationView, crate::ModelServiceError> {
+            Ok(crate::InstallationView {
+                job_id,
+                model_id: "base".to_string(),
+                status: "done".to_string(),
+                bytes_downloaded: 1,
+                total_bytes: Some(1),
+                percent: Some(100.0),
+                error: None,
+            })
+        }
+
+        async fn delete_model(&self, _model_id: String) -> Result<(), crate::ModelServiceError> {
+            Ok(())
+        }
+    }
+
     fn server() -> Router {
         create_server_router(
             AppState {
@@ -266,6 +340,7 @@ mod tests {
             },
             Arc::new(FakeSettings),
             Arc::new(FakeTemplates),
+            Arc::new(FakeTranscriptionModels),
             TOKEN.to_string(),
             "0.1.0-test",
         )
@@ -293,6 +368,10 @@ mod tests {
         ("PUT", "/api/v1/templates/foo"),
         ("DELETE", "/api/v1/templates/foo"),
         ("POST", "/api/v1/templates/foo/rename"),
+        ("GET", "/api/v1/transcription-models"),
+        ("POST", "/api/v1/transcription-models/base/install"),
+        ("GET", "/api/v1/transcription-models/installations/job-1"),
+        ("DELETE", "/api/v1/transcription-models/base"),
     ];
 
     #[tokio::test]

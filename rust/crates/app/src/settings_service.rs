@@ -1,9 +1,11 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use meeting_adapters::settings_store::PersistedSettings;
-use meeting_adapters::{build_llm, probe_llm, JsonSettingsStore, ProviderKind, TranscriberPrefs};
+use meeting_adapters::{
+    build_llm, probe_llm, resolve_transcription_model_path, JsonSettingsStore, ProviderKind,
+    TranscriberPrefs,
+};
 use meeting_api::SettingsService;
 use serde_json::{json, Value};
 
@@ -41,11 +43,8 @@ impl AppSettingsService {
             settings.transcriber.beam_size,
             settings.transcriber.n_threads,
         ));
-        if let Some(model) = &settings.transcriber.model_path {
-            self.handles
-                .transcriber
-                .set_model_path(PathBuf::from(model))
-                .await;
+        if let Ok(model) = resolve_transcription_model_path(settings) {
+            self.handles.transcriber.set_model_path(model).await;
         }
         if let Some(prompts) = &settings.paths.prompts {
             self.handles.templates.set_dir(prompts);
@@ -72,6 +71,7 @@ impl SettingsService for AppSettingsService {
         json!({
             "paths": {
                 "model": s.paths.model,
+                "models_dir": s.paths.models_dir,
                 "db": s.paths.db,
                 "meetings_dir": s.paths.meetings_dir,
                 "prompts": s.paths.prompts,
@@ -85,7 +85,10 @@ impl SettingsService for AppSettingsService {
                 "language": s.transcriber.language,
                 "beam_size": s.transcriber.beam_size,
                 "n_threads": s.transcriber.n_threads,
-                "model_path": s.transcriber.model_path,
+                "model_source": s.transcriber.model_source,
+                "model_id": s.transcriber.model_id,
+                "custom_model_path": s.transcriber.custom_model_path,
+                "model_path": s.transcriber.custom_model_path,
             },
             "llm": {
                 "active": llm.active.as_str(),
@@ -102,6 +105,7 @@ impl SettingsService for AppSettingsService {
     async fn update(&self, body: Value) -> Result<Value, String> {
         let settings: PersistedSettings =
             serde_json::from_value(body).map_err(|e| format!("invalid settings: {e}"))?;
+        let settings = settings.normalize();
         self.store()
             .save(settings.clone())
             .map_err(|e| format!("failed to persist settings: {e}"))?;

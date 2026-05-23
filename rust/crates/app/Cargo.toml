@@ -24,11 +24,13 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 axum = "0.7"
+reqwest = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
 fs2 = "0.4"
 getrandom = "0.2"
 dirs = { workspace = true }
 async-trait = { workspace = true }
+sha1 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -39,7 +41,6 @@ windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_
 # Section-08 sidecar contract tests spawn the real `meeting-server` binary and
 # talk to it over loopback HTTP.
 [dev-dependencies]
-reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"

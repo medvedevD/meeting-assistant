@@ -8,7 +8,7 @@ Meeting Assistant is an AI-powered desktop app for recording, transcribing, and 
 
 ## Planning Artifacts
 
-All plans, requirements, and PRDs go into `.agents/plans/` in this repo — **one folder per task**, with clear nesting (e.g. `.agents/plans/<task-slug>/prd-v1.0.md`). Never use `docs/prds/`, `.Codex/plans/`, `.claude/plans/`, or ad-hoc locations. Tools or skills that generate planning docs must write to this location, overriding their defaults.
+All plans, requirements, and PRDs go into `.claude/plans/` in this repo — **one folder per task**, with clear nesting (e.g. `.claude/plans/<task-slug>/prd-v1.0.md`). Never use `docs/prds/`, `.Codex/plans/`, `.agents/plans/`, or ad-hoc locations. Tools or skills that generate planning docs must write to this location, overriding their defaults.
 
 ## Backlog
 

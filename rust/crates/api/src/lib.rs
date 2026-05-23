@@ -2,6 +2,7 @@ mod router;
 mod routes;
 mod settings_service;
 mod template_service;
+mod transcription_model_service;
 
 pub use router::{
     create_router, create_server_router, no_default_template, AppState, DefaultTemplateFn,
@@ -9,6 +10,10 @@ pub use router::{
 };
 pub use settings_service::SettingsService;
 pub use template_service::{TemplateDto, TemplateError, TemplateService};
+pub use transcription_model_service::{
+    InstallStarted, InstallationView, ModelServiceError, TranscriptionModelService,
+    TranscriptionModelView, TranscriptionModelsView,
+};
 
 /// IPC protocol version negotiated between the Qt GUI client and this server.
 ///

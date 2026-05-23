@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use meeting_adapters::{
-    build_llm, AnthropicProvider, CpalAudioCapture, Db, FileTemplateLoader, FsMeetingFileStore,
-    JsonSettingsStore, KeyringSecretStore, LazyWhisperTranscriber, LiveProgress, SqliteJobRepo,
-    SqliteMeetingRepo, SwappableLlm, TranscriberPrefs, WhisperTranscriber, Worker,
+    build_llm, resolve_transcription_model_path, AnthropicProvider, CpalAudioCapture, Db,
+    FileTemplateLoader, FsMeetingFileStore, JsonSettingsStore, KeyringSecretStore,
+    LazyWhisperTranscriber, LiveProgress, SqliteJobRepo, SqliteMeetingRepo, SwappableLlm,
+    TranscriberPrefs, WhisperTranscriber, Worker,
 };
 use meeting_core::ports::{
     AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber,
@@ -92,7 +93,7 @@ impl Container {
 
         // One-time migration: a pre-keyring build stored the Anthropic key in
         // plaintext inside settings.json. Move it into the keyring, then clear it.
-        let mut settings = settings_store.load();
+        let mut settings = settings_store.load().normalize();
         if let Some(key) = settings.anthropic_api_key.take() {
             if !key.is_empty() {
                 let _ = secrets.set("anthropic", &key);
@@ -103,12 +104,8 @@ impl Container {
 
         // Effective paths: a settings override wins over the passed default. (db
         // and recordings overrides are restart-required and applied at boot.)
-        let model = settings
-            .transcriber
-            .model_path
-            .clone()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| model_path.to_path_buf());
+        let model = resolve_transcription_model_path(&settings)
+            .unwrap_or_else(|_| model_path.to_path_buf());
         let prompts = settings
             .paths
             .prompts

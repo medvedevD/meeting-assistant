@@ -297,6 +297,10 @@ fn every_api_route_is_bearer_gated_401_without_token() {
         ("PUT", "/api/v1/templates/foo"),
         ("DELETE", "/api/v1/templates/foo"),
         ("POST", "/api/v1/templates/foo/rename"),
+        ("GET", "/api/v1/transcription-models"),
+        ("POST", "/api/v1/transcription-models/base/install"),
+        ("GET", "/api/v1/transcription-models/installations/job-1"),
+        ("DELETE", "/api/v1/transcription-models/base"),
     ];
 
     for (method, path) in routes {
@@ -309,6 +313,116 @@ fn every_api_route_is_bearer_gated_401_without_token() {
             "{method} {path} must be 401 without a bearer token"
         );
     }
+}
+
+// ── Transcription model management ─────────────────────────────────────────
+
+#[test]
+fn transcription_models_catalog_shape_is_stable() {
+    let s = Sidecar::spawn();
+    let c = client();
+    let url = format!("{}/api/v1/transcription-models", s.base_url());
+
+    let no_token = c.get(&url).send().expect("request");
+    assert_eq!(no_token.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let body: serde_json::Value = c
+        .get(&url)
+        .bearer_auth(&s.handshake.token)
+        .send()
+        .expect("request")
+        .json()
+        .expect("json");
+
+    assert_eq!(body["active_source"], "managed");
+    assert!(body["models_dir"].as_str().unwrap().ends_with("models"));
+    let models = body["models"].as_array().expect("models array");
+    let ids: Vec<_> = models
+        .iter()
+        .map(|model| model["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec!["tiny", "base", "small", "medium", "large-v3"]);
+    let base = models
+        .iter()
+        .find(|model| model["id"] == "base")
+        .expect("base model");
+    assert_eq!(base["filename"], "ggml-base.bin");
+    assert!(base["download_url"]
+        .as_str()
+        .unwrap()
+        .contains("huggingface.co/ggerganov/whisper.cpp"));
+    assert_eq!(base["checksum"].as_str().unwrap().len(), 40);
+    assert_eq!(base["installed"], false);
+    assert_eq!(base["active"], false);
+}
+
+#[test]
+fn transcription_model_install_job_exposes_progress_and_terminal_error() {
+    let s = Sidecar::spawn();
+    let c = client();
+    let base = format!("{}/api/v1/transcription-models", s.base_url());
+    let settings_url = format!("{}/api/v1/settings", s.base_url());
+
+    // Point models_dir at an existing regular file so the background job fails
+    // before any network download. The contract still pins the in-memory job
+    // lifecycle shape without pulling a multi-hundred-MB model in tests.
+    let models_dir_file = tempfile::NamedTempFile::new().expect("models dir file");
+    let mut settings: serde_json::Value = c
+        .get(&settings_url)
+        .bearer_auth(&s.handshake.token)
+        .send()
+        .expect("get settings")
+        .json()
+        .expect("json");
+    settings["paths"]["models_dir"] = serde_json::json!(models_dir_file.path().to_str().unwrap());
+    let put_settings = c
+        .put(&settings_url)
+        .bearer_auth(&s.handshake.token)
+        .json(&settings)
+        .send()
+        .expect("put settings");
+    assert_eq!(put_settings.status(), reqwest::StatusCode::OK);
+
+    let start: serde_json::Value = c
+        .post(format!("{base}/base/install"))
+        .bearer_auth(&s.handshake.token)
+        .send()
+        .expect("start install")
+        .json()
+        .expect("json");
+    let job_id = start["job_id"].as_str().expect("job id");
+    assert!(!job_id.is_empty());
+
+    let mut last: Option<serde_json::Value> = None;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        let status: serde_json::Value = c
+            .get(format!("{base}/installations/{job_id}"))
+            .bearer_auth(&s.handshake.token)
+            .send()
+            .expect("poll install")
+            .json()
+            .expect("json");
+        if status["status"] == "failed" || status["status"] == "done" {
+            last = Some(status);
+            break;
+        }
+        last = Some(status);
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    let status = last.expect("at least one install status");
+    assert_eq!(status["job_id"], job_id);
+    assert_eq!(status["model_id"], "base");
+    assert!(matches!(
+        status["status"].as_str().unwrap(),
+        "queued" | "downloading" | "failed" | "done"
+    ));
+    assert!(status.get("bytes_downloaded").is_some());
+    assert!(
+        status["status"] == "failed" || status["status"] == "done",
+        "install job should reach a terminal state in the isolated test env: {status}"
+    );
 }
 
 // ── Settings: GET/PUT round-trip + secret has_key ────────────────────────────

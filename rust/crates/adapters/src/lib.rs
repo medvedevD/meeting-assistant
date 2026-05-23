@@ -7,6 +7,13 @@ pub use fs_meeting_file_store::FsMeetingFileStore;
 pub mod settings_store;
 pub use settings_store::JsonSettingsStore;
 
+pub mod transcription_models;
+pub use transcription_models::{
+    find_transcription_model, managed_model_path, resolve_transcription_model_path,
+    transcription_model_catalog, ModelPathError, ModelPathErrorCode,
+    TranscriptionModelCatalogEntry,
+};
+
 pub mod secret_store;
 pub use secret_store::KeyringSecretStore;
 

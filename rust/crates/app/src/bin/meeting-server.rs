@@ -30,6 +30,9 @@ mod settings_service;
 #[path = "../template_service.rs"]
 mod template_service;
 
+#[path = "../transcription_model_service.rs"]
+mod transcription_model_service;
+
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
@@ -133,6 +136,12 @@ async fn run(args: Args) -> Result<()> {
         let store = handles.settings_store.clone();
         std::sync::Arc::new(move || store.load().default_template.clone())
     };
+    let transcription_model_service: std::sync::Arc<dyn meeting_api::TranscriptionModelService> =
+        std::sync::Arc::new(
+            transcription_model_service::AppTranscriptionModelService::new(
+                handles.settings_store.clone(),
+            ),
+        );
     let settings_service: std::sync::Arc<dyn meeting_api::SettingsService> =
         std::sync::Arc::new(settings_service::AppSettingsService::new(handles));
 
@@ -177,6 +186,7 @@ async fn run(args: Args) -> Result<()> {
         },
         settings_service,
         template_service,
+        transcription_model_service,
         token.clone(),
         env!("CARGO_PKG_VERSION"),
     );
