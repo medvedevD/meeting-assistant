@@ -412,6 +412,101 @@ mod tests {
         assert!(!model_path.exists());
     }
 
+    #[tokio::test]
+    async fn delete_unknown_custom_id_does_not_remove_external_custom_file() {
+        let models = tempfile::tempdir().expect("models dir");
+        let external = tempfile::tempdir().expect("external dir");
+        let external_model = external.path().join("ggml-custom.bin");
+        std::fs::write(&external_model, b"external").expect("write external model");
+        let mut settings = PersistedSettings::default();
+        settings.paths.models_dir = Some(models.path().display().to_string());
+        settings.transcriber = PersistedTranscriberPrefs {
+            model_source: TranscriptionModelSource::CustomPath,
+            custom_model_path: Some(external_model.display().to_string()),
+            ..PersistedTranscriberPrefs::default()
+        };
+        let (store, _settings_dir) = store_with_settings(settings);
+        let service = AppTranscriptionModelService::new(store);
+
+        let err = service
+            .delete_model("custom-external".to_string())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ModelServiceError::NotFound(_)));
+        assert!(external_model.is_file());
+    }
+
+    #[tokio::test]
+    async fn installed_model_is_not_selected_automatically() {
+        let models = tempfile::tempdir().expect("models dir");
+        std::fs::write(models.path().join("ggml-base.bin"), b"installed").expect("write model");
+        let mut settings = PersistedSettings::default();
+        settings.paths.models_dir = Some(models.path().display().to_string());
+        let (store, _settings_dir) = store_with_settings(settings);
+        let service = AppTranscriptionModelService::new(store);
+
+        let view = service.list().await.unwrap();
+        let base = view
+            .models
+            .iter()
+            .find(|model| model.id == "base")
+            .expect("base model");
+
+        assert!(base.installed);
+        assert!(!base.active);
+        assert_eq!(view.selected_model_id, None);
+    }
+
+    #[tokio::test]
+    async fn models_dir_change_rescans_without_moving_files() {
+        let old_models = tempfile::tempdir().expect("old models dir");
+        let new_models = tempfile::tempdir().expect("new models dir");
+        let old_model = old_models.path().join("ggml-base.bin");
+        let new_model = new_models.path().join("ggml-small.bin");
+        std::fs::write(&old_model, b"old").expect("write old model");
+        std::fs::write(&new_model, b"new").expect("write new model");
+        let mut settings = PersistedSettings::default();
+        settings.paths.models_dir = Some(old_models.path().display().to_string());
+        let (store, _settings_dir) = store_with_settings(settings);
+        let service = AppTranscriptionModelService::new(store.clone());
+
+        let before = service.list().await.unwrap();
+        assert!(
+            before
+                .models
+                .iter()
+                .find(|model| model.id == "base")
+                .expect("base model")
+                .installed
+        );
+
+        let mut settings = store.load();
+        settings.paths.models_dir = Some(new_models.path().display().to_string());
+        store.save(settings).expect("save settings");
+
+        let after = service.list().await.unwrap();
+
+        assert!(
+            !after
+                .models
+                .iter()
+                .find(|model| model.id == "base")
+                .expect("base model")
+                .installed
+        );
+        assert!(
+            after
+                .models
+                .iter()
+                .find(|model| model.id == "small")
+                .expect("small model")
+                .installed
+        );
+        assert!(old_model.is_file());
+        assert!(new_model.is_file());
+    }
+
     #[test]
     fn new_cleans_partial_temp_downloads() {
         let models = tempfile::tempdir().expect("models dir");

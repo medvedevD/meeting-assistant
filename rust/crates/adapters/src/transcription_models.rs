@@ -73,6 +73,33 @@ pub const TRANSCRIPTION_MODEL_CATALOG: &[TranscriptionModelCatalogEntry] = &[
         download_url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
         checksum_sha1: "ad82bf6a9043ceed055076d0fd39f5f186ff8062",
     },
+    TranscriptionModelCatalogEntry {
+        id: "large-v3-turbo-q5_0",
+        display_name: "Large v3 Turbo Q5",
+        approximate_size: "548 MiB",
+        description: "Compressed Turbo model for faster everyday transcription with moderate size.",
+        pros: &["Fast for a large model", "Moderate download size"],
+        cons: &[
+            "Quantized quality trade-off",
+            "Less accurate than full Large v3",
+        ],
+        filename: "ggml-large-v3-turbo-q5_0.bin",
+        download_url:
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        checksum_sha1: "e050f7970618a659205450ad97eb95a18d69c9ee",
+    },
+    TranscriptionModelCatalogEntry {
+        id: "large-v3-turbo-q8_0",
+        display_name: "Large v3 Turbo Q8",
+        approximate_size: "834 MiB",
+        description: "Higher-precision Turbo model with stronger quality than Q5 at a larger size.",
+        pros: &["Fast for a large model", "Better quality than Q5"],
+        cons: &["Larger download", "Still a quantized model"],
+        filename: "ggml-large-v3-turbo-q8_0.bin",
+        download_url:
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin",
+        checksum_sha1: "01bf15bedffe9f39d65c1b6ff9b687ea91f59e0e",
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,13 +220,24 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn catalog_contains_phase_one_models() {
+    fn catalog_contains_builtin_models() {
         let ids: Vec<_> = transcription_model_catalog()
             .iter()
             .map(|entry| entry.id)
             .collect();
 
-        assert_eq!(ids, vec!["tiny", "base", "small", "medium", "large-v3"]);
+        assert_eq!(
+            ids,
+            vec![
+                "tiny",
+                "base",
+                "small",
+                "medium",
+                "large-v3",
+                "large-v3-turbo-q5_0",
+                "large-v3-turbo-q8_0"
+            ]
+        );
     }
 
     #[test]

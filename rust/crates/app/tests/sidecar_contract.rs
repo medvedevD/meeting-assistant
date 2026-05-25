@@ -76,6 +76,7 @@ impl Sidecar {
             // file fallback so tests never read/write the real OS keyring.
             .env("XDG_CONFIG_HOME", data_dir)
             .env("MEETING_ASSISTANT_KEYRING_DISABLE", "1")
+            .env("RUST_LOG", "info")
             .env_remove("ANTHROPIC_API_KEY")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -341,7 +342,18 @@ fn transcription_models_catalog_shape_is_stable() {
         .iter()
         .map(|model| model["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, vec!["tiny", "base", "small", "medium", "large-v3"]);
+    assert_eq!(
+        ids,
+        vec![
+            "tiny",
+            "base",
+            "small",
+            "medium",
+            "large-v3",
+            "large-v3-turbo-q5_0",
+            "large-v3-turbo-q8_0"
+        ]
+    );
     let base = models
         .iter()
         .find(|model| model["id"] == "base")
@@ -443,6 +455,20 @@ fn settings_get_put_roundtrip_and_secret_flag() {
         .json()
         .expect("json");
     assert_eq!(snap["transcriber"]["language"], "ru", "default language");
+    assert_eq!(snap["transcriber"]["model_source"], "managed");
+    assert_eq!(snap["transcriber"]["model_id"], serde_json::Value::Null);
+    assert_eq!(
+        snap["transcriber"]["custom_model_path"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        snap["transcriber"]["custom_models"]
+            .as_array()
+            .expect("custom models array")
+            .len(),
+        0
+    );
+    assert!(snap["paths"].get("models_dir").is_some());
     assert_eq!(snap["llm"]["active"], "anthropic", "default provider");
     // No key configured yet (ANTHROPIC_API_KEY is removed in the test env).
     assert_eq!(snap["llm"]["anthropic"]["has_key"], false);
@@ -454,6 +480,17 @@ fn settings_get_put_roundtrip_and_secret_flag() {
     // PUT a full settings object with a changed language; expect it echoed back.
     let mut updated = snap.clone();
     updated["transcriber"]["language"] = serde_json::json!("en");
+    updated["paths"]["models_dir"] = serde_json::json!("/tmp/ma-models");
+    updated["transcriber"]["model_source"] = serde_json::json!("custom_path");
+    updated["transcriber"]["custom_model_path"] = serde_json::json!("/tmp/ggml-custom.bin");
+    updated["transcriber"]["custom_models"] = serde_json::json!([
+        {
+            "id": "custom-test",
+            "name": "Custom Test",
+            "path": "/tmp/ggml-custom.bin",
+            "description": "External test model"
+        }
+    ]);
     let put_resp = c
         .put(&url)
         .bearer_auth(tok)
@@ -463,6 +500,16 @@ fn settings_get_put_roundtrip_and_secret_flag() {
     assert_eq!(put_resp.status(), reqwest::StatusCode::OK);
     let echoed: serde_json::Value = put_resp.json().expect("json");
     assert_eq!(echoed["transcriber"]["language"], "en");
+    assert_eq!(echoed["paths"]["models_dir"], "/tmp/ma-models");
+    assert_eq!(echoed["transcriber"]["model_source"], "custom_path");
+    assert_eq!(
+        echoed["transcriber"]["custom_model_path"],
+        "/tmp/ggml-custom.bin"
+    );
+    assert_eq!(
+        echoed["transcriber"]["custom_models"][0]["name"],
+        "Custom Test"
+    );
 
     // GET again: the change persisted.
     let after: serde_json::Value = c
@@ -473,6 +520,12 @@ fn settings_get_put_roundtrip_and_secret_flag() {
         .json()
         .expect("json");
     assert_eq!(after["transcriber"]["language"], "en");
+    assert_eq!(after["paths"]["models_dir"], "/tmp/ma-models");
+    assert_eq!(after["transcriber"]["model_source"], "custom_path");
+    assert_eq!(
+        after["transcriber"]["custom_models"][0]["id"],
+        "custom-test"
+    );
 
     // Store an OpenAI key; the snapshot's has_key flips without leaking the key.
     let secret_resp = c

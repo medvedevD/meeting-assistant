@@ -1,3 +1,4 @@
+use crate::transcription_models::ModelPathError;
 use async_trait::async_trait;
 use meeting_core::{
     entities::{PipelineStage, Segment, Transcript},
@@ -287,6 +288,7 @@ impl Default for LazyState {
 
 pub struct LazyWhisperTranscriber {
     model_path: std::sync::RwLock<PathBuf>,
+    model_error: std::sync::RwLock<Option<ModelPathError>>,
     factory: RunnerFactory,
     pub(crate) state: Arc<tokio::sync::Mutex<LazyState>>,
     prefs: std::sync::RwLock<TranscriberPrefs>,
@@ -325,7 +327,9 @@ impl LazyWhisperTranscriber {
             let ctx =
                 WhisperContext::new_with_params(path_str, WhisperContextParameters::default())
                     .map_err(|e| {
-                        CoreError::Transcription(format!("Модель не найдена или повреждена: {e}"))
+                        CoreError::Transcription(format!(
+                            "model_missing: Модель не найдена или повреждена: {e}"
+                        ))
                     })?;
             let model_name = path
                 .file_name()
@@ -347,15 +351,32 @@ impl LazyWhisperTranscriber {
     ) -> Self {
         Self {
             model_path: std::sync::RwLock::new(model_path),
+            model_error: std::sync::RwLock::new(None),
             factory,
             state: Arc::new(tokio::sync::Mutex::new(LazyState::default())),
             prefs: std::sync::RwLock::new(prefs),
         }
     }
 
+    /// Creates a lazy transcriber whose current settings do not resolve to a
+    /// usable model. The stored path is only a placeholder; transcription fails
+    /// before any Whisper load attempt until settings resolve to a valid path.
+    pub fn new_unavailable(
+        fallback_model_path: PathBuf,
+        error: ModelPathError,
+        prefs: TranscriberPrefs,
+    ) -> Self {
+        let transcriber = Self::new(fallback_model_path, prefs);
+        *transcriber.model_error.write().unwrap() = Some(error);
+        transcriber
+    }
+
     /// Preloads the model in the background without running a transcription.
     /// Safe to call multiple times — a no-op if the model is already loaded.
     pub async fn ensure_loaded(&self) -> Result<(), CoreError> {
+        if let Some(error) = self.model_error.read().unwrap().clone() {
+            return Err(model_path_error_to_core(error));
+        }
         let model_path = self.model_path.read().unwrap().clone();
         let mut state = self.state.lock().await;
         if state.runner.is_none() {
@@ -377,13 +398,50 @@ impl LazyWhisperTranscriber {
     /// Change the model path at runtime. Immediately unloads the current model from memory;
     /// the new model will be loaded on the next transcription request.
     pub async fn set_model_path(&self, new_path: PathBuf) {
-        *self.model_path.write().unwrap() = new_path;
+        let path_changed = {
+            let mut current = self.model_path.write().unwrap();
+            let changed = *current != new_path;
+            *current = new_path;
+            changed
+        };
+        let had_error = {
+            let mut current_error = self.model_error.write().unwrap();
+            let had_error = current_error.is_some();
+            *current_error = None;
+            had_error
+        };
+        let should_unload = path_changed || had_error;
+        if !should_unload {
+            return;
+        }
+        self.unload_runner().await;
+        tracing::info!("whisper model path updated, old model unloaded");
+    }
+
+    /// Mark the model as currently unavailable and unload any previously loaded
+    /// runner so stale settings cannot keep transcribing with an old model.
+    pub async fn set_model_path_error(&self, error: ModelPathError) {
+        *self.model_error.write().unwrap() = Some(error.clone());
+        if let Some(path) = error.path.clone() {
+            *self.model_path.write().unwrap() = path;
+        }
+        self.unload_runner().await;
+        tracing::info!("whisper model unavailable, old model unloaded");
+    }
+
+    pub async fn set_model_resolution(&self, result: Result<PathBuf, ModelPathError>) {
+        match result {
+            Ok(path) => self.set_model_path(path).await,
+            Err(error) => self.set_model_path_error(error).await,
+        }
+    }
+
+    async fn unload_runner(&self) {
         let mut state = self.state.lock().await;
         state.runner = None;
         if let Some(handle) = state.unload_handle.take() {
             handle.abort();
         }
-        tracing::info!("whisper model path updated, old model unloaded");
     }
 
     #[cfg(test)]
@@ -402,6 +460,9 @@ impl LazyWhisperTranscriber {
         on_progress: ProgressSink,
     ) -> Result<Transcript, CoreError> {
         let prefs = self.prefs.read().unwrap().clone();
+        if let Some(error) = self.model_error.read().unwrap().clone() {
+            return Err(model_path_error_to_core(error));
+        }
         let model_path = self.model_path.read().unwrap().clone();
 
         // --- 1. ACQUIRE ---
@@ -441,6 +502,10 @@ impl LazyWhisperTranscriber {
     }
 }
 
+fn model_path_error_to_core(error: ModelPathError) -> CoreError {
+    CoreError::Transcription(format!("{}: {}", error.code.as_str(), error.message))
+}
+
 #[async_trait]
 impl Transcriber for LazyWhisperTranscriber {
     async fn transcribe(&self, audio_path: &Path) -> Result<Transcript, CoreError> {
@@ -471,6 +536,7 @@ impl Drop for LazyWhisperTranscriber {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcription_models::{ModelPathError, ModelPathErrorCode};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
@@ -540,6 +606,14 @@ mod tests {
 
     fn default_prefs() -> TranscriberPrefs {
         TranscriberPrefs::default()
+    }
+
+    fn model_error(code: ModelPathErrorCode, path: Option<PathBuf>) -> ModelPathError {
+        ModelPathError {
+            code,
+            path,
+            message: code.as_str().to_string(),
+        }
     }
 
     // TC-001: первый вызов загружает модель
@@ -793,6 +867,68 @@ mod tests {
             2,
             "должна быть загрузка новой модели"
         );
+    }
+
+    #[tokio::test]
+    async fn unavailable_model_fails_before_loading_runner() {
+        let load_count = Arc::new(AtomicUsize::new(0));
+        let t = LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/model-a.bin"),
+            factory_ok(load_count.clone()),
+            default_prefs(),
+        );
+        t.set_model_path_error(model_error(ModelPathErrorCode::ModelNotSelected, None))
+            .await;
+
+        let err = t.transcribe(audio()).await.unwrap_err();
+
+        assert_eq!(load_count.load(Ordering::SeqCst), 0);
+        assert!(err.to_string().contains("model_not_selected"));
+    }
+
+    #[tokio::test]
+    async fn unavailable_model_unloads_stale_runner() {
+        let load_count = Arc::new(AtomicUsize::new(0));
+        let t = LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/model-a.bin"),
+            factory_ok(load_count.clone()),
+            default_prefs(),
+        );
+        t.transcribe(audio()).await.unwrap();
+        assert!(t.ctx_is_loaded().await);
+
+        t.set_model_path_error(model_error(
+            ModelPathErrorCode::ModelMissing,
+            Some(PathBuf::from("/missing/ggml-base.bin")),
+        ))
+        .await;
+        let err = t.transcribe(audio()).await.unwrap_err();
+
+        assert!(!t.ctx_is_loaded().await);
+        assert_eq!(
+            load_count.load(Ordering::SeqCst),
+            1,
+            "stale runner must be unloaded and the missing model must not load"
+        );
+        assert!(err.to_string().contains("model_missing"));
+    }
+
+    #[tokio::test]
+    async fn set_model_path_clears_unavailable_state() {
+        let load_count = Arc::new(AtomicUsize::new(0));
+        let t = LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/model-a.bin"),
+            factory_ok(load_count.clone()),
+            default_prefs(),
+        );
+        t.set_model_path_error(model_error(ModelPathErrorCode::ModelNotSelected, None))
+            .await;
+
+        t.set_model_path(PathBuf::from("/model-b.bin")).await;
+        t.transcribe(audio()).await.unwrap();
+
+        assert_eq!(load_count.load(Ordering::SeqCst), 1);
+        assert_eq!(t.current_model_path(), PathBuf::from("/model-b.bin"));
     }
 }
 

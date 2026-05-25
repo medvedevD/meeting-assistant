@@ -43,9 +43,10 @@ impl AppSettingsService {
             settings.transcriber.beam_size,
             settings.transcriber.n_threads,
         ));
-        if let Ok(model) = resolve_transcription_model_path(settings) {
-            self.handles.transcriber.set_model_path(model).await;
-        }
+        self.handles
+            .transcriber
+            .set_model_resolution(resolve_transcription_model_path(settings))
+            .await;
         if let Some(prompts) = &settings.paths.prompts {
             self.handles.templates.set_dir(prompts);
         }
@@ -88,6 +89,7 @@ impl SettingsService for AppSettingsService {
                 "model_source": s.transcriber.model_source,
                 "model_id": s.transcriber.model_id,
                 "custom_model_path": s.transcriber.custom_model_path,
+                "custom_models": s.transcriber.custom_models,
                 "model_path": s.transcriber.custom_model_path,
             },
             "llm": {

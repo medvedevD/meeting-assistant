@@ -38,6 +38,12 @@ function describe(errorClass, rawMessage) {
             hint: "Укажите корректный путь к файлу модели в настройках транскрайбера.",
             settings: true
         }
+    case "model_not_selected":
+        return {
+            title: "Модель Whisper не выбрана",
+            hint: "Выберите модель транскрипции в настройках.",
+            settings: true
+        }
     case "worker_killed":
         return {
             title: "Обработка прервана",

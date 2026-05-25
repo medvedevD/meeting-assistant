@@ -6,6 +6,10 @@ import MeetingAssistant
 SpinBox {
     id: control
 
+    implicitWidth: Math.max(background.implicitWidth,
+                            contentItem.implicitWidth + leftPadding + rightPadding)
+    implicitHeight: background.implicitHeight
+
     font.family: Theme.fontUi
     font.pixelSize: Theme.fsBodyLg
     font.weight: Theme.wRegular
@@ -49,7 +53,8 @@ SpinBox {
         x: control.width - 34
         y: 1
         implicitWidth: 33
-        implicitHeight: Math.floor((control.height - 2) / 2)
+        implicitHeight: 18
+        height: Math.floor((control.height - 2) / 2)
         color: control.up.pressed ? Theme.paper4
              : control.up.hovered ? Theme.paper3 : "transparent"
         radius: Theme.rSm
@@ -66,7 +71,8 @@ SpinBox {
         x: control.width - 34
         y: Math.ceil(control.height / 2)
         implicitWidth: 33
-        implicitHeight: Math.floor((control.height - 2) / 2)
+        implicitHeight: 18
+        height: Math.floor((control.height - 2) / 2)
         color: control.down.pressed ? Theme.paper4
              : control.down.hovered ? Theme.paper3 : "transparent"
         radius: Theme.rSm

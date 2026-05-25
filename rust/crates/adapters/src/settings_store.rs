@@ -63,6 +63,17 @@ pub struct PersistedTranscriberPrefs {
         skip_serializing_if = "Option::is_none"
     )]
     pub custom_model_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_models: Vec<CustomTranscriptionModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CustomTranscriptionModel {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -81,6 +92,8 @@ struct PersistedTranscriberPrefsWire {
     custom_model_path: Option<String>,
     #[serde(default, deserialize_with = "empty_string_as_none")]
     model_path: Option<String>,
+    #[serde(default)]
+    custom_models: Vec<CustomTranscriptionModel>,
 }
 
 impl<'de> Deserialize<'de> for PersistedTranscriberPrefs {
@@ -96,6 +109,7 @@ impl<'de> Deserialize<'de> for PersistedTranscriberPrefs {
             model_source: wire.model_source,
             model_id: wire.model_id,
             custom_model_path: wire.custom_model_path.or(wire.model_path),
+            custom_models: wire.custom_models,
         })
     }
 }
@@ -129,6 +143,7 @@ impl Default for PersistedTranscriberPrefs {
             model_source: TranscriptionModelSource::Managed,
             model_id: None,
             custom_model_path: None,
+            custom_models: Vec::new(),
         }
     }
 }
@@ -144,7 +159,44 @@ impl PersistedTranscriberPrefs {
         if self.custom_model_path.is_some() && self.model_id.is_none() {
             self.model_source = TranscriptionModelSource::CustomPath;
         }
+        if let Some(path) = self.custom_model_path.clone() {
+            self.ensure_custom_model_for_path(&path);
+        }
     }
+
+    fn ensure_custom_model_for_path(&mut self, path: &str) {
+        if self.custom_models.iter().any(|model| model.path == path) {
+            return;
+        }
+        self.custom_models.push(CustomTranscriptionModel {
+            id: custom_model_id(path),
+            name: custom_model_name(path),
+            path: path.to_string(),
+            description: None,
+        });
+    }
+}
+
+fn custom_model_id(path: &str) -> String {
+    let mut id = String::from("custom-");
+    for b in path.as_bytes() {
+        id.push_str(&format!("{b:02x}"));
+    }
+    id
+}
+
+fn custom_model_name(path: &str) -> String {
+    let filename = PathBuf::from(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Custom model")
+        .to_string();
+    filename
+        .strip_prefix("ggml-")
+        .unwrap_or(&filename)
+        .strip_suffix(".bin")
+        .unwrap_or_else(|| filename.strip_prefix("ggml-").unwrap_or(&filename))
+        .to_string()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -487,6 +539,36 @@ mod tests {
         assert_eq!(
             settings.transcriber.custom_model_path.as_deref(),
             Some("/legacy/ggml-base.bin")
+        );
+    }
+
+    #[test]
+    fn custom_model_path_is_added_to_custom_models_list() {
+        let settings: PersistedSettings = serde_json::from_str(
+            r#"{
+                "paths": {},
+                "recording": { "source": "mic", "echo_cancel": false },
+                "transcriber": {
+                    "language": "ru",
+                    "beam_size": 1,
+                    "n_threads": 0,
+                    "custom_model_path": "/models/ggml-large-v3-turbo-q5_0.bin",
+                    "custom_models": []
+                }
+            }"#,
+        )
+        .expect("settings JSON should parse");
+
+        let settings = settings.normalize();
+
+        assert_eq!(settings.transcriber.custom_models.len(), 1);
+        assert_eq!(
+            settings.transcriber.custom_models[0].path,
+            "/models/ggml-large-v3-turbo-q5_0.bin"
+        );
+        assert_eq!(
+            settings.transcriber.custom_models[0].name,
+            "large-v3-turbo-q5_0"
         );
     }
 }

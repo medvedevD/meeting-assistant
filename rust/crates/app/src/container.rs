@@ -104,8 +104,18 @@ impl Container {
 
         // Effective paths: a settings override wins over the passed default. (db
         // and recordings overrides are restart-required and applied at boot.)
-        let model = resolve_transcription_model_path(&settings)
-            .unwrap_or_else(|_| model_path.to_path_buf());
+        let model_resolution = resolve_transcription_model_path(&settings);
+        let model = model_resolution
+            .as_ref()
+            .ok()
+            .cloned()
+            .or_else(|| {
+                model_resolution
+                    .as_ref()
+                    .err()
+                    .and_then(|error| error.path.clone())
+            })
+            .unwrap_or_else(|| model_path.to_path_buf());
         let prompts = settings
             .paths
             .prompts
@@ -119,7 +129,10 @@ impl Container {
             settings.transcriber.beam_size,
             settings.transcriber.n_threads,
         );
-        let transcriber_handle = Arc::new(LazyWhisperTranscriber::new(model, prefs));
+        let transcriber_handle = Arc::new(match model_resolution {
+            Ok(_) => LazyWhisperTranscriber::new(model, prefs),
+            Err(error) => LazyWhisperTranscriber::new_unavailable(model, error, prefs),
+        });
         let transcriber: Arc<dyn Transcriber> = transcriber_handle.clone();
 
         let db = Db::open(db_path)?;

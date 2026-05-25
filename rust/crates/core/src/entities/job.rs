@@ -106,6 +106,7 @@ pub enum ErrorClass {
     ApiAuth,
     NetworkTimeout,
     WorkerKilled,
+    ModelNotSelected,
     ModelMissing,
     Unknown,
 }
@@ -118,6 +119,7 @@ impl ErrorClass {
             Self::ApiAuth => "api_auth",
             Self::NetworkTimeout => "network_timeout",
             Self::WorkerKilled => "worker_killed",
+            Self::ModelNotSelected => "model_not_selected",
             Self::ModelMissing => "model_missing",
             Self::Unknown => "unknown",
         }
@@ -130,6 +132,7 @@ impl ErrorClass {
             "api_auth" => Some(Self::ApiAuth),
             "network_timeout" => Some(Self::NetworkTimeout),
             "worker_killed" => Some(Self::WorkerKilled),
+            "model_not_selected" => Some(Self::ModelNotSelected),
             "model_missing" => Some(Self::ModelMissing),
             "unknown" => Some(Self::Unknown),
             _ => None,
@@ -151,15 +154,22 @@ impl ErrorClass {
             // The Whisper loader reports a model-load failure as a
             // `Transcription` error with this signature (RU/EN). Anything else
             // from transcription is an audio/decoding problem we can't pin down.
+            Transcription(m) if is_model_not_selected(m) => Self::ModelNotSelected,
             Transcription(m) if is_model_missing(m) => Self::ModelMissing,
             _ => Self::Unknown,
         }
     }
 }
 
+fn is_model_not_selected(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    m.contains("model_not_selected") || m.contains("model is not selected")
+}
+
 fn is_model_missing(msg: &str) -> bool {
     let m = msg.to_lowercase();
-    m.contains("модель не найдена")
+    m.contains("model_missing")
+        || m.contains("модель не найдена")
         || m.contains("model not found")
         || m.contains("failed to load whisper model")
 }
@@ -248,6 +258,7 @@ mod tests {
             ErrorClass::ApiAuth,
             ErrorClass::NetworkTimeout,
             ErrorClass::WorkerKilled,
+            ErrorClass::ModelNotSelected,
             ErrorClass::ModelMissing,
             ErrorClass::Unknown,
         ] {
@@ -281,6 +292,12 @@ mod tests {
         assert_eq!(
             ErrorClass::from_core_error(&CoreError::WorkerKilled("x".into())),
             ErrorClass::WorkerKilled
+        );
+        assert_eq!(
+            ErrorClass::from_core_error(&CoreError::Transcription(
+                "model_not_selected: transcription model is not selected".into()
+            )),
+            ErrorClass::ModelNotSelected,
         );
         assert_eq!(
             ErrorClass::from_core_error(&CoreError::Transcription(
