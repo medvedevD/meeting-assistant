@@ -282,6 +282,19 @@ impl JobRepo for FakeJobRepo {
             .cloned())
     }
 
+    async fn list_active(&self) -> Result<Vec<Job>, CoreError> {
+        let mut jobs: Vec<Job> = self
+            .store
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|j| matches!(j.status, JobStatus::Pending | JobStatus::Running))
+            .cloned()
+            .collect();
+        jobs.sort_by_key(|j| j.created_at);
+        Ok(jobs)
+    }
+
     async fn claim_pending(&self, now_ts: i64) -> Result<Option<Job>, CoreError> {
         let mut store = self.store.lock().unwrap();
         let idx = store

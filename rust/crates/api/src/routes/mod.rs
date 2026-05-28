@@ -5,6 +5,5 @@ pub mod protocols;
 pub mod recordings;
 pub mod settings;
 pub mod templates;
-pub mod transcribe;
 pub mod transcription_models;
 pub mod version;

@@ -82,6 +82,26 @@ impl JobRepo for SqliteJobRepo {
         .map_err(|e| CoreError::Storage(e.to_string()))
     }
 
+    async fn list_active(&self) -> Result<Vec<Job>, CoreError> {
+        let db = Arc::clone(&self.0);
+
+        tokio::task::spawn_blocking(move || {
+            let conn = db.conn.lock().unwrap();
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {SELECT_COLS} FROM jobs
+                 WHERE status IN ('pending', 'running')
+                 ORDER BY created_at"
+            ))?;
+            let jobs = stmt
+                .query_map([], row_to_job)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok::<_, rusqlite::Error>(jobs)
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+        .map_err(|e| CoreError::Storage(e.to_string()))
+    }
+
     async fn claim_pending(&self, now_ts: i64) -> Result<Option<Job>, CoreError> {
         let db = Arc::clone(&self.0);
 
@@ -339,6 +359,48 @@ mod tests {
             j.error_class,
             Some(meeting_core::entities::ErrorClass::ApiAuth)
         );
+    }
+
+    #[tokio::test]
+    async fn list_active_returns_pending_and_running_oldest_first() {
+        let (mr, jr) = make_repos();
+        let m = insert_meeting(&mr).await;
+
+        // pending (created first), running (claimed), done, failed.
+        let mut pending = Job::new_transcribe(m.id.clone());
+        pending.created_at = 100;
+        jr.enqueue(&pending).await.unwrap();
+
+        let mut running = Job::new_transcribe(m.id.clone());
+        running.created_at = 200;
+        jr.enqueue(&running).await.unwrap();
+        jr.claim_pending(i64::MAX).await.unwrap(); // claims oldest pending → `pending`
+
+        let mut done = Job::new_transcribe(m.id.clone());
+        done.created_at = 300;
+        jr.enqueue(&done).await.unwrap();
+        jr.mark_done(&done.id, 1000).await.unwrap();
+
+        let mut failed = Job::new_transcribe(m.id.clone());
+        failed.created_at = 400;
+        jr.enqueue(&failed).await.unwrap();
+        jr.mark_permanently_failed(&failed.id, "boom", None, 5, 1000)
+            .await
+            .unwrap();
+
+        let active = jr.list_active().await.unwrap();
+        let statuses: Vec<JobStatus> = active.iter().map(|j| j.status.clone()).collect();
+        // `claim_pending` flipped the first-created job to running; the
+        // second stays pending. done/failed are excluded. Order is by created_at.
+        assert_eq!(active.len(), 2);
+        assert_eq!(statuses, vec![JobStatus::Running, JobStatus::Pending]);
+        assert!(active[0].created_at <= active[1].created_at);
+    }
+
+    #[tokio::test]
+    async fn list_active_empty_when_no_jobs() {
+        let (_, jr) = make_repos();
+        assert!(jr.list_active().await.unwrap().is_empty());
     }
 
     #[tokio::test]

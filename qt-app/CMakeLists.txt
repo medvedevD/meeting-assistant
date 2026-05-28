@@ -100,6 +100,12 @@ set_source_files_properties(qml/SettingsStore.qml PROPERTIES
 set_source_files_properties(qml/theme/Theme.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE)
 
+# ActiveJobsStore is the global active-jobs singleton
+# (backlog/active-jobs-store.md): owns one JobPoller per in-flight job so
+# progress survives navigation. Reachable from any screen as `ActiveJobsStore`.
+set_source_files_properties(qml/ActiveJobsStore.qml PROPERTIES
+    QT_QML_SINGLETON_TYPE TRUE)
+
 qt_add_qml_module(meeting-assistant-qt
     URI MeetingAssistant
     VERSION 1.0
@@ -108,6 +114,7 @@ qt_add_qml_module(meeting-assistant-qt
         qml/AppShell.qml
         qml/MeetingStore.qml
         qml/SettingsStore.qml
+        qml/ActiveJobsStore.qml
         qml/Request.qml
         qml/screens/MeetingListScreen.qml
         qml/screens/WelcomeScreen.qml

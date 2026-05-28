@@ -172,3 +172,12 @@ add_test(NAME qt_offscreen_smoke COMMAND tst_smoke)
 set_tests_properties(qt_offscreen_smoke PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;MA_SIDECAR=${MA_SMOKE_SIDECAR}"
     TIMEOUT 180)
+
+# Regression for the transcription-progress-visibility task: QML must not
+# call the (now removed) synchronous POST /api/v1/transcribe shortcut — it
+# produced an indeterminate spinner on long meetings. The transcribe step now
+# goes through POST /api/v1/meetings/:id/reprocess {kind:"transcribe"}, polled
+# by the same PipelineProgress component as the protocol step.
+add_test(NAME qt_no_sync_transcribe_in_qml
+    COMMAND ${CMAKE_COMMAND} -DSEARCH_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../qml
+                             -P ${CMAKE_CURRENT_SOURCE_DIR}/no_sync_transcribe.cmake)

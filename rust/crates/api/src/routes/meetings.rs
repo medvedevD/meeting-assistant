@@ -647,4 +647,62 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
+
+    #[tokio::test]
+    async fn reprocess_transcribe_enqueues_job_and_returns_job_id() {
+        use meeting_core::ports::JobRepo as _;
+
+        let repo = FakeMeetingRepo::new();
+        let m = Meeting::new("Планёрка".into(), PathBuf::from("/recordings/x/audio.wav"));
+        repo.save(&m).await.unwrap();
+
+        let jr = FakeJobRepo::new();
+        let fs = FakeMeetingFileStore::new();
+        let app = make_app_full(
+            std::sync::Arc::clone(&repo),
+            std::sync::Arc::clone(&jr),
+            std::sync::Arc::clone(&fs),
+        );
+
+        let resp = post_json(
+            app,
+            &format!("/api/v1/meetings/{}/reprocess", m.id),
+            serde_json::json!({ "kind": "transcribe" }),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+        let json = body_json(resp).await;
+        let job_id = json["job_id"].as_str().unwrap().to_string();
+
+        let job = jr.find_by_id(&job_id).await.unwrap().expect("job stored");
+        assert!(job.kind.is_transcription());
+        assert_eq!(job.meeting_id, m.id);
+    }
+
+    #[tokio::test]
+    async fn reprocess_transcribe_returns_422_when_audio_was_deleted() {
+        let repo = FakeMeetingRepo::new();
+        // audio_path empty simulates a meeting whose audio was removed via
+        // `DELETE /meetings/:id?mode=audio` — transcript is what's left.
+        let m = Meeting::new("Без аудио".into(), PathBuf::from(""));
+        repo.save(&m).await.unwrap();
+
+        let jr = FakeJobRepo::new();
+        let fs = FakeMeetingFileStore::new();
+        let app = make_app_full(
+            std::sync::Arc::clone(&repo),
+            std::sync::Arc::clone(&jr),
+            std::sync::Arc::clone(&fs),
+        );
+
+        let resp = post_json(
+            app,
+            &format!("/api/v1/meetings/{}/reprocess", m.id),
+            serde_json::json!({ "kind": "transcribe" }),
+        )
+        .await;
+
+        assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
 }

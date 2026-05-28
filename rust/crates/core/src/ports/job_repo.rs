@@ -5,6 +5,9 @@ use async_trait::async_trait;
 pub trait JobRepo: Send + Sync {
     async fn enqueue(&self, job: &Job) -> Result<(), CoreError>;
     async fn find_by_id(&self, id: &str) -> Result<Option<Job>, CoreError>;
+    /// List in-flight jobs (`pending` or `running`), oldest first. Used to seed
+    /// the UI's active-jobs view after an app restart.
+    async fn list_active(&self) -> Result<Vec<Job>, CoreError>;
     /// Atomically claim one pending job whose retry_after <= now_ts.
     async fn claim_pending(&self, now_ts: i64) -> Result<Option<Job>, CoreError>;
     async fn mark_done(&self, id: &str, now_ts: i64) -> Result<(), CoreError>;

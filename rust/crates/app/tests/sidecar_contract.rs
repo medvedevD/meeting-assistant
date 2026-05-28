@@ -278,8 +278,8 @@ fn every_api_route_is_bearer_gated_401_without_token() {
     // (method, path) for each auth-gated route, including the Phase 1–5 additions:
     // settings*, templates*, meetings/{import,scan,:id/reprocess,:id}.
     let routes: &[(&str, &str)] = &[
-        ("POST", "/api/v1/transcribe"),
         ("POST", "/api/v1/jobs"),
+        ("GET", "/api/v1/active-jobs"),
         ("GET", "/api/v1/jobs/abc"),
         ("POST", "/api/v1/protocols"),
         ("POST", "/api/v1/recordings"),

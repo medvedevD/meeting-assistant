@@ -33,8 +33,8 @@ pub fn no_default_template() -> DefaultTemplateFn {
     Arc::new(|| None)
 }
 use crate::routes::{
-    health, jobs, meetings, protocols, recordings, settings, templates, transcribe,
-    transcription_models, version,
+    health, jobs, meetings, protocols, recordings, settings, templates, transcription_models,
+    version,
 };
 use crate::settings_service::SettingsService;
 use crate::template_service::TemplateService;
@@ -137,8 +137,8 @@ pub fn create_server_router(
 
 fn api_routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/api/v1/transcribe", post(transcribe::handle))
         .route("/api/v1/jobs", post(jobs::submit))
+        .route("/api/v1/active-jobs", get(jobs::active))
         .route("/api/v1/jobs/:id", get(jobs::status))
         .route("/api/v1/protocols", post(protocols::generate))
         .route("/api/v1/recordings", post(recordings::start))
@@ -348,8 +348,8 @@ mod tests {
 
     // The API routes the contract requires to be auth-gated.
     const API_ROUTES: &[(&str, &str)] = &[
-        ("POST", "/api/v1/transcribe"),
         ("POST", "/api/v1/jobs"),
+        ("GET", "/api/v1/active-jobs"),
         ("GET", "/api/v1/jobs/abc"),
         ("POST", "/api/v1/protocols"),
         ("POST", "/api/v1/recordings"),

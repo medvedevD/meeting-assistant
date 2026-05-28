@@ -16,7 +16,29 @@ Page {
 
     property string actionNote: ""
 
+    // A job may be active for this meeting (e.g. started on the generation
+    // screen, then navigated here). Mirror ActiveJobsStore so the empty state
+    // yields to live progress instead of falsely claiming "no protocol".
+    readonly property var jobEntry: (ActiveJobsStore.version,
+                                     ActiveJobsStore.entryFor(meetingId))
+    readonly property bool jobActive: jobEntry !== null && jobEntry.terminalAt === 0
+
     background: Rectangle { color: Theme.paper }
+
+    Connections {
+        target: ActiveJobsStore
+        function onJobFinished(meetingId, status, job, kind) {
+            if (meetingId !== scr.meetingId)
+                return
+            scr.store.refresh()
+            if (status === "done")
+                scr.shell.showDetail({
+                    "id": scr.meetingId, "name": scr.meetingName,
+                    "audio_path": scr.audioPath, "has_transcript": true,
+                    "created_at": scr.createdAt
+                })
+        }
+    }
 
     Request {
         id: deleteReq
@@ -142,7 +164,21 @@ Page {
         color: Theme.rule
     }
 
+    // Live progress when a job is running for this meeting.
+    MeetyCard {
+        visible: scr.jobEntry !== null
+        anchors.centerIn: parent
+        width: Math.min(Math.max(parent.width - 64, 280), 520)
+        PipelineProgress {
+            width: parent ? parent.width : 0
+            apiClient: api
+            sourceJob: scr.jobEntry ? scr.jobEntry.job : null
+            onOpenSettings: scr.shell.showSettings()
+        }
+    }
+
     ColumnLayout {
+        visible: scr.jobEntry === null
         anchors.centerIn: parent
         width: Math.min(Math.max(parent.width - 64, 260), 460)
         spacing: 16

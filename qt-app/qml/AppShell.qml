@@ -23,15 +23,19 @@ Item {
     // *before* the ready() signal that drives ApiClient::configure, so listening
     // to state would still fire one tick too early.
     Component.onCompleted: {
-        if (api.configured)
+        if (api.configured) {
             store.refresh()
+            ActiveJobsStore.seedActive()
+        }
     }
 
     Connections {
         target: api
         function onConfiguredChanged() {
-            if (api.configured)
+            if (api.configured) {
                 store.refresh()
+                ActiveJobsStore.seedActive()
+            }
         }
     }
 
@@ -84,6 +88,14 @@ Item {
         selectedId = ""
         stack.pop(null, StackView.Immediate)
         stack.push(diagComp, { "shell": shell }, StackView.Immediate)
+    }
+    function openActiveJobs(anchorItem) {
+        if (activeJobsCount <= 0)
+            return
+        var p = anchorItem.mapToItem(shell, 0, anchorItem.height)
+        activeJobsPopup.x = Math.min(p.x, shell.width - activeJobsPopup.width - 8)
+        activeJobsPopup.y = p.y + 6
+        activeJobsPopup.open()
     }
 
     Component { id: detailComp;   MeetingDetailScreen {} }
@@ -152,6 +164,22 @@ Item {
     readonly property bool noMatches: store.status === "success"
                                       && filteredGroups.length === 0
 
+    // Active-jobs badge. ActiveJobsStore.version is read so these re-evaluate on
+    // every poll tick (track/enqueue/terminal). activeMeetingsList intersects the
+    // store's active set with the loaded meetings, so a job whose meeting is gone
+    // (deleted) is naturally dropped.
+    readonly property int activeJobsCount: (ActiveJobsStore.version,
+                                            ActiveJobsStore.activeCount())
+    readonly property var activeMeetingsList: {
+        ActiveJobsStore.version // dependency for reactivity
+        var out = []
+        var list = store.meetings || []
+        for (var i = 0; i < list.length; ++i)
+            if (ActiveJobsStore.isActive(list[i].id))
+                out.push(list[i])
+        return out
+    }
+
     RowLayout {
         anchors.fill: parent
         spacing: 0
@@ -200,6 +228,47 @@ Item {
                         color: Theme.ink
                     }
                     Item { Layout.fillWidth: true }
+
+                    // active-jobs badge: count of in-flight jobs; click → list
+                    Rectangle {
+                        id: jobsBadge
+                        visible: shell.activeJobsCount > 0
+                        Layout.alignment: Qt.AlignVCenter
+                        implicitHeight: 22
+                        implicitWidth: badgeRow.implicitWidth + 16
+                        radius: 11
+                        color: badgeHover.hovered ? Theme.accent2 : Theme.accent
+                        HoverHandler { id: badgeHover }
+                        TapHandler { onTapped: shell.openActiveJobs(jobsBadge) }
+                        MeetyToolTip {
+                            text: qsTr("Идёт обработка")
+                            visible: badgeHover.hovered
+                        }
+                        RowLayout {
+                            id: badgeRow
+                            anchors.centerIn: parent
+                            spacing: 5
+                            Rectangle {
+                                Layout.alignment: Qt.AlignVCenter
+                                width: 6; height: 6; radius: 3
+                                color: Theme.accentInk
+                                SequentialAnimation on opacity {
+                                    running: jobsBadge.visible
+                                    loops: Animation.Infinite
+                                    NumberAnimation { from: 1.0; to: 0.3; duration: 700 }
+                                    NumberAnimation { from: 0.3; to: 1.0; duration: 700 }
+                                }
+                            }
+                            Text {
+                                text: shell.activeJobsCount
+                                font.family: Theme.fontUi
+                                font.pixelSize: Theme.fsSmall
+                                font.weight: Theme.wSemiBold
+                                color: Theme.accentInk
+                            }
+                        }
+                    }
+
                     MeetyIconButton {
                         iconName: "arrow-left"
                         iconSize: 15
@@ -241,6 +310,30 @@ Item {
                         MeetyToolTip { text: qsTr("Развернуть сайдбар"); visible: brandHover.hovered }
                     }
 
+                    // active-jobs badge (compact): count circle, click → list
+                    Rectangle {
+                        id: jobsBadgeCompact
+                        visible: shell.activeJobsCount > 0
+                        Layout.alignment: Qt.AlignHCenter
+                        implicitWidth: 24; implicitHeight: 24
+                        radius: 12
+                        color: badgeCompactHover.hovered ? Theme.accent2 : Theme.accent
+                        HoverHandler { id: badgeCompactHover }
+                        TapHandler { onTapped: shell.openActiveJobs(jobsBadgeCompact) }
+                        MeetyToolTip {
+                            text: qsTr("Идёт обработка")
+                            visible: badgeCompactHover.hovered
+                            placement: "right"
+                        }
+                        Text {
+                            anchors.centerIn: parent
+                            text: shell.activeJobsCount
+                            font.family: Theme.fontUi
+                            font.pixelSize: Theme.fsSmall
+                            font.weight: Theme.wSemiBold
+                            color: Theme.accentInk
+                        }
+                    }
                     MeetyIconButton {
                         Layout.alignment: Qt.AlignHCenter
                         iconName: "plus"
@@ -373,6 +466,11 @@ Item {
                                                 modelData.has_transcript === true
                                             readonly property string compactLabel:
                                                 shell.compactInitials(modelData.name)
+                                            // Live job for this meeting (ActiveJobsStore.version
+                                            // forces re-evaluation on every poll tick).
+                                            readonly property bool inWork:
+                                                (ActiveJobsStore.version,
+                                                 ActiveJobsStore.isActive(modelData.id))
 
                                             Layout.fillWidth: true
                                             Layout.leftMargin: shell.sidebarCompact ? 18 : 8
@@ -433,6 +531,23 @@ Item {
                                                 color: Theme.ink2
                                             }
 
+                                            // in-work dot (compact mode only)
+                                            Rectangle {
+                                                visible: shell.sidebarCompact && row.inWork
+                                                anchors.right: parent.right
+                                                anchors.top: parent.top
+                                                anchors.rightMargin: 8
+                                                anchors.topMargin: 8
+                                                width: 7; height: 7; radius: 3.5
+                                                color: Theme.accent
+                                                SequentialAnimation on opacity {
+                                                    running: shell.sidebarCompact && row.inWork
+                                                    loops: Animation.Infinite
+                                                    NumberAnimation { from: 1.0; to: 0.3; duration: 700 }
+                                                    NumberAnimation { from: 0.3; to: 1.0; duration: 700 }
+                                                }
+                                            }
+
                                             RowLayout {
                                                 id: rowContent
                                                 visible: !shell.sidebarCompact
@@ -457,14 +572,30 @@ Item {
                                                                      : Theme.wMedium
                                                         color: Theme.ink
                                                     }
-                                                    Text {
-                                                        text: row.hasTx
-                                                              ? qsTr("транскрипт")
-                                                              : qsTr("нет транскрипта")
-                                                        font.family: Theme.fontUi
-                                                        font.pixelSize: 12
-                                                        color: row.hasTx ? Theme.ink3
-                                                                         : Theme.warn
+                                                    RowLayout {
+                                                        Layout.fillWidth: true
+                                                        spacing: 6
+                                                        Rectangle {
+                                                            visible: row.inWork
+                                                            Layout.alignment: Qt.AlignVCenter
+                                                            width: 6; height: 6; radius: 3
+                                                            color: Theme.accent
+                                                            SequentialAnimation on opacity {
+                                                                running: row.inWork
+                                                                loops: Animation.Infinite
+                                                                NumberAnimation { from: 1.0; to: 0.3; duration: 700 }
+                                                                NumberAnimation { from: 0.3; to: 1.0; duration: 700 }
+                                                            }
+                                                        }
+                                                        Text {
+                                                            text: row.inWork ? qsTr("в работе")
+                                                                  : (row.hasTx ? qsTr("транскрипт")
+                                                                               : qsTr("нет транскрипта"))
+                                                            font.family: Theme.fontUi
+                                                            font.pixelSize: 12
+                                                            color: row.inWork ? Theme.accent2
+                                                                   : (row.hasTx ? Theme.ink3 : Theme.warn)
+                                                        }
                                                     }
                                                 }
                                                 Text {
@@ -538,6 +669,106 @@ Item {
             popExit: Transition {}
             replaceEnter: Transition {}
             replaceExit: Transition {}
+        }
+    }
+
+    // ── active-jobs list (opened from the sidebar badge) ─────────────────────
+    Popup {
+        id: activeJobsPopup
+        parent: shell
+        width: 280
+        padding: 4
+        modal: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        // Auto-close if the last job finishes while the list is open.
+        onOpened: if (shell.activeJobsCount <= 0) close()
+
+        background: Rectangle {
+            radius: Theme.rMd
+            color: Theme.paper
+            border.width: 1
+            border.color: Theme.rule
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 1
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: 10
+                Layout.rightMargin: 10
+                Layout.topMargin: 8
+                Layout.bottomMargin: 6
+                MeetySectionLabel { label: qsTr("В работе"); trackingEm: 0.08 }
+                Item { Layout.fillWidth: true }
+                Text {
+                    text: shell.activeMeetingsList.length
+                    font.family: Theme.fontUi
+                    font.pixelSize: Theme.fsMicro
+                    font.weight: Theme.wMedium
+                    color: Theme.ink4
+                }
+            }
+
+            Repeater {
+                model: shell.activeMeetingsList
+                delegate: Rectangle {
+                    id: jobRow
+                    required property var modelData
+                    readonly property var entry:
+                        (ActiveJobsStore.version,
+                         ActiveJobsStore.entryFor(modelData.id))
+                    Layout.fillWidth: true
+                    implicitHeight: 40
+                    radius: Theme.rSm
+                    color: jobRowHover.hovered ? Theme.paper3 : "transparent"
+
+                    HoverHandler { id: jobRowHover }
+                    TapHandler {
+                        onTapped: {
+                            activeJobsPopup.close()
+                            shell.showDetail(jobRow.modelData)
+                        }
+                    }
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        spacing: 8
+                        Rectangle {
+                            Layout.alignment: Qt.AlignVCenter
+                            width: 6; height: 6; radius: 3
+                            color: Theme.accent
+                            SequentialAnimation on opacity {
+                                running: activeJobsPopup.opened
+                                loops: Animation.Infinite
+                                NumberAnimation { from: 1.0; to: 0.3; duration: 700 }
+                                NumberAnimation { from: 0.3; to: 1.0; duration: 700 }
+                            }
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: jobRow.modelData.name
+                            elide: Text.ElideRight
+                            font.family: Theme.fontUi
+                            font.pixelSize: Theme.fsBody
+                            font.weight: Theme.wMedium
+                            color: Theme.ink
+                        }
+                        Text {
+                            text: jobRow.entry && jobRow.entry.kind === "regenerate_protocol"
+                                  ? qsTr("протокол")
+                                  : qsTr("транскрипция")
+                            font.family: Theme.fontUi
+                            font.pixelSize: Theme.fsSmall
+                            color: Theme.ink3
+                        }
+                    }
+                }
+            }
+            Item { Layout.fillWidth: true; implicitHeight: 4 }
         }
     }
 }

@@ -13,9 +13,16 @@ import "../i18n/errors.js" as Errors
 ColumnLayout {
     id: root
 
-    // Required wiring.
+    // Required wiring (self-driven mode): set jobId + apiClient and this owns a
+    // JobPoller. Optional store-driven mode: set `sourceJob` to a snapshot that
+    // someone else (ActiveJobsStore) polls — the internal poller stays off and
+    // `finished` is not emitted (the store owns terminal detection).
     property string jobId: ""
     property var apiClient: null
+    // When defined (incl. null), render this snapshot and do NOT poll. Left
+    // `undefined` (the default) keeps the self-driven JobPoller behaviour.
+    property var sourceJob: undefined
+    readonly property bool storeDriven: sourceJob !== undefined
     // Optional: invoked when the tracked job reaches a terminal state.
     signal finished(string status, var job)
     // Optional: invoked when the user clicks "Открыть настройки".
@@ -23,8 +30,10 @@ ColumnLayout {
 
     spacing: 14
 
-    // Latest decoded job snapshot.
-    property var job: ({})
+    // Latest decoded job snapshot from the internal poller (self-driven mode).
+    property var _polledJob: ({})
+    // Effective snapshot the view renders from.
+    readonly property var job: storeDriven ? (sourceJob || ({})) : _polledJob
     readonly property string status: job.status || "pending"
     readonly property var progress: job.progress || null
     readonly property string stage: progress ? progress.stage : "queued"
@@ -83,20 +92,29 @@ ColumnLayout {
         return qsTr("В работе…")
     }
 
+    // Resets visual state, then either re-arms the poller for the new jobId
+    // or leaves it stopped (jobId === ""). Must clear `root.job` and stop the
+    // poller unconditionally — otherwise swapping jobId mid-flight (e.g. when
+    // the screen chains transcribe → protocol jobs) leaves the previous job's
+    // terminal `status:"done"` visible until the next tick of the new job.
     function start() {
+        terminalEmitted = false
+        root._polledJob = ({})
+        poller.stop()
+        if (root.storeDriven)   // someone else owns the polling
+            return
         if (jobId.length === 0)
             return
-        terminalEmitted = false
         poller.jobId = jobId
         poller.start()
     }
     function stop() { poller.stop() }
 
     function applyJobUpdate(status, j) {
-        root.job = j || ({})
+        root._polledJob = j || ({})
         if ((status === "done" || status === "failed") && !root.terminalEmitted) {
             root.terminalEmitted = true
-            root.finished(status, root.job)
+            root.finished(status, root._polledJob)
         }
     }
 
@@ -111,11 +129,11 @@ ColumnLayout {
             root.applyJobUpdate(status, j)
         }
         onFailed: function (e) {
-            root.job = { "status": "failed", "error_class": "unknown",
-                         "last_error": e }
+            root._polledJob = { "status": "failed", "error_class": "unknown",
+                                "last_error": e }
             if (!root.terminalEmitted) {
                 root.terminalEmitted = true
-                root.finished("failed", root.job)
+                root.finished("failed", root._polledJob)
             }
         }
     }

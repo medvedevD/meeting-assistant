@@ -21,8 +21,11 @@ Page {
     property string protocol: ""
     readonly property bool hasProtocol: protocol.length > 0
 
-    // Active reprocess job (transcribe / protocol). Drives the inline progress.
-    property string activeJobId: ""
+    // Active reprocess job (transcribe / protocol) lives in ActiveJobsStore so it
+    // survives navigation; `version` makes these re-evaluate on every poll.
+    readonly property var jobEntry: (ActiveJobsStore.version,
+                                     ActiveJobsStore.entryFor(meetingId))
+    readonly property bool jobActive: jobEntry !== null && jobEntry.terminalAt === 0
     property string actionNote: ""
 
     background: Rectangle { color: Theme.paper }
@@ -35,15 +38,32 @@ Page {
 
     function reprocess(kind) {
         scr.actionNote = ""
-        reprocessReq.post("/api/v1/meetings/" + meetingId + "/reprocess",
-                          { "kind": kind })
+        ActiveJobsStore.reprocess(meetingId, kind, "")
+    }
+
+    Connections {
+        target: ActiveJobsStore
+        function onJobFinished(meetingId, status, job, kind) {
+            if (meetingId !== scr.meetingId)
+                return
+            scr.store.refresh()
+            if (status === "done") {
+                scr.actionNote = qsTr("Готово.")
+                scr.loadProtocol()
+            }
+        }
+        function onEnqueueFailed(meetingId, error) {
+            if (meetingId === scr.meetingId)
+                scr.actionNote = qsTr("Ошибка: %1").arg(error)
+        }
     }
 
     Request {
         id: protocolReq
         onOk: function (j) {
             scr.protocol = (j && j.protocol) ? j.protocol : ""
-            if (!scr.hasProtocol && scr.shell.selectedId === scr.meetingId)
+            if (!scr.hasProtocol && scr.shell.selectedId === scr.meetingId
+                    && !ActiveJobsStore.isActive(scr.meetingId))
                 scr.shell.showNoProtocol({
                     "id": scr.meetingId, "name": scr.meetingName,
                     "audio_path": scr.audioPath,
@@ -54,11 +74,6 @@ Page {
         onFail: function (s, e) { scr.actionNote = qsTr("Ошибка: %1").arg(e) }
     }
 
-    Request {
-        id: reprocessReq
-        onOk: function (j) { scr.activeJobId = j.job_id }
-        onFail: function (s, e) { scr.actionNote = qsTr("Ошибка: %1").arg(e) }
-    }
     Request {
         id: deleteReq
         onOk: function (j) {
@@ -81,13 +96,13 @@ Page {
         MeetyMenuItem {
             text: qsTr("Перетранскрибировать")
             iconName: "refresh"
-            enabled: scr.audioPath.length > 0 && scr.activeJobId.length === 0
+            enabled: scr.audioPath.length > 0 && !scr.jobActive
             onTriggered: scr.reprocess("transcribe")
         }
         MeetyMenuItem {
             text: qsTr("Перегенерировать протокол")
             iconName: "sparkle"
-            enabled: scr.activeJobId.length === 0
+            enabled: !scr.jobActive
             onTriggered: scr.reprocess("protocol")
         }
         MenuSeparator {}
@@ -210,26 +225,18 @@ Page {
             Layout.fillWidth: true
             Layout.leftMargin: 24
             Layout.rightMargin: 24
-            Layout.topMargin: (scr.activeJobId.length > 0
+            Layout.topMargin: (scr.jobEntry !== null
                                || scr.actionNote.length > 0) ? 16 : 0
             spacing: 10
 
             MeetyCard {
-                visible: scr.activeJobId.length > 0
+                visible: scr.jobEntry !== null
                 Layout.fillWidth: true
                 PipelineProgress {
                     width: parent ? parent.width : 0
                     apiClient: api
-                    jobId: scr.activeJobId
+                    sourceJob: scr.jobEntry ? scr.jobEntry.job : null
                     onOpenSettings: scr.shell.showSettings()
-                    onFinished: function (status, job) {
-                        scr.activeJobId = ""
-                        scr.store.refresh()
-                        if (status === "done") {
-                            scr.actionNote = qsTr("Готово.")
-                            scr.loadProtocol()
-                        }
-                    }
                 }
             }
             Text {
