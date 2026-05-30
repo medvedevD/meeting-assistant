@@ -15,14 +15,7 @@ legacy/.redis.log
 .DS_Store
 .idea/
 .vscode/
-
-# Локальные данные Claude Code
-.claude/
-ARCHITECTURE.md
-1on1-guide.md
-
-# Internal docs (not ready for repo)
-docs/
+.qtcreator/
 
 # Qt migration build outputs (section-07 packaging)
 /dist/

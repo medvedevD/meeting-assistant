@@ -6,18 +6,27 @@ This file is the shared source of repository guidance for both Codex and Claude 
 
 Meeting Assistant is an AI-powered desktop app for recording, transcribing, and generating meeting protocols. It consists of a Rust backend (clean-architecture core + HTTP sidecar binary) and a Qt 6 (QML) desktop UI that talks to the sidecar over loopback HTTP.
 
-## Planning Artifacts
+## Plans & Backlog
 
-All plans, requirements, and PRDs go into `.claude/plans/` in this repo — **one folder per task**, with clear nesting (e.g. `.claude/plans/<task-slug>/prd-v1.0.md`). Never use `docs/prds/`, `.Codex/plans/`, `.agents/plans/`, or ad-hoc locations. Tools or skills that generate planning docs must write to this location, overriding their defaults.
+Planning artifacts live in two top-level locations with an explicit lifecycle:
 
-## Backlog
+- **`backlog/<slug>.md`** — single Markdown file per future idea (kebab-case slug, e.g. `backlog/structured-protocol-rendering.md`). One item per file; no monolithic `BACKLOG.md`.
+- **`plans/active/<task-slug>/`** — folder per task **currently in flight**. Contains the PRD and any related docs (`prd-v1.0.md`, `plan-v1.0.md`, research notes, interview transcripts, etc.).
+- **`plans/done/<task-slug>/`** — same shape as `active/`, archive of plans whose code has shipped to `main`.
 
-Future work that should be tracked but is not yet an active plan goes into
-`backlog/` at the repository root. Use one Markdown file per backlog item, named
-with a short kebab-case slug (for example,
-`backlog/structured-protocol-rendering.md`). Do not use a single monolithic
-`BACKLOG.md`; split items into separate files so each task can grow into its own
-plan later.
+### Lifecycle rules
+
+| Transition | Action |
+|---|---|
+| New small idea | Create `backlog/<slug>.md`. |
+| New large initiative (already prioritized, skips backlog) | Create `plans/active/<slug>/prd-v1.0.md` directly. |
+| Backlog → Active (promotion) | In the same commit: `git mv backlog/<slug>.md plans/active/<slug>/prd-v1.0.md` (or another appropriate doc name). **Never leave the item in both places** — one item, one location. |
+| Active → Done (completion) | When the change is **merged to `main` and the feature works**, `git mv plans/active/<slug> plans/done/<slug>`. Do **not** promote on PR open; only on shipped. |
+| Cancellation | Delete the `backlog/<slug>.md` or `plans/active/<slug>/` in a dedicated commit with a one-line reason in the commit message. Never silently move to `done/`. |
+
+### Forbidden locations
+
+Never use any of: `docs/prds/`, `.Codex/plans/`, `.agents/plans/`, `.claude/plans/`, or ad-hoc top-level files. Tools or skills that generate planning docs must write to `plans/active/<slug>/` (or `backlog/<slug>.md` for a single-file idea), overriding their defaults.
 
 ## Development Commands
 
