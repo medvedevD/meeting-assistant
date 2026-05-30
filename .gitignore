@@ -1,13 +1,3 @@
-# Python virtual environments
-.venv/
-
-# Legacy Python artifacts
-legacy/__pycache__/
-legacy/**/__pycache__/
-legacy/.venv/
-legacy/.pytest_cache/
-legacy/.redis.log
-
 # Logs
 *.log
 
