@@ -1591,6 +1591,7 @@ dependencies = [
  "meeting-adapters",
  "meeting-api",
  "meeting-core",
+ "num_cpus",
  "reqwest",
  "serde",
  "serde_json",

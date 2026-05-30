@@ -104,23 +104,44 @@ impl JobRepo for SqliteJobRepo {
         .map_err(|e| CoreError::Storage(e.to_string()))
     }
 
-    async fn claim_pending(&self, now_ts: i64) -> Result<Option<Job>, CoreError> {
+    async fn claim_pending_kind(
+        &self,
+        kinds: &[JobKind],
+        now_ts: i64,
+    ) -> Result<Option<Job>, CoreError> {
+        if kinds.is_empty() {
+            return Ok(None);
+        }
         let db = Arc::clone(&self.0);
+        let kind_strs: Vec<String> = kinds.iter().map(|k| k.as_str().to_string()).collect();
 
         tokio::task::spawn_blocking(move || {
             let mut conn = db.conn.lock().unwrap();
             let tx = conn.transaction()?;
 
+            // Build `?2, ?3, ?4, …` for the kind IN-list (rusqlite has no
+            // dynamic IN sugar without the `rarray` feature; the list is at
+            // most 3 entries, so an inline build is the simplest path).
+            let placeholders: String = (0..kind_strs.len())
+                .map(|i| format!("?{}", i + 2))
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT {SELECT_COLS} FROM jobs
+                 WHERE status='pending' AND retry_after <= ?1
+                   AND kind IN ({placeholders})
+                 ORDER BY created_at LIMIT 1"
+            );
+
+            let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::with_capacity(1 + kind_strs.len());
+            params.push(Box::new(now_ts));
+            for k in &kind_strs {
+                params.push(Box::new(k.clone()));
+            }
+            let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+
             let mut job = tx
-                .query_row(
-                    &format!(
-                        "SELECT {SELECT_COLS} FROM jobs
-                     WHERE status='pending' AND retry_after <= ?1
-                     ORDER BY created_at LIMIT 1"
-                    ),
-                    [now_ts],
-                    row_to_job,
-                )
+                .query_row(&sql, param_refs.as_slice(), row_to_job)
                 .optional()?;
 
             if let Some(ref mut j) = job {

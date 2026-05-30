@@ -1,5 +1,5 @@
 use crate::{
-    entities::{Job, JobStatus, Meeting, Segment, Transcript},
+    entities::{Job, JobKind, JobStatus, Meeting, Segment, Transcript},
     ports::{
         AudioCapture, CaptureSource, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo,
         TemplateLoader, Transcriber,
@@ -295,11 +295,17 @@ impl JobRepo for FakeJobRepo {
         Ok(jobs)
     }
 
-    async fn claim_pending(&self, now_ts: i64) -> Result<Option<Job>, CoreError> {
+    async fn claim_pending_kind(
+        &self,
+        kinds: &[JobKind],
+        now_ts: i64,
+    ) -> Result<Option<Job>, CoreError> {
         let mut store = self.store.lock().unwrap();
-        let idx = store
-            .iter()
-            .position(|j| j.status == JobStatus::Pending && j.retry_after <= now_ts);
+        let idx = store.iter().position(|j| {
+            j.status == JobStatus::Pending
+                && j.retry_after <= now_ts
+                && kinds.iter().any(|k| k == &j.kind)
+        });
         if let Some(i) = idx {
             store[i].status = JobStatus::Running;
             store[i].updated_at = now_ts;

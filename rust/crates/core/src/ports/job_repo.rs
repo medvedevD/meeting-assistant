@@ -1,5 +1,16 @@
-use crate::{entities::Job, CoreError};
+use crate::{
+    entities::{Job, JobKind},
+    CoreError,
+};
 use async_trait::async_trait;
+
+/// All `JobKind`s. Used by [`JobRepo::claim_pending`] as the unfiltered
+/// shorthand and by tests that don't care which kind they claim.
+pub const ALL_JOB_KINDS: &[JobKind] = &[
+    JobKind::Transcribe,
+    JobKind::ReprocessTranscribe,
+    JobKind::RegenerateProtocol,
+];
 
 #[async_trait]
 pub trait JobRepo: Send + Sync {
@@ -8,8 +19,21 @@ pub trait JobRepo: Send + Sync {
     /// List in-flight jobs (`pending` or `running`), oldest first. Used to seed
     /// the UI's active-jobs view after an app restart.
     async fn list_active(&self) -> Result<Vec<Job>, CoreError>;
-    /// Atomically claim one pending job whose retry_after <= now_ts.
-    async fn claim_pending(&self, now_ts: i64) -> Result<Option<Job>, CoreError>;
+    /// Atomically claim one pending job whose `kind` is in `kinds` and whose
+    /// `retry_after <= now_ts`. The split worker-pool architecture
+    /// ([`plans/active/worker-concurrency-pool`]) uses this to run a
+    /// CPU-bound transcribe worker and an IO-bound protocol worker that each
+    /// claim disjoint kinds.
+    async fn claim_pending_kind(
+        &self,
+        kinds: &[JobKind],
+        now_ts: i64,
+    ) -> Result<Option<Job>, CoreError>;
+    /// Convenience wrapper that claims any kind. Used by tests; production
+    /// workers call [`Self::claim_pending_kind`] with their disjoint filter.
+    async fn claim_pending(&self, now_ts: i64) -> Result<Option<Job>, CoreError> {
+        self.claim_pending_kind(ALL_JOB_KINDS, now_ts).await
+    }
     async fn mark_done(&self, id: &str, now_ts: i64) -> Result<(), CoreError>;
     /// Reset job to pending for a future retry attempt.
     async fn reset_for_retry(

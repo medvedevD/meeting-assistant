@@ -212,7 +212,7 @@ impl Cli {
             }
 
             Command::Serve { port } => {
-                let (_worker, _shutdown) = container.spawn_worker();
+                let _workers = container.spawn_workers().await;
 
                 let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
                 let listener = tokio::net::TcpListener::bind(addr).await?;

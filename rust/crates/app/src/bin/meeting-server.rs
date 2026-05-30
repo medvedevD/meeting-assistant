@@ -154,8 +154,9 @@ async fn run(args: Args) -> Result<()> {
     meeting_adapters::run_recovery(&container.recordings_dir, container.meeting_repo.as_ref())
         .await;
 
-    let (worker_join, worker_shutdown) = container.spawn_worker();
-    let worker_abort = worker_join.abort_handle();
+    let workers = container.spawn_workers().await;
+    let transcribe_abort = workers.transcribe_join.abort_handle();
+    let protocol_abort = workers.protocol_join.abort_handle();
 
     // ── Loopback bind (strict) ────────────────────────────────────────────────
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
@@ -248,14 +249,20 @@ async fn run(args: Args) -> Result<()> {
         .await
         .context("http server error")?;
 
-    // ── Drain the worker, then exit ───────────────────────────────────────────
-    let _ = worker_shutdown.send(());
-    if tokio::time::timeout(Duration::from_millis(1200), worker_join)
-        .await
-        .is_err()
-    {
-        tracing::warn!("worker did not stop within 1.2s — aborting");
-        worker_abort.abort();
+    // ── Drain the workers, then exit ──────────────────────────────────────────
+    let _ = workers.transcribe_shutdown.send(());
+    let _ = workers.protocol_shutdown.send(());
+    let drain = tokio::time::timeout(
+        Duration::from_millis(1200),
+        async {
+            let _ = tokio::join!(workers.transcribe_join, workers.protocol_join);
+        },
+    )
+    .await;
+    if drain.is_err() {
+        tracing::warn!("workers did not stop within 1.2s — aborting");
+        transcribe_abort.abort();
+        protocol_abort.abort();
     }
     tracing::info!("graceful shutdown complete");
     std::process::exit(EXIT_OK);
