@@ -1,7 +1,5 @@
 # Resume In-Flight Jobs On Restart
 
-**Status:** Backlog
-
 ## Context
 
 Если закрыть приложение во время транскрипции или генерации протокола, jobs

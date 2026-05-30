@@ -1,7 +1,5 @@
 # Global Active-Jobs Store
 
-**Status:** Backlog
-
 ## Context
 
 Во время обработки встречи прогресс job‑а живёт как локальный property у

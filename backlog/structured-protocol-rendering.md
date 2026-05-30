@@ -1,7 +1,5 @@
 # Structured Protocol Rendering
 
-**Status:** Backlog
-
 ## Context
 
 During the Qt redesign, `MeetingDetailScreen` received an improved

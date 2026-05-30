@@ -32,6 +32,7 @@ Backlog items (`backlog/<slug>.md`) require only **Problem + Sketch of approach*
 | New small idea | Create `backlog/<slug>.md`. |
 | New large initiative (already prioritized, skips backlog) | Create `plans/active/<slug>/prd-v1.0.md` directly. |
 | Backlog → Active (promotion) | In the same commit: `git mv backlog/<slug>.md plans/active/<slug>/prd-v1.0.md` (or another appropriate doc name). **Never leave the item in both places** — one item, one location. |
+| Backlog → Done (skipped active) | If the implementation shipped before the item was ever promoted to `active/` (work outran the doc — common for backlog items that already contain a near-PRD), the closing commit performs `git mv backlog/<slug>.md plans/done/<slug>/prd-v1.0.md`. Same closing-commit principle as Active → Done; the item skips `active/` entirely. |
 | Active → Done (completion) | Make a small **closing commit** that performs `git mv plans/active/<slug> plans/done/<slug>` after the implementation is committed and the feature works on the working branch. The plan stays in `active/` until this specific commit lands — not when the work is "almost done" or a PR is open, only when the closing commit is made. A later merge to `main` requires no further action — the plan is already in `done/`. |
 | Cancellation | Delete the `backlog/<slug>.md` or `plans/active/<slug>/` in a dedicated commit with a one-line reason in the commit message. Never silently move to `done/`. |
 

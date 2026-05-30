@@ -1,7 +1,5 @@
 # Recording State Visual Exploration
 
-**Status:** Backlog
-
 ## Context
 
 During the Qt redesign, the `NewRecordingScreen` recording state was simplified
