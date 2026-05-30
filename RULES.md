@@ -143,10 +143,6 @@ The `LlmProvider` port is intentionally minimal (`generate(transcript, instructi
 
 VAD is intentionally **not** wired into the Whisper transcriber. `whisper-rs` VAD requires bundling and managing a **separate silero model file**, which adds packaging/notarization surface (an extra signed asset, download/version management) without changing transcription correctness — Whisper's own decoding handles silence acceptably. Given the shipping focus (signing/notarization/updater), the cost outweighs the benefit for now. Revisit only if real recordings show meaningful wasted compute on long silences; if added, plan it as its own task (model acquisition + settings UI for `vad`/`vad_threshold` + transcriber wiring).
 
-## Environment
-
-`ANTHROPIC_API_KEY` must be set for protocol generation. The app shows a warning on startup if missing.
-
 ## Key Files
 
 - [run-qt.sh](run-qt.sh) — main dev workflow script
