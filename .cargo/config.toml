@@ -1,0 +1,22 @@
+# Swift runtime rpath for the macOS ScreenCaptureKit backend (section-05).
+#
+# `meeting-adapters` links the `screencapturekit` crate, whose Swift bridge
+# pulls in the Swift Concurrency runtime (`@rpath/libswift_Concurrency.dylib`,
+# resolved from the dyld shared cache via the `/usr/lib/swift` rpath).
+#
+# That crate's build script emits the rpath via `cargo:rustc-link-arg`, but
+# Cargo does NOT propagate a dependency's `rustc-link-arg` to the dependent
+# binary/test — only to the dependency's own artifacts. So without this,
+# every workspace binary and test that links the adapter fails at load time
+# with `dyld: Library not loaded: @rpath/libswift_Concurrency.dylib`.
+#
+# This file MUST be at the repo root, not rust/.cargo/: Cargo discovers
+# config from the invocation CWD upward, and the documented test command
+# (`cargo test --manifest-path rust/Cargo.toml`, per CLAUDE.md) runs from
+# the repo root — a rust/.cargo/config.toml would never be discovered there.
+#
+# Scoped to macOS only — Linux/Windows builds are unaffected. No RUSTFLAGS
+# env is set anywhere in this repo, so these config rustflags are not
+# clobbered.
+[target.'cfg(target_os = "macos")']
+rustflags = ["-C", "link-arg=-Wl,-rpath,/usr/lib/swift"]

@@ -1,0 +1,104 @@
+name: Qt CI
+
+# Section-08 gate for the Qt migration: both binaries must build and the
+# sidecar-contract, recovery and offscreen-Qt-smoke tests must pass on all
+# three OSes, and the IPC protocol version must stay single-source-of-truth.
+# This is what gates the ship.
+
+on:
+  push:
+    branches:
+      - feat/qt-migration
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Fast, OS-independent gate: Rust PROTOCOL_VERSION == generated C++ kClientProtocol.
+  protocol-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce protocol-version single source of truth
+        run: bash .github/scripts/check-protocol-version.sh
+
+  build-and-test:
+    name: build+test (${{ matrix.os }})
+    needs: protocol-version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            sidecar: rust/target/release/meeting-server
+          - os: macos-latest
+            sidecar: rust/target/release/meeting-server
+          - os: windows-latest
+            sidecar: rust/target/release/meeting-server.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      # cpal needs ALSA headers; reqwest's default-tls needs OpenSSL; the Qt
+      # offscreen platform plugin still dlopens a handful of system libs.
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev pkg-config libssl-dev \
+            libgl1-mesa-dev libegl1 libxkbcommon-dev libxkbcommon-x11-0 \
+            libfontconfig1 libfreetype6 libdbus-1-3 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-xinerama0 libxcb-cursor0
+
+      - name: Install Qt 6.7
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.3'
+          cache: true
+
+      # ── Build the Rust sidecar (the artefact the Qt smoke spawns) ──────────
+      - name: Build meeting-server (release)
+        shell: bash
+        run: cargo build --release --manifest-path rust/Cargo.toml -p meeting-assistant --bin meeting-server
+
+      # ── Rust tests: recovery pass (section-06) + sidecar contract (02) ─────
+      - name: Recovery-pass tests
+        shell: bash
+        run: cargo test --release --manifest-path rust/Cargo.toml -p meeting-adapters recovery
+
+      - name: Sidecar contract tests
+        shell: bash
+        run: cargo test --release --manifest-path rust/Cargo.toml -p meeting-assistant --test sidecar_contract
+
+      # ── Build both: the Qt GUI + the offscreen smoke test ─────────────────
+      # Default per-OS generator (Unix Makefiles on Linux/macOS, Visual Studio
+      # on Windows). `--config Release` / `-C Release` are no-ops for the
+      # single-config generators and required for the VS multi-config one, so
+      # the same recipe works everywhere with no extra build-tool deps.
+      - name: Configure qt-app (tests on)
+        shell: bash
+        run: |
+          cmake -S qt-app -B qt-app/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMA_BUILD_TESTS=ON \
+            -DMA_SMOKE_SIDECAR="$PWD/${{ matrix.sidecar }}" \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+
+      - name: Build qt-app (GUI + tst_smoke)
+        shell: bash
+        run: cmake --build qt-app/build --config Release --parallel
+
+      # ── Offscreen Qt boot smoke (handshake+health+fetch+version-mismatch) ──
+      - name: Offscreen Qt smoke
+        shell: bash
+        run: ctest --test-dir qt-app/build -C Release --output-on-failure

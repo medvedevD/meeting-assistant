@@ -1,0 +1,43 @@
+Meeting Assistant — Qt (LGPLv3) Compliance Notice
+=================================================
+
+This application uses the Qt framework (Qt 6, modules: Qt Quick, Qt Quick
+Controls, Qt Network and their runtime dependencies) under the terms of the
+GNU Lesser General Public License, version 3 (LGPLv3).
+
+How we comply
+-------------
+
+1. Dynamic linking. Qt is linked DYNAMICALLY. We do not statically link any
+   Qt module. The Qt shared libraries/frameworks are shipped beside the
+   application (macOS: MeetingAssistant.app/Contents/Frameworks via
+   macdeployqt; Linux: the AppImage's bundled Qt; Windows: the windeployqt
+   output) and can be replaced by the user with a compatible Qt build.
+
+2. Re-linking right. Because Qt is dynamically linked, you may substitute a
+   modified or different but compatible version of the Qt libraries. On
+   Linux/Windows replace the bundled Qt shared objects/DLLs in place. On
+   macOS, the .app is ad-hoc signed; after replacing a Qt framework re-run
+   `codesign -s - --force` on the changed framework and the .app, or run an
+   unsigned local build.
+
+3. Source code. The complete corresponding source code for the exact version
+   of Qt used in this build is available from The Qt Company:
+
+       https://download.qt.io/official_releases/qt/
+
+   Qt version used by this release: see `Qt-VERSION.txt` next to this file.
+
+4. Written offer. For a period of three years from your receipt of this
+   application, the publisher will, on request, provide the complete
+   corresponding source code of the LGPLv3-covered Qt libraries used here
+   (or a written copy on a physical medium for a charge no more than the
+   cost of distribution) by emailing: codemedvedev@gmail.com
+
+The full Qt licensing text (LGPLv3, and the GPLv3 it incorporates by
+reference, plus the Qt GPL3 exception) is in `Qt-LICENSE.txt` and
+`Qt-LICENSE.GPL3-EXCEPT.txt` alongside this file. The exact Qt version is in
+`Qt-VERSION.txt`.
+
+Nothing in this notice grants rights in the Meeting Assistant application
+itself beyond those required by the LGPLv3 for the Qt libraries.

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Meeting Assistant
+GenericName=Meeting Recorder & Transcriber
+Comment=Record, transcribe, and generate meeting protocols
+Exec=meeting-assistant-qt
+Icon=meeting-assistant
+Terminal=false
+Categories=AudioVideo;Audio;Office;
+Keywords=meeting;transcription;recording;protocol;
