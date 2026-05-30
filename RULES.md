@@ -21,7 +21,7 @@ Planning artifacts live in two top-level locations with an explicit lifecycle:
 | New small idea | Create `backlog/<slug>.md`. |
 | New large initiative (already prioritized, skips backlog) | Create `plans/active/<slug>/prd-v1.0.md` directly. |
 | Backlog → Active (promotion) | In the same commit: `git mv backlog/<slug>.md plans/active/<slug>/prd-v1.0.md` (or another appropriate doc name). **Never leave the item in both places** — one item, one location. |
-| Active → Done (completion) | When the change is **merged to `main` and the feature works**, `git mv plans/active/<slug> plans/done/<slug>`. Do **not** promote on PR open; only on shipped. |
+| Active → Done (completion) | When the implementation is **committed to the current working branch and the feature works as the plan describes**, `git mv plans/active/<slug> plans/done/<slug>`. Trigger is shipped code, not PR-open or "almost done". A later merge to `main` requires no further action — the plan is already in `done/`. |
 | Cancellation | Delete the `backlog/<slug>.md` or `plans/active/<slug>/` in a dedicated commit with a one-line reason in the commit message. Never silently move to `done/`. |
 
 ### Forbidden locations
