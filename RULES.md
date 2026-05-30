@@ -11,8 +11,8 @@ Meeting Assistant is an AI-powered desktop app for recording, transcribing, and 
 Planning artifacts live in two top-level locations with an explicit lifecycle:
 
 - **`backlog/<slug>.md`** — single Markdown file per future idea (kebab-case slug, e.g. `backlog/structured-protocol-rendering.md`). One item per file; no monolithic `BACKLOG.md`.
-- **`plans/active/<task-slug>/`** — folder per task **currently in flight**. Contains the PRD and any related docs (`prd-v1.0.md`, `plan-v1.0.md`, research notes, interview transcripts, etc.).
-- **`plans/done/<task-slug>/`** — same shape as `active/`, archive of plans whose code has shipped to `main`.
+- **`plans/active/<task-slug>/`** — folder per task **currently in flight**. Contains the PRD and any related docs (`prd-v1.0.md`, `plan-v1.0.md`, research notes, interview transcripts, etc.). Every plan **must list as its final step**: "make the closing commit that performs `git mv plans/active/<slug> plans/done/<slug>`". Until that commit lands, the plan stays in `active/` — regardless of how done the feature looks.
+- **`plans/done/<task-slug>/`** — same shape as `active/`, archive of plans whose closing commit has landed.
 
 ### Lifecycle rules
 
@@ -21,7 +21,7 @@ Planning artifacts live in two top-level locations with an explicit lifecycle:
 | New small idea | Create `backlog/<slug>.md`. |
 | New large initiative (already prioritized, skips backlog) | Create `plans/active/<slug>/prd-v1.0.md` directly. |
 | Backlog → Active (promotion) | In the same commit: `git mv backlog/<slug>.md plans/active/<slug>/prd-v1.0.md` (or another appropriate doc name). **Never leave the item in both places** — one item, one location. |
-| Active → Done (completion) | When the implementation is **committed to the current working branch and the feature works as the plan describes**, `git mv plans/active/<slug> plans/done/<slug>`. Trigger is shipped code, not PR-open or "almost done". A later merge to `main` requires no further action — the plan is already in `done/`. |
+| Active → Done (completion) | Make a small **closing commit** that performs `git mv plans/active/<slug> plans/done/<slug>` after the implementation is committed and the feature works on the working branch. The plan stays in `active/` until this specific commit lands — not when the work is "almost done" or a PR is open, only when the closing commit is made. A later merge to `main` requires no further action — the plan is already in `done/`. |
 | Cancellation | Delete the `backlog/<slug>.md` or `plans/active/<slug>/` in a dedicated commit with a one-line reason in the commit message. Never silently move to `done/`. |
 
 ### Forbidden locations
