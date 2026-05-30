@@ -11,8 +11,19 @@ Meeting Assistant is an AI-powered desktop app for recording, transcribing, and 
 Planning artifacts live in two top-level locations with an explicit lifecycle:
 
 - **`backlog/<slug>.md`** — single Markdown file per future idea (kebab-case slug, e.g. `backlog/structured-protocol-rendering.md`). One item per file; no monolithic `BACKLOG.md`.
-- **`plans/active/<task-slug>/`** — folder per task **currently in flight**. Contains the PRD and any related docs (`prd-v1.0.md`, `plan-v1.0.md`, research notes, interview transcripts, etc.). Every plan **must list as its final step**: "make the closing commit that performs `git mv plans/active/<slug> plans/done/<slug>`". Until that commit lands, the plan stays in `active/` — regardless of how done the feature looks.
+- **`plans/active/<task-slug>/`** — folder per task **currently in flight**. Contains the PRD and any related docs (`prd-v1.0.md`, `plan-v1.0.md`, research notes, interview transcripts, etc.).
 - **`plans/done/<task-slug>/`** — same shape as `active/`, archive of plans whose closing commit has landed.
+
+### Plan content
+
+Every plan in `plans/active/<slug>/` must contain at minimum:
+
+1. **Problem** — what's broken or missing (1–3 sentences).
+2. **Scope** — explicit in/out lists; bound the change.
+3. **Deliverables** — file-level change list + test plan.
+4. **Closing step** — final task: "make the closing commit that performs `git mv plans/active/<slug> plans/done/<slug>`".
+
+Backlog items (`backlog/<slug>.md`) require only **Problem + Sketch of approach** (a paragraph or two). They graduate into the structure above when promoted to `active/`.
 
 ### Lifecycle rules
 
