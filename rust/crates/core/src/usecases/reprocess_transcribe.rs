@@ -7,10 +7,17 @@ use std::sync::Arc;
 
 /// Re-transcribe an existing meeting: clear the stale transcript + protocol,
 /// then enqueue a fresh transcription job (the worker re-runs Whisper).
+///
+/// When `then_protocol` is set, the job is flagged so the worker enqueues a
+/// protocol job on success (carrying `template_name`); this is how the
+/// "transcribe → protocol" generation flow chains its two steps without relying
+/// on client-side state that would be lost across a restart.
 pub async fn reprocess_transcribe(
     meeting_repo: Arc<dyn MeetingRepo>,
     job_repo: Arc<dyn JobRepo>,
     meeting_id: &str,
+    then_protocol: bool,
+    template_name: Option<String>,
 ) -> Result<Job, CoreError> {
     let meeting = meeting_repo
         .find_by_id(meeting_id)
@@ -26,7 +33,9 @@ pub async fn reprocess_transcribe(
     meeting_repo.clear_transcript(meeting_id).await?;
     meeting_repo.clear_protocol(meeting_id).await?;
 
-    let job = Job::new_reprocess_transcribe(meeting_id.to_string());
+    let mut job = Job::new_reprocess_transcribe(meeting_id.to_string());
+    job.then_protocol = then_protocol;
+    job.template_name = template_name;
     job_repo.enqueue(&job).await?;
     Ok(job)
 }
@@ -51,14 +60,39 @@ mod tests {
             Arc::clone(&mr) as Arc<dyn MeetingRepo>,
             Arc::clone(&jr) as Arc<dyn JobRepo>,
             &m.id,
+            false,
+            None,
         )
         .await
         .unwrap();
 
         assert!(job.kind.is_transcription());
+        assert!(!job.then_protocol);
         let after = mr.find_by_id(&m.id).await.unwrap().unwrap();
         assert!(after.transcript_text.is_none());
         assert!(after.protocol_text.is_none());
+    }
+
+    #[tokio::test]
+    async fn then_protocol_flag_and_template_carried_onto_job() {
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+
+        let job = reprocess_transcribe(
+            Arc::clone(&mr) as Arc<dyn MeetingRepo>,
+            Arc::clone(&jr) as Arc<dyn JobRepo>,
+            &m.id,
+            true,
+            Some("Командная встреча".into()),
+        )
+        .await
+        .unwrap();
+
+        assert!(job.kind.is_transcription());
+        assert!(job.then_protocol);
+        assert_eq!(job.template_name.as_deref(), Some("Командная встреча"));
     }
 
     #[tokio::test]
@@ -69,6 +103,8 @@ mod tests {
             Arc::clone(&mr) as Arc<dyn MeetingRepo>,
             Arc::clone(&jr) as Arc<dyn JobRepo>,
             "nope",
+            false,
+            None,
         )
         .await
         .unwrap_err();

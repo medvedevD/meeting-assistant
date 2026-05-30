@@ -200,6 +200,10 @@ pub struct ReprocessRequest {
     /// "transcribe" | "protocol".
     pub kind: String,
     pub template_name: Option<String>,
+    /// For `kind == "transcribe"`: also generate the protocol once the
+    /// transcript is ready (the generation flow's two-step chain). The worker
+    /// enqueues the protocol job on success, so the chain survives a restart.
+    pub then_protocol: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -214,10 +218,21 @@ pub async fn reprocess(
 ) -> Result<(StatusCode, Json<JobIdResponse>), (StatusCode, String)> {
     let job = match req.kind.as_str() {
         "transcribe" => {
+            let then_protocol = req.then_protocol.unwrap_or(false);
+            // Resolve the configured default template now (decision #3) so the
+            // chained protocol job the worker enqueues carries a ready name.
+            // Only meaningful when chaining; the transcription step ignores it.
+            let template_name = if then_protocol {
+                req.template_name.or_else(|| (state.default_template)())
+            } else {
+                None
+            };
             reprocess_transcribe(
                 Arc::clone(&state.meeting_repo),
                 Arc::clone(&state.job_repo),
                 &id,
+                then_protocol,
+                template_name,
             )
             .await
         }

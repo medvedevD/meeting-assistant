@@ -5,8 +5,14 @@
 //
 // A screen reads entryFor(meetingId)/isActive(meetingId) and feeds the cached
 // `job` snapshot into a PipelineProgress in `sourceJob` mode (no second poller).
-// Enqueue + the transcribe -> protocol chain live here, not on the generation
-// screen, so the chain keeps going even when that screen is gone.
+//
+// The transcribe -> protocol chain is owned by the BACKEND: the generation flow
+// posts the transcribe job with `then_protocol`, and the worker enqueues the
+// protocol job on success. That keeps the chain alive even if the app restarts
+// mid-transcription. The client's only job is to FOLLOW the chain: when a
+// transcription job finishes, it adopts whatever follow-up job the backend
+// enqueued for that meeting (via /active-jobs) so the visible progress moves
+// straight on to the protocol step without flashing a "no protocol" state.
 pragma Singleton
 import QtQuick
 import MeetingAssistant
@@ -15,9 +21,10 @@ QtObject {
     id: store
 
     // meetingId -> entry:
-    //   { jobId, kind, status, job, terminalAt, templateName, chainToProtocol,
-    //     poller, sweepTimer }
-    // terminalAt is 0 while live, Date.now() once done/failed (then swept).
+    //   { jobId, kind, status, job, terminalAt, poller, sweepTimer }
+    // `kind` is a client label: "transcribe" or "protocol" (backend kinds are
+    // normalized via _clientKind). terminalAt is 0 while live, Date.now() once
+    // done/failed (then swept).
     property var _jobs: ({})
 
     // Bumped on every mutation (including each poll) so bindings that read the
@@ -65,7 +72,7 @@ QtObject {
             return
         if (isActive(meetingId))
             return
-        _onEnqueued(meetingId, jobId, kind || "", "", false)
+        _onEnqueued(meetingId, jobId, _clientKind(kind || ""))
     }
 
     // Fetch in-flight jobs and track each. Call once the API is configured
@@ -93,7 +100,10 @@ QtObject {
         _enqueue(meetingId, kind, templateName, false)
     }
 
-    // Protocol generation: transcribe first when needed, then chain to protocol.
+    // Protocol generation. With a transcript, enqueue the protocol job directly.
+    // Without one, enqueue a transcribe job that asks the backend to chain into
+    // the protocol step on success (then_protocol); the client adopts that
+    // backend-enqueued protocol job when the transcription finishes.
     function startGeneration(meetingId, hasTranscript, templateName) {
         if (hasTranscript === true)
             _enqueue(meetingId, "protocol", templateName, false)
@@ -106,7 +116,16 @@ QtObject {
     // ── internals ────────────────────────────────────────────────────────────
     function _touch() { version = version + 1 }
 
-    function _enqueue(meetingId, kind, templateName, chainToProtocol) {
+    // Normalize a backend JobKind ("transcribe"|"reprocess_transcribe"|
+    // "regenerate_protocol") to the client label the UI reasons about.
+    function _clientKind(k) {
+        return _isTranscribeKind(k) ? "transcribe" : "protocol"
+    }
+    function _isTranscribeKind(k) {
+        return k === "transcribe" || k === "reprocess_transcribe"
+    }
+
+    function _enqueue(meetingId, kind, templateName, thenProtocol) {
         if (!meetingId)
             return
         var req = _reqComp.createObject(store)
@@ -115,8 +134,7 @@ QtObject {
             return
         }
         req.ok.connect(function (j) {
-            store._onEnqueued(meetingId, (j && j.job_id) ? j.job_id : "",
-                              kind, templateName, chainToProtocol)
+            store._onEnqueued(meetingId, (j && j.job_id) ? j.job_id : "", kind)
             req.destroy()
         })
         req.fail.connect(function (s, e) {
@@ -126,10 +144,12 @@ QtObject {
         var body = { "kind": kind }
         if (templateName && templateName.length > 0)
             body["template_name"] = templateName
+        if (thenProtocol === true)
+            body["then_protocol"] = true
         req.post("/api/v1/meetings/" + meetingId + "/reprocess", body)
     }
 
-    function _onEnqueued(meetingId, jobId, kind, templateName, chainToProtocol) {
+    function _onEnqueued(meetingId, jobId, kind) {
         if (!jobId || jobId.length === 0) {
             store.enqueueFailed(meetingId, qsTr("no job id"))
             return
@@ -142,9 +162,7 @@ QtObject {
         }
         var entry = {
             "jobId": jobId, "kind": kind, "status": "pending", "job": ({}),
-            "terminalAt": 0, "templateName": templateName || "",
-            "chainToProtocol": chainToProtocol === true, "poller": poller,
-            "sweepTimer": null
+            "terminalAt": 0, "poller": poller, "sweepTimer": null
         }
         _jobs[meetingId] = entry
         poller.statusChanged.connect(function (s, j) { store._onUpdate(meetingId, s, j) })
@@ -192,15 +210,78 @@ QtObject {
         var e = _jobs[meetingId]
         if (!e || e.terminalAt !== 0)
             return
-        // Chain transcribe -> protocol while a generation is still in flight.
-        // Leave the entry live (terminalAt stays 0) so the UI never flashes a
-        // "no protocol" state between the two jobs.
-        if (status === "done" && e.chainToProtocol && e.kind === "transcribe") {
-            if (e.poller)
-                e.poller.stop()
-            _enqueue(meetingId, "protocol", e.templateName, false)
+        // Stop the finished job's poller first: the adoption lookup below is
+        // async, and a still-running poller would re-emit "done" every tick and
+        // fire it repeatedly.
+        if (e.poller)
+            e.poller.stop()
+        // A successful transcription may have a backend-chained protocol job
+        // (then_protocol). Adopt it so the entry follows the chain without
+        // flashing a "no protocol" state. Self-correcting: if there is no
+        // follow-up (plain re-transcribe), adoption finalizes the entry.
+        if (status === "done" && _isTranscribeKind(e.kind)) {
+            _adoptFollowUp(meetingId, job)
             return
         }
+        _finalize(meetingId, status, job)
+    }
+
+    // Look up the meeting's next in-flight job (the protocol job the worker
+    // enqueued) and re-point this entry's poller at it; finalize if there's none.
+    function _adoptFollowUp(meetingId, transcribeJob) {
+        var req = _reqComp.createObject(store)
+        if (req === null) {
+            _finalize(meetingId, "done", transcribeJob)
+            return
+        }
+        req.ok.connect(function (jobs) {
+            var found = null
+            if (jobs && jobs.length !== undefined)
+                for (var i = 0; i < jobs.length; ++i)
+                    if (jobs[i] && jobs[i].meeting_id === meetingId) {
+                        found = jobs[i]
+                        break
+                    }
+            if (found)
+                store._repoint(meetingId, found.id, found.kind || "")
+            else
+                store._finalize(meetingId, "done", transcribeJob)
+            req.destroy()
+        })
+        req.fail.connect(function (s, e) {
+            store._finalize(meetingId, "done", transcribeJob)
+            req.destroy()
+        })
+        req.get("/api/v1/active-jobs")
+    }
+
+    // Re-point a live entry at a new job id (the chained protocol job), keeping
+    // terminalAt at 0 so the screen stays in its "running" state.
+    function _repoint(meetingId, jobId, backendKind) {
+        var e = _jobs[meetingId]
+        if (!e || e.terminalAt !== 0)
+            return
+        if (e.poller) { e.poller.stop(); e.poller.destroy() }
+        var poller = _pollerComp.createObject(store, { "api": api, "jobId": jobId })
+        if (poller === null) {
+            _finalize(meetingId, "done", e.job)
+            return
+        }
+        _patch(meetingId, {
+            "jobId": jobId, "kind": _clientKind(backendKind),
+            "status": "pending", "job": ({}), "poller": poller
+        })
+        poller.statusChanged.connect(function (s, j) { store._onUpdate(meetingId, s, j) })
+        poller.jobUpdated.connect(function (s, j) { store._onUpdate(meetingId, s, j) })
+        poller.failed.connect(function (er) { store._onPollerFailed(meetingId, er) })
+        poller.start()
+        _touch()
+    }
+
+    function _finalize(meetingId, status, job) {
+        var e = _jobs[meetingId]
+        if (!e || e.terminalAt !== 0)
+            return
         if (e.poller)
             e.poller.stop()
         _patch(meetingId, { "terminalAt": Date.now() })
@@ -213,6 +294,7 @@ QtObject {
         _patch(meetingId, { "sweepTimer": t })
         t.triggered.connect(function () { store.clear(meetingId) })
         t.start()
+        _touch()
     }
 
     function _untrack(meetingId) {

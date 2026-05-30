@@ -29,11 +29,12 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
             .get::<_, Option<String>>(10)?
             .as_deref()
             .and_then(ErrorClass::from_str),
+        then_protocol: row.get::<_, i64>(11)? != 0,
     })
 }
 
 const SELECT_COLS: &str =
-    "id, meeting_id, kind, status, attempts, last_error, retry_after, created_at, updated_at, template_name, error_class";
+    "id, meeting_id, kind, status, attempts, last_error, retry_after, created_at, updated_at, template_name, error_class, then_protocol";
 
 #[async_trait]
 impl JobRepo for SqliteJobRepo {
@@ -46,15 +47,16 @@ impl JobRepo for SqliteJobRepo {
         let created_at = job.created_at;
         let updated_at = job.updated_at;
         let template_name = job.template_name.clone();
+        let then_protocol = job.then_protocol as i64;
 
         let retry_after = job.retry_after;
 
         tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO jobs (id, meeting_id, kind, status, attempts, retry_after, created_at, updated_at, template_name)
-                 VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8)",
-                rusqlite::params![id, meeting_id, kind, status, retry_after, created_at, updated_at, template_name],
+                "INSERT INTO jobs (id, meeting_id, kind, status, attempts, retry_after, created_at, updated_at, template_name, then_protocol)
+                 VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![id, meeting_id, kind, status, retry_after, created_at, updated_at, template_name, then_protocol],
             )
         })
         .await

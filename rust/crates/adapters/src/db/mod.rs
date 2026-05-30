@@ -22,6 +22,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
         5,
         include_str!("../../../../migrations/005_job_error_class.sql"),
     ),
+    (
+        6,
+        include_str!("../../../../migrations/006_job_then_protocol.sql"),
+    ),
 ];
 
 pub struct Db {

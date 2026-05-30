@@ -205,8 +205,13 @@ pub struct Job {
     /// Unix timestamp; 0 means immediately eligible.
     pub retry_after: i64,
     /// Template to use for `RegenerateProtocol`; `None` falls back to the
-    /// built-in default prompt. Ignored by transcription kinds.
+    /// built-in default prompt. For a transcription job with `then_protocol`,
+    /// this carries the template for the protocol job enqueued on success.
     pub template_name: Option<String>,
+    /// When set on a transcription job, the worker enqueues a protocol job once
+    /// the transcript is written. Persists the "transcribe → protocol" chain so
+    /// it survives a client/app restart. Always `false` for protocol jobs.
+    pub then_protocol: bool,
     /// Classified terminal failure (persisted). `None` until the job fails
     /// permanently with a recognizable cause.
     pub error_class: Option<ErrorClass>,
@@ -226,6 +231,7 @@ impl Job {
             last_error: None,
             retry_after: 0,
             template_name,
+            then_protocol: false,
             error_class: None,
             created_at: now,
             updated_at: now,

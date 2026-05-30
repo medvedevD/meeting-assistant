@@ -1,6 +1,6 @@
 use dashmap::DashMap;
 use meeting_core::{
-    entities::{meeting::now_unix, ErrorClass, JobProgress, Meeting, PipelineStage},
+    entities::{meeting::now_unix, ErrorClass, Job, JobProgress, Meeting, PipelineStage},
     ports::{
         JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, ProgressSink, TemplateLoader,
         Transcriber,
@@ -150,6 +150,19 @@ impl Worker {
 
         match result {
             Ok(()) => {
+                // Backend-owned chain: a transcription job flagged `then_protocol`
+                // enqueues the protocol job as soon as the transcript is written,
+                // so the generation flow's second step survives a client restart.
+                // Enqueue before `mark_done` so the protocol job already exists in
+                // the queue by the time a client observes the transcription done.
+                if job.kind.is_transcription() && job.then_protocol {
+                    let proto =
+                        Job::new_regenerate_protocol(job.meeting_id.clone(), job.template_name.clone());
+                    match self.job_repo.enqueue(&proto).await {
+                        Ok(()) => info!(job_id = %job.id, next = %proto.id, "enqueued chained protocol job"),
+                        Err(e) => error!(job_id = %job.id, "failed to enqueue chained protocol job: {e}"),
+                    }
+                }
                 let now = now_unix();
                 if let Err(e) = self.job_repo.mark_done(&job.id, now).await {
                     error!(job_id = %job.id, "mark_done failed: {e}");
@@ -291,5 +304,84 @@ impl Worker {
             // Re-queued; live progress will be re-established on next claim.
             self.clear_progress(&job.id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use meeting_core::entities::{Job, JobKind, JobStatus, Meeting};
+    use meeting_core::fakes::{
+        FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo, FakeTemplateLoader,
+        FakeTranscriber,
+    };
+    use meeting_core::ports::{JobRepo, MeetingRepo};
+    use std::path::PathBuf;
+
+    fn make_worker(jr: Arc<FakeJobRepo>, mr: Arc<FakeMeetingRepo>) -> Worker {
+        Worker::new(
+            jr as Arc<dyn JobRepo>,
+            mr as Arc<dyn MeetingRepo>,
+            FakeTranscriber::new("распознанный текст"),
+            FakeMeetingFileStore::new(),
+            FakeLlmProvider::new("# Протокол"),
+            FakeTemplateLoader::empty(),
+            Arc::new(DashMap::new()),
+        )
+    }
+
+    #[tokio::test]
+    async fn transcription_with_then_protocol_enqueues_protocol_job() {
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+
+        let mut job = Job::new_reprocess_transcribe(m.id.clone());
+        job.then_protocol = true;
+        job.template_name = Some("Командная встреча".into());
+        jr.enqueue(&job).await.unwrap();
+
+        let worker = make_worker(Arc::clone(&jr), Arc::clone(&mr));
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        worker.execute(claimed).await;
+
+        // The transcribe job is done...
+        let t = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert_eq!(t.status, JobStatus::Done);
+        // ...and a protocol job carrying the template was chained on.
+        let proto = jr
+            .list_active()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|j| j.kind == JobKind::RegenerateProtocol)
+            .expect("chained protocol job should be enqueued");
+        assert_eq!(proto.meeting_id, m.id);
+        assert_eq!(proto.template_name.as_deref(), Some("Командная встреча"));
+    }
+
+    #[tokio::test]
+    async fn plain_transcription_does_not_chain_protocol() {
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+
+        let job = Job::new_reprocess_transcribe(m.id.clone()); // then_protocol == false
+        jr.enqueue(&job).await.unwrap();
+
+        let worker = make_worker(Arc::clone(&jr), Arc::clone(&mr));
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        worker.execute(claimed).await;
+
+        assert_eq!(
+            jr.find_by_id(&job.id).await.unwrap().unwrap().status,
+            JobStatus::Done
+        );
+        assert!(
+            jr.list_active().await.unwrap().is_empty(),
+            "no protocol job should be chained for a plain re-transcribe"
+        );
     }
 }

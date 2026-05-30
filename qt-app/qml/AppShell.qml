@@ -758,7 +758,7 @@ Item {
                             color: Theme.ink
                         }
                         Text {
-                            text: jobRow.entry && jobRow.entry.kind === "regenerate_protocol"
+                            text: jobRow.entry && jobRow.entry.kind === "protocol"
                                   ? qsTr("протокол")
                                   : qsTr("транскрипция")
                             font.family: Theme.fontUi
