@@ -1,4 +1,3 @@
-use dashmap::DashMap;
 use meeting_core::{
     entities::{meeting::now_unix, ErrorClass, Job, JobKind, JobProgress, Meeting, PipelineStage},
     ports::{
@@ -17,9 +16,7 @@ use tracing::{error, info, warn};
 const MAX_ATTEMPTS: u32 = 5;
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
-/// Shared, in-memory live-progress table keyed by job id. Never persisted
-/// (decision #11); the `GET /jobs/:id` handler merges it with the DB row.
-pub type LiveProgress = Arc<DashMap<String, JobProgress>>;
+pub use meeting_core::LiveProgress;
 
 /// Kinds the CPU-bound transcribe worker claims.
 pub const TRANSCRIBE_KINDS: &[JobKind] = &[JobKind::Transcribe, JobKind::ReprocessTranscribe];
@@ -370,6 +367,7 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dashmap::DashMap;
     use meeting_core::entities::{Job, JobKind, JobStatus, Meeting};
     use meeting_core::fakes::{
         FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo, FakeTemplateLoader,

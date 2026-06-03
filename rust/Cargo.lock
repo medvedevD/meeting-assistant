@@ -1608,6 +1608,7 @@ name = "meeting-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "dashmap",
  "serde",
  "thiserror 2.0.18",
  "tokio",

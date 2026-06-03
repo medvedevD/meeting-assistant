@@ -7,8 +7,6 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use dashmap::DashMap;
-use meeting_core::entities::JobProgress;
 use meeting_core::ports::{
     AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber,
 };
@@ -16,10 +14,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Live, in-memory job-progress table keyed by job id. Shared with the worker
-/// (the writer); the `GET /jobs/:id` handler reads it. Never persisted
-/// (decision #11).
-pub type LiveProgress = Arc<DashMap<String, JobProgress>>;
+pub use meeting_core::LiveProgress;
 
 /// Resolves the configured `default_template` name when a protocol request
 /// omits one. Decision #3: settings never leak into the core; the API layer

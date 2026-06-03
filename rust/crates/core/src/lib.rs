@@ -2,6 +2,9 @@ pub mod entities;
 pub mod ports;
 pub mod usecases;
 
+mod live;
+pub use live::LiveProgress;
+
 #[cfg(any(test, feature = "fakes"))]
 pub mod fakes;
 
