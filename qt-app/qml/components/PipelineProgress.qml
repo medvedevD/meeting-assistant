@@ -44,7 +44,7 @@ ColumnLayout {
     readonly property bool done: status === "done"
     readonly property int displayPercent: done ? 100 : Math.max(0, Math.min(100, percent))
     readonly property bool indeterminate: !failed && !done
-                                      && (displayPercent === 0 || stage === "queued"
+                                      && (stage === "queued"
                                           || stage === "generating_protocol")
     property bool terminalEmitted: false
 
@@ -261,7 +261,7 @@ ColumnLayout {
                 elide: Text.ElideRight
             }
             Text {
-                visible: root.displayPercent > 0 && !root.indeterminate
+                visible: !root.indeterminate
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 color: Theme.ink3

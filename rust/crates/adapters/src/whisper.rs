@@ -7,6 +7,7 @@ use meeting_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
@@ -149,19 +150,61 @@ fn run_whisper(
     params.set_print_timestamps(false);
 
     // Stream inference progress (0–100) into the live-progress sink, inside the
-    // Transcribing stage. The callback runs on the inference thread.
+    // Transcribing stage. Two feeds merge through a monotonic-up guard so neither
+    // can roll the bar backward:
+    //   1. whisper.cpp's own callback (may fire only 0–1 times on short audio
+    //      with one segment — the bar would otherwise sit at 0% the whole run);
+    //   2. a 500ms synthetic ticker driven by an asymptotic ETA based on the
+    //      audio duration, so the UI shows movement even when (1) is silent.
     on_progress(PipelineStage::Transcribing, 0);
-    {
+    let max_pct = Arc::new(AtomicU8::new(0));
+    let monotonic: ProgressSink = {
         let sink = Arc::clone(on_progress);
+        let mp = Arc::clone(&max_pct);
+        Arc::new(move |stage, p| {
+            let prev = mp.load(Ordering::Relaxed);
+            let m = p.max(prev);
+            mp.store(m, Ordering::Relaxed);
+            sink(stage, m);
+        })
+    };
+    {
+        let mono = Arc::clone(&monotonic);
         params.set_progress_callback_safe(move |p: i32| {
-            sink(PipelineStage::Transcribing, p.clamp(0, 100) as u8);
+            mono(PipelineStage::Transcribing, p.clamp(0, 100) as u8);
         });
     }
 
+    let (tx_stop, rx_stop) = std::sync::mpsc::channel::<()>();
+    let ticker = {
+        let mono = Arc::clone(&monotonic);
+        // Optimistic ETA: typical CPU RTF for whisper-large-v3-turbo is ~1–1.8,
+        // so picking a target shorter than `audio_duration_s` lets the asymptote
+        // reach a "near-done" reading by the time inference actually finishes.
+        // Cap at 99 (not 100) — final 100% is pinned explicitly on success below
+        // so synthetic progress never *claims* completion.
+        let eta_s = (audio_duration_s * 0.7).max(2.0);
+        let started = std::time::Instant::now();
+        std::thread::spawn(move || loop {
+            match rx_stop.recv_timeout(std::time::Duration::from_millis(500)) {
+                Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    let elapsed = started.elapsed().as_secs_f64();
+                    let pct = (99.0 * (1.0 - (-elapsed / eta_s).exp())).round() as u8;
+                    mono(PipelineStage::Transcribing, pct);
+                }
+            }
+        })
+    };
+
     let t = std::time::Instant::now();
-    state
-        .full(params, &samples)
-        .map_err(|e| CoreError::Transcription(e.to_string()))?;
+    let inference_result = state.full(params, &samples);
+    let _ = tx_stop.send(());
+    let _ = ticker.join();
+    inference_result.map_err(|e| CoreError::Transcription(e.to_string()))?;
+    // Pin 100% on successful completion — best-effort closure signal before the
+    // worker transitions to WritingTranscript (which would reset percent to 0).
+    on_progress(PipelineStage::Transcribing, 100);
     let infer_ms = t.elapsed().as_millis();
     let rtf = infer_ms as f64 / 1000.0 / audio_duration_s;
     bench_log(&format!("inference_done  infer_ms={infer_ms} rtf={rtf:.2}"));
