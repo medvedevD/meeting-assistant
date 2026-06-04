@@ -335,7 +335,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: PathBuf::from("/tmp"),
-            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             default_template: crate::router::no_default_template(),
         })
     }
@@ -498,7 +498,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store,
             recordings_dir: PathBuf::from("/recordings"),
-            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             default_template: crate::router::no_default_template(),
         })
     }

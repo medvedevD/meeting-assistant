@@ -69,12 +69,11 @@ mod tests {
     use super::*;
     use crate::entities::{ErrorClass, Job, JobProgress, PipelineStage};
     use crate::fakes::FakeJobRepo;
-    use crate::LiveEntry;
-    use dashmap::DashMap;
+    use crate::{LiveEntry, LiveProgress};
     use tokio_util::sync::CancellationToken;
 
     fn empty_live() -> LiveJobs {
-        Arc::new(DashMap::new())
+        LiveProgress::new()
     }
 
     #[tokio::test]

@@ -5,6 +5,7 @@
 #include <QVariant>
 
 class QNetworkAccessManager;
+class QNetworkReply;
 
 // Thin authenticated HTTP client over the loopback sidecar, exposed to QML.
 //
@@ -33,6 +34,14 @@ public:
     Q_INVOKABLE int put(const QString &path, const QVariantMap &body);
     // DELETE — `del` because `delete` is a C++ keyword. No body.
     Q_INVOKABLE int del(const QString &path);
+
+    // Open an authenticated streaming GET (e.g. an SSE `text/event-stream`
+    // endpoint). Unlike the verbs above, the reply is returned to the caller
+    // with NO finished-handler attached and NO auto-read: the caller owns the
+    // reply, drives it incrementally via readyRead, and deletes it. Returns
+    // nullptr when the client is not yet configured. C++-only (used by
+    // JobPoller); the bearer token never leaves ApiClient.
+    QNetworkReply *streamGet(const QString &path);
 
 signals:
     void configuredChanged();

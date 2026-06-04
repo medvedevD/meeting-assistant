@@ -80,7 +80,7 @@ impl Container {
             audio_capture,
             file_store,
             recordings_dir,
-            progress: Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             settings_handles: None,
         })
     }
@@ -176,7 +176,7 @@ impl Container {
             audio_capture,
             file_store,
             recordings_dir,
-            progress: Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             settings_handles: Some(SettingsHandles {
                 settings_store,
                 secrets,

@@ -68,7 +68,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
-            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             default_template: crate::router::no_default_template(),
         })
     }
@@ -111,7 +111,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
-            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             default_template: crate::router::no_default_template(),
         });
 
@@ -151,7 +151,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
-            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             default_template: crate::router::no_default_template(),
         });
 
@@ -196,7 +196,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
-            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             default_template: std::sync::Arc::new(|| Some("Ретро".to_string())),
         });
 
@@ -237,7 +237,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
-            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             default_template: std::sync::Arc::new(|| Some("Дефолт".to_string())),
         });
 

@@ -281,6 +281,7 @@ fn every_api_route_is_bearer_gated_401_without_token() {
         ("POST", "/api/v1/jobs"),
         ("GET", "/api/v1/active-jobs"),
         ("GET", "/api/v1/jobs/abc"),
+        ("GET", "/api/v1/jobs/abc/events"),
         ("POST", "/api/v1/protocols"),
         ("POST", "/api/v1/recordings"),
         ("POST", "/api/v1/recordings/abc/stop"),

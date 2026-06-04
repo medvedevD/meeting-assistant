@@ -96,30 +96,19 @@ impl Worker {
             .saturating_sub(self.permits.available_permits())
     }
 
-    /// Publish a coarse stage (percent 0) to the live-progress table. Mutates
-    /// the existing entry in-place so the cancellation token survives the
-    /// update; falls back to inserting a fresh entry if the job is not yet
-    /// in the map.
+    /// Publish a coarse stage (percent 0) to the live-progress table. Delegates
+    /// to [`LiveProgress::publish`], which preserves the cancellation token and
+    /// notifies any open SSE stream.
     fn set_stage(&self, job_id: &str, stage: PipelineStage) {
-        let progress = JobProgress::new(stage, stage_sub(stage), 0);
-        match self.progress.get_mut(job_id) {
-            Some(mut entry) => entry.progress = progress,
-            None => {
-                self.progress.insert(
-                    job_id.to_string(),
-                    LiveEntry {
-                        progress,
-                        cancel: CancellationToken::new(),
-                    },
-                );
-            }
-        }
+        self.progress
+            .publish(job_id, JobProgress::new(stage, stage_sub(stage), 0));
     }
 
     /// Drop the live-progress entry once a job reaches a terminal state; the
-    /// `GET /jobs/:id` handler then reports the persisted DB state.
+    /// `GET /jobs/:id` handler then reports the persisted DB state and any open
+    /// SSE stream emits the final status and closes.
     fn clear_progress(&self, job_id: &str) {
-        self.progress.remove(job_id);
+        self.progress.finish(job_id);
     }
 
     /// Main loop. Permit-before-claim: an idle pool never holds rows in
@@ -163,7 +152,7 @@ impl Worker {
                     // so a DELETE /api/v1/jobs/:id arriving in the next tick
                     // finds the token and can signal it. See ADR-002.
                     let cancel = CancellationToken::new();
-                    self.progress.insert(
+                    self.progress.seed(
                         job.id.clone(),
                         LiveEntry {
                             progress: JobProgress::new(
@@ -292,25 +281,14 @@ impl Worker {
     }
 
     /// Build a progress sink that publishes the transcriber's stage/percent
-    /// reports into the live-progress table under this job's id. Mutates the
-    /// existing entry in-place so the cancellation token survives sink calls.
+    /// reports into the live-progress table under this job's id. Delegates to
+    /// [`LiveProgress::publish`], preserving the cancellation token and
+    /// notifying any open SSE stream on every report.
     fn transcribe_sink(&self, job_id: &str) -> ProgressSink {
         let map = Arc::clone(&self.progress);
         let id = job_id.to_string();
         Arc::new(move |stage: PipelineStage, percent: u8| {
-            let progress = JobProgress::new(stage, stage_sub(stage), percent);
-            match map.get_mut(&id) {
-                Some(mut entry) => entry.progress = progress,
-                None => {
-                    map.insert(
-                        id.clone(),
-                        LiveEntry {
-                            progress,
-                            cancel: CancellationToken::new(),
-                        },
-                    );
-                }
-            }
+            map.publish(&id, JobProgress::new(stage, stage_sub(stage), percent));
         })
     }
 
@@ -458,7 +436,6 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dashmap::DashMap;
     use meeting_core::entities::{Job, JobKind, JobStatus, Meeting};
     use meeting_core::fakes::{
         FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo, FakeTemplateLoader,
@@ -475,7 +452,7 @@ mod tests {
             FakeMeetingFileStore::new(),
             FakeLlmProvider::new("# Протокол"),
             FakeTemplateLoader::empty(),
-            Arc::new(DashMap::new()),
+            meeting_core::LiveProgress::new(),
             TRANSCRIBE_KINDS,
             1,
             "transcribe",
@@ -609,7 +586,7 @@ mod tests {
             FakeMeetingFileStore::new(),
             FakeLlmProvider::new("# Протокол"),
             FakeTemplateLoader::empty(),
-            Arc::new(DashMap::new()),
+            meeting_core::LiveProgress::new(),
             TRANSCRIBE_KINDS,
             pool_size,
             "transcribe",
@@ -794,7 +771,7 @@ mod tests {
             FakeMeetingFileStore::new(),
             FakeLlmProvider::new("# Протокол"),
             FakeTemplateLoader::empty(),
-            Arc::new(DashMap::new()),
+            meeting_core::LiveProgress::new(),
             PROTOCOL_KINDS,
             2,
             "protocol",
@@ -964,7 +941,7 @@ mod tests {
             FakeMeetingFileStore::new(),
             llm,
             FakeTemplateLoader::empty(),
-            Arc::new(DashMap::new()),
+            meeting_core::LiveProgress::new(),
             PROTOCOL_KINDS,
             1,
             "protocol",

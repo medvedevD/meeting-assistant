@@ -13,6 +13,4 @@ async-trait = { workspace = true }
 uuid = { workspace = true }
 dashmap = { workspace = true }
 tokio-util = { workspace = true }
-
-[dev-dependencies]
 tokio = { workspace = true }

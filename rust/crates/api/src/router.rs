@@ -137,6 +137,7 @@ fn api_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/v1/jobs", post(jobs::submit))
         .route("/api/v1/active-jobs", get(jobs::active))
+        .route("/api/v1/jobs/:id/events", get(jobs::events))
         .route("/api/v1/jobs/:id", get(jobs::status).delete(jobs::cancel))
         .route("/api/v1/protocols", post(protocols::generate))
         .route("/api/v1/recordings", post(recordings::start))
@@ -333,7 +334,7 @@ mod tests {
                 audio_capture: FakeAudioCapture::new(),
                 file_store: FakeMeetingFileStore::new(),
                 recordings_dir: PathBuf::from("/tmp"),
-                progress: std::sync::Arc::new(dashmap::DashMap::new()),
+                progress: meeting_core::LiveProgress::new(),
                 default_template: super::no_default_template(),
             },
             Arc::new(FakeSettings),
@@ -348,6 +349,7 @@ mod tests {
     const API_ROUTES: &[(&str, &str)] = &[
         ("POST", "/api/v1/jobs"),
         ("GET", "/api/v1/active-jobs"),
+        ("GET", "/api/v1/jobs/abc/events"),
         ("GET", "/api/v1/jobs/abc"),
         ("DELETE", "/api/v1/jobs/abc"),
         ("POST", "/api/v1/protocols"),

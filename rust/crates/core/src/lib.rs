@@ -3,7 +3,7 @@ pub mod ports;
 pub mod usecases;
 
 mod live;
-pub use live::{LiveEntry, LiveJobs};
+pub use live::{LiveEntry, LiveJobs, LiveProgress, ProgressEvent};
 
 #[cfg(any(test, feature = "fakes"))]
 pub mod fakes;
