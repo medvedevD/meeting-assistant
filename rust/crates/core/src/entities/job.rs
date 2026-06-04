@@ -108,6 +108,10 @@ pub enum ErrorClass {
     WorkerKilled,
     ModelNotSelected,
     ModelMissing,
+    /// User-initiated cancellation via `DELETE /api/v1/jobs/:id`. Distinct
+    /// from `WorkerKilled` (process-level termination) and from the retry
+    /// path — see `plans/active/job-cancellation`.
+    Cancelled,
     Unknown,
 }
 
@@ -121,6 +125,7 @@ impl ErrorClass {
             Self::WorkerKilled => "worker_killed",
             Self::ModelNotSelected => "model_not_selected",
             Self::ModelMissing => "model_missing",
+            Self::Cancelled => "cancelled",
             Self::Unknown => "unknown",
         }
     }
@@ -134,6 +139,7 @@ impl ErrorClass {
             "worker_killed" => Some(Self::WorkerKilled),
             "model_not_selected" => Some(Self::ModelNotSelected),
             "model_missing" => Some(Self::ModelMissing),
+            "cancelled" => Some(Self::Cancelled),
             "unknown" => Some(Self::Unknown),
             _ => None,
         }
@@ -151,6 +157,7 @@ impl ErrorClass {
             ApiTimeout(_) | Network(_) => Self::NetworkTimeout,
             AudioCorrupt(_) => Self::AudioCorrupt,
             WorkerKilled(_) => Self::WorkerKilled,
+            Cancelled => Self::Cancelled,
             // The Whisper loader reports a model-load failure as a
             // `Transcription` error with this signature (RU/EN). Anything else
             // from transcription is an audio/decoding problem we can't pin down.
@@ -266,6 +273,7 @@ mod tests {
             ErrorClass::WorkerKilled,
             ErrorClass::ModelNotSelected,
             ErrorClass::ModelMissing,
+            ErrorClass::Cancelled,
             ErrorClass::Unknown,
         ] {
             assert_eq!(ErrorClass::from_str(c.as_str()), Some(c));
@@ -298,6 +306,10 @@ mod tests {
         assert_eq!(
             ErrorClass::from_core_error(&CoreError::WorkerKilled("x".into())),
             ErrorClass::WorkerKilled
+        );
+        assert_eq!(
+            ErrorClass::from_core_error(&CoreError::Cancelled),
+            ErrorClass::Cancelled
         );
         assert_eq!(
             ErrorClass::from_core_error(&CoreError::Transcription(

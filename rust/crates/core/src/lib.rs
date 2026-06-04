@@ -3,7 +3,7 @@ pub mod ports;
 pub mod usecases;
 
 mod live;
-pub use live::LiveProgress;
+pub use live::{LiveEntry, LiveJobs};
 
 #[cfg(any(test, feature = "fakes"))]
 pub mod fakes;
@@ -42,4 +42,6 @@ pub enum CoreError {
     Network(String),
     #[error("worker terminated: {0}")]
     WorkerKilled(String),
+    #[error("cancelled by user")]
+    Cancelled,
 }

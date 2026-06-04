@@ -765,10 +765,64 @@ Item {
                             font.pixelSize: Theme.fsSmall
                             color: Theme.ink3
                         }
+                        // ✕ Cancel affordance — visible on row hover, fires the
+                        // confirmation dialog. Hidden if the user has already
+                        // requested cancel (the row is in transient "Прерывание…"
+                        // state until the poller confirms terminal).
+                        MeetyIconButton {
+                            id: cancelBtn
+                            Layout.alignment: Qt.AlignVCenter
+                            iconName: "close"
+                            visible: jobRowHover.hovered
+                                     && jobRow.entry
+                                     && jobRow.entry.terminalAt === 0
+                                     && jobRow.entry.cancelRequested !== true
+                            onClicked: {
+                                cancelTargetMeetingId = jobRow.modelData.id
+                                cancelTargetMeetingName = jobRow.modelData.name
+                                confirmJobCancel.open()
+                            }
+                            MeetyToolTip { text: qsTr("Прервать"); visible: parent.hovered }
+                        }
                     }
                 }
             }
             Item { Layout.fillWidth: true; implicitHeight: 4 }
+        }
+    }
+
+    // Shared confirm dialog for the active-jobs popup ✕ affordance. State is
+    // a pair of properties on `shell` so any row can re-use the same dialog
+    // instance without each row owning its own.
+    property string cancelTargetMeetingId: ""
+    property string cancelTargetMeetingName: ""
+
+    MeetyDialog {
+        id: confirmJobCancel
+        preferredWidth: 420
+        title: qsTr("Прервать обработку?")
+        onAccepted: if (shell.cancelTargetMeetingId.length > 0)
+                        ActiveJobsStore.cancel(shell.cancelTargetMeetingId)
+
+        Text {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            lineHeight: 1.35
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBodyLg
+            color: Theme.ink2
+            text: shell.cancelTargetMeetingName.length > 0
+                  ? qsTr("Текущая задача для встречи «%1» будет помечена как отменённая.")
+                        .arg(shell.cancelTargetMeetingName)
+                  : qsTr("Текущая задача будет помечена как отменённая.")
+        }
+
+        footer: MeetyDialogActions {
+            dialog: confirmJobCancel
+            cancelText: qsTr("Назад")
+            confirmText: qsTr("Прервать")
+            confirmVariant: "accent"
+            confirmIconName: "close"
         }
     }
 }

@@ -6,7 +6,10 @@ use axum::{
 };
 use meeting_core::{
     entities::{Job, JobProgress},
-    usecases::{get_job_status, list_active_jobs, submit_transcription_job},
+    usecases::{
+        cancel_job as cancel_job_usecase, get_job_status, list_active_jobs,
+        submit_transcription_job, CancelOutcome,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -79,9 +82,29 @@ pub async fn status(
     // Merge the persisted job (status + error_class) with the live in-memory
     // progress, present only while the job is mid-flight (decision #11).
     let mut resp: JobResponse = job.into();
-    resp.progress = state.progress.get(&id).map(|p| p.value().clone());
+    resp.progress = state.progress.get(&id).map(|e| e.value().progress.clone());
 
     Ok(Json(resp))
+}
+
+/// Cooperative cancellation of a single job. Pending jobs flip to terminal
+/// `failed` (`error_class='cancelled'`) in a single repo write and respond
+/// `202`; running jobs have their in-memory cancellation token signalled and
+/// the worker drives the terminal transition at its next safe checkpoint
+/// (also `202`). Already-terminal jobs return `204`; unknown ids return `404`.
+/// See `plans/active/job-cancellation`.
+pub async fn cancel(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let outcome = cancel_job_usecase(Arc::clone(&state.job_repo), Arc::clone(&state.progress), &id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    match outcome {
+        CancelOutcome::NotFound => Err((StatusCode::NOT_FOUND, format!("job {id} not found"))),
+        CancelOutcome::Cancelled | CancelOutcome::Cancelling => Ok(StatusCode::ACCEPTED),
+        CancelOutcome::AlreadyTerminal => Ok(StatusCode::NO_CONTENT),
+    }
 }
 
 /// In-flight jobs (`pending` or `running`), oldest first. Lets the UI re-seed
@@ -98,7 +121,7 @@ pub async fn active(
         .into_iter()
         .map(|job| {
             let mut r: JobResponse = job.into();
-            r.progress = state.progress.get(&r.id).map(|p| p.value().clone());
+            r.progress = state.progress.get(&r.id).map(|e| e.value().progress.clone());
             r
         })
         .collect();
@@ -240,9 +263,11 @@ mod tests {
     async fn active_lists_only_in_flight_jobs_with_merged_progress() {
         use meeting_core::entities::{Job, JobProgress, PipelineStage};
         use meeting_core::ports::JobRepo;
+        use meeting_core::LiveEntry;
+        use tokio_util::sync::CancellationToken;
 
         let jr = FakeJobRepo::new();
-        let progress: crate::router::LiveProgress = std::sync::Arc::new(dashmap::DashMap::new());
+        let progress: crate::router::LiveJobs = std::sync::Arc::new(dashmap::DashMap::new());
 
         // One pending job with live progress, one done (excluded).
         let mut pending = Job::new_transcribe("m1".into());
@@ -250,7 +275,10 @@ mod tests {
         jr.enqueue(&pending).await.unwrap();
         progress.insert(
             pending.id.clone(),
-            JobProgress::new(PipelineStage::Transcribing, "Распознавание речи", 42),
+            LiveEntry {
+                progress: JobProgress::new(PipelineStage::Transcribing, "Распознавание речи", 42),
+                cancel: CancellationToken::new(),
+            },
         );
 
         let done = Job::new_transcribe("m2".into());
@@ -292,9 +320,11 @@ mod tests {
     async fn status_merges_live_progress_and_persisted_error_class() {
         use meeting_core::entities::{Job, JobProgress, PipelineStage};
         use meeting_core::ports::JobRepo;
+        use meeting_core::LiveEntry;
+        use tokio_util::sync::CancellationToken;
 
         let jr = FakeJobRepo::new();
-        let progress: crate::router::LiveProgress = std::sync::Arc::new(dashmap::DashMap::new());
+        let progress: crate::router::LiveJobs = std::sync::Arc::new(dashmap::DashMap::new());
 
         // A claimed job with a live progress entry, plus a (separate) failed job
         // carrying a persisted error_class.
@@ -302,7 +332,10 @@ mod tests {
         jr.enqueue(&active).await.unwrap();
         progress.insert(
             active.id.clone(),
-            JobProgress::new(PipelineStage::Transcribing, "Распознавание речи", 42),
+            LiveEntry {
+                progress: JobProgress::new(PipelineStage::Transcribing, "Распознавание речи", 42),
+                cancel: CancellationToken::new(),
+            },
         );
 
         let failed = Job::new_transcribe("m2".into());
@@ -354,5 +387,120 @@ mod tests {
         assert_eq!(json["status"], "failed");
         assert_eq!(json["error_class"], "api_auth");
         assert!(json["progress"].is_null());
+    }
+
+    // ── DELETE /api/v1/jobs/:id ──────────────────────────────────────────────
+
+    fn delete_request(id: &str) -> Request<Body> {
+        Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/v1/jobs/{id}"))
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn delete_unknown_returns_404() {
+        let app = make_app();
+        let resp = app.oneshot(delete_request("ghost")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn delete_pending_returns_202_and_persists_cancelled() {
+        use meeting_core::entities::{ErrorClass, Job, JobStatus};
+        use meeting_core::ports::JobRepo;
+
+        let jr = FakeJobRepo::new();
+        let pending = Job::new_transcribe("m1".into());
+        jr.enqueue(&pending).await.unwrap();
+
+        let app = create_router(AppState {
+            transcriber: FakeTranscriber::new("fake"),
+            meeting_repo: FakeMeetingRepo::new(),
+            job_repo: Arc::clone(&jr) as Arc<dyn JobRepo>,
+            llm: FakeLlmProvider::new(""),
+            templates: FakeTemplateLoader::empty(),
+            audio_capture: FakeAudioCapture::new(),
+            file_store: FakeMeetingFileStore::new(),
+            recordings_dir: std::path::PathBuf::from("/tmp"),
+            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            default_template: crate::router::no_default_template(),
+        });
+
+        let resp = app.oneshot(delete_request(&pending.id)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+        let in_db = jr.find_by_id(&pending.id).await.unwrap().unwrap();
+        assert_eq!(in_db.status, JobStatus::Failed);
+        assert_eq!(in_db.error_class, Some(ErrorClass::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn delete_done_returns_204() {
+        use meeting_core::entities::Job;
+        use meeting_core::ports::JobRepo;
+
+        let jr = FakeJobRepo::new();
+        let done = Job::new_transcribe("m1".into());
+        jr.enqueue(&done).await.unwrap();
+        jr.mark_done(&done.id, 1).await.unwrap();
+
+        let app = create_router(AppState {
+            transcriber: FakeTranscriber::new("fake"),
+            meeting_repo: FakeMeetingRepo::new(),
+            job_repo: Arc::clone(&jr) as Arc<dyn JobRepo>,
+            llm: FakeLlmProvider::new(""),
+            templates: FakeTemplateLoader::empty(),
+            audio_capture: FakeAudioCapture::new(),
+            file_store: FakeMeetingFileStore::new(),
+            recordings_dir: std::path::PathBuf::from("/tmp"),
+            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            default_template: crate::router::no_default_template(),
+        });
+
+        let resp = app.oneshot(delete_request(&done.id)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn delete_running_returns_202_and_signals_token() {
+        use meeting_core::entities::{Job, JobProgress, PipelineStage};
+        use meeting_core::ports::JobRepo;
+        use meeting_core::LiveEntry;
+        use tokio_util::sync::CancellationToken;
+
+        let jr = FakeJobRepo::new();
+        let running = Job::new_transcribe("m1".into());
+        jr.enqueue(&running).await.unwrap();
+        jr.claim_pending(i64::MAX).await.unwrap();
+
+        let progress: crate::router::LiveJobs =
+            std::sync::Arc::new(dashmap::DashMap::new());
+        let token = CancellationToken::new();
+        progress.insert(
+            running.id.clone(),
+            LiveEntry {
+                progress: JobProgress::new(PipelineStage::Transcribing, "Распознавание речи", 50),
+                cancel: token.clone(),
+            },
+        );
+
+        let app = create_router(AppState {
+            transcriber: FakeTranscriber::new("fake"),
+            meeting_repo: FakeMeetingRepo::new(),
+            job_repo: Arc::clone(&jr) as Arc<dyn JobRepo>,
+            llm: FakeLlmProvider::new(""),
+            templates: FakeTemplateLoader::empty(),
+            audio_capture: FakeAudioCapture::new(),
+            file_store: FakeMeetingFileStore::new(),
+            recordings_dir: std::path::PathBuf::from("/tmp"),
+            progress: Arc::clone(&progress),
+            default_template: crate::router::no_default_template(),
+        });
+
+        let resp = app.oneshot(delete_request(&running.id)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::ACCEPTED);
+        assert!(token.is_cancelled(), "running job's token must be signalled");
     }
 }

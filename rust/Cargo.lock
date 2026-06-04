@@ -1553,6 +1553,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
  "uuid",
  "whisper-rs",
@@ -1571,6 +1572,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tokio-util",
  "tower 0.4.13",
  "tracing",
 ]
@@ -1612,6 +1614,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "uuid",
 ]
 

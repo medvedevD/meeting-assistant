@@ -122,6 +122,31 @@ Page {
     }
 
     MeetyDialog {
+        id: confirmCancel
+        preferredWidth: 420
+        title: qsTr("Прервать обработку?")
+        onAccepted: ActiveJobsStore.cancel(scr.meetingId)
+
+        Text {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            lineHeight: 1.35
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBodyLg
+            color: Theme.ink2
+            text: qsTr("Текущая задача будет помечена как отменённая. Уже выполненная часть транскрипта или протокола сохранится.")
+        }
+
+        footer: MeetyDialogActions {
+            dialog: confirmCancel
+            cancelText: qsTr("Назад")
+            confirmText: qsTr("Прервать")
+            confirmVariant: "accent"
+            confirmIconName: "close"
+        }
+    }
+
+    MeetyDialog {
         id: confirmDelete
         preferredWidth: 420
         title: qsTr("Удалить встречу?")
@@ -232,11 +257,34 @@ Page {
             MeetyCard {
                 visible: scr.jobEntry !== null
                 Layout.fillWidth: true
-                PipelineProgress {
+                ColumnLayout {
                     width: parent ? parent.width : 0
-                    apiClient: api
-                    sourceJob: scr.jobEntry ? scr.jobEntry.job : null
-                    onOpenSettings: scr.shell.showSettings()
+                    spacing: 12
+                    PipelineProgress {
+                        Layout.fillWidth: true
+                        apiClient: api
+                        sourceJob: scr.jobEntry ? scr.jobEntry.job : null
+                        onOpenSettings: scr.shell.showSettings()
+                    }
+                    // Cancel affordance lives next to the progress so the
+                    // user sees the way to stop a running job in the same
+                    // visual context as what's happening. Hidden once the
+                    // user has clicked it (transient "Прерывание…" state)
+                    // and after the job reaches a terminal state.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        visible: scr.jobActive
+                        Item { Layout.fillWidth: true }
+                        MeetyButton {
+                            variant: "ghost"
+                            iconName: "close"
+                            text: (scr.jobEntry && scr.jobEntry.cancelRequested === true)
+                                  ? qsTr("Прерывание…")
+                                  : qsTr("Прервать")
+                            enabled: !(scr.jobEntry && scr.jobEntry.cancelRequested === true)
+                            onClicked: confirmCancel.open()
+                        }
+                    }
                 }
             }
             Text {

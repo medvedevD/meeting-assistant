@@ -14,7 +14,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub use meeting_core::LiveProgress;
+pub use meeting_core::LiveJobs;
 
 /// Resolves the configured `default_template` name when a protocol request
 /// omits one. Decision #3: settings never leak into the core; the API layer
@@ -45,8 +45,11 @@ pub struct AppState {
     pub file_store: Arc<dyn MeetingFileStore>,
     /// Directory where per-meeting recording subdirs are created.
     pub recordings_dir: PathBuf,
-    /// Live, in-memory job-progress table (shared with the worker).
-    pub progress: LiveProgress,
+    /// Live, in-memory job table (shared with the worker). Each entry holds
+    /// both the in-flight progress snapshot and a cancellation token; the
+    /// `DELETE /api/v1/jobs/:id` handler signals the token to stop a running
+    /// job at its next safe checkpoint.
+    pub progress: LiveJobs,
     /// Resolves the configured default template when a protocol request omits
     /// one (decision #3 — the API layer resolves it before the use-case runs).
     pub default_template: DefaultTemplateFn,
@@ -134,7 +137,7 @@ fn api_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/v1/jobs", post(jobs::submit))
         .route("/api/v1/active-jobs", get(jobs::active))
-        .route("/api/v1/jobs/:id", get(jobs::status))
+        .route("/api/v1/jobs/:id", get(jobs::status).delete(jobs::cancel))
         .route("/api/v1/protocols", post(protocols::generate))
         .route("/api/v1/recordings", post(recordings::start))
         .route("/api/v1/recordings/:id/stop", post(recordings::stop))
@@ -346,6 +349,7 @@ mod tests {
         ("POST", "/api/v1/jobs"),
         ("GET", "/api/v1/active-jobs"),
         ("GET", "/api/v1/jobs/abc"),
+        ("DELETE", "/api/v1/jobs/abc"),
         ("POST", "/api/v1/protocols"),
         ("POST", "/api/v1/recordings"),
         ("POST", "/api/v1/recordings/abc/stop"),

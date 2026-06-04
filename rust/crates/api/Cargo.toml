@@ -17,3 +17,4 @@ async-trait = { workspace = true }
 meeting-core = { path = "../core", features = ["fakes"] }
 tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"
+tokio-util = { workspace = true }

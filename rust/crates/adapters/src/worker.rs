@@ -5,18 +5,19 @@ use meeting_core::{
         Transcriber,
     },
     usecases::generate_protocol,
-    CoreError,
+    CoreError, LiveEntry,
 };
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tokio::time::{sleep, Duration};
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 const MAX_ATTEMPTS: u32 = 5;
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 
-pub use meeting_core::LiveProgress;
+pub use meeting_core::LiveJobs;
 
 /// Kinds the CPU-bound transcribe worker claims.
 pub const TRANSCRIBE_KINDS: &[JobKind] = &[JobKind::Transcribe, JobKind::ReprocessTranscribe];
@@ -48,7 +49,7 @@ pub struct Worker {
     file_store: Arc<dyn MeetingFileStore>,
     llm: Arc<dyn LlmProvider>,
     templates: Arc<dyn TemplateLoader>,
-    progress: LiveProgress,
+    progress: LiveJobs,
     kind_filter: &'static [JobKind],
     permits: Arc<Semaphore>,
     pool_size: usize,
@@ -64,7 +65,7 @@ impl Worker {
         file_store: Arc<dyn MeetingFileStore>,
         llm: Arc<dyn LlmProvider>,
         templates: Arc<dyn TemplateLoader>,
-        progress: LiveProgress,
+        progress: LiveJobs,
         kind_filter: &'static [JobKind],
         pool_size: usize,
         name: &'static str,
@@ -95,12 +96,24 @@ impl Worker {
             .saturating_sub(self.permits.available_permits())
     }
 
-    /// Publish a coarse stage (percent 0) to the live-progress table.
+    /// Publish a coarse stage (percent 0) to the live-progress table. Mutates
+    /// the existing entry in-place so the cancellation token survives the
+    /// update; falls back to inserting a fresh entry if the job is not yet
+    /// in the map.
     fn set_stage(&self, job_id: &str, stage: PipelineStage) {
-        self.progress.insert(
-            job_id.to_string(),
-            JobProgress::new(stage, stage_sub(stage), 0),
-        );
+        let progress = JobProgress::new(stage, stage_sub(stage), 0);
+        match self.progress.get_mut(job_id) {
+            Some(mut entry) => entry.progress = progress,
+            None => {
+                self.progress.insert(
+                    job_id.to_string(),
+                    LiveEntry {
+                        progress,
+                        cancel: CancellationToken::new(),
+                    },
+                );
+            }
+        }
     }
 
     /// Drop the live-progress entry once a job reaches a terminal state; the
@@ -145,9 +158,25 @@ impl Worker {
                         kind = %job.kind.as_str(),
                         "claimed job"
                     );
+                    // Allocate the cancellation token and publish a Queued
+                    // live-progress entry *before* spawning the per-job task,
+                    // so a DELETE /api/v1/jobs/:id arriving in the next tick
+                    // finds the token and can signal it. See ADR-002.
+                    let cancel = CancellationToken::new();
+                    self.progress.insert(
+                        job.id.clone(),
+                        LiveEntry {
+                            progress: JobProgress::new(
+                                PipelineStage::Queued,
+                                stage_sub(PipelineStage::Queued),
+                                0,
+                            ),
+                            cancel: cancel.clone(),
+                        },
+                    );
                     let me = Arc::clone(&self);
                     inflight.spawn(async move {
-                        me.execute(job).await;
+                        me.execute(job, cancel).await;
                         drop(permit);
                     });
                 }
@@ -173,7 +202,7 @@ impl Worker {
         info!(worker = self.name, drained, "worker stopped");
     }
 
-    async fn execute(&self, job: meeting_core::entities::Job) {
+    async fn execute(&self, job: meeting_core::entities::Job, cancel: CancellationToken) {
         let meeting = match self.meeting_repo.find_by_id(&job.meeting_id).await {
             Ok(Some(m)) => m,
             Ok(None) => {
@@ -198,15 +227,23 @@ impl Worker {
             }
         };
 
+        // Pre-flight cancel check: a DELETE that arrived between claim and
+        // here gets a fast terminal without doing any work.
+        if cancel.is_cancelled() {
+            self.finalize_cancelled(&job).await;
+            return;
+        }
+
         let result = if job.kind.is_transcription() {
-            self.run_transcribe(&job, &meeting).await
+            self.run_transcribe(&job, &meeting, cancel.clone()).await
         } else {
             // JobKind::RegenerateProtocol
-            self.run_regenerate_protocol(&job, &meeting).await
+            self.run_regenerate_protocol(&job, &meeting, cancel.clone())
+                .await
         };
 
         match result {
-            Ok(()) => {
+            Ok(()) if !cancel.is_cancelled() => {
                 // Backend-owned chain: a transcription job flagged `then_protocol`
                 // enqueues the protocol job as soon as the transcript is written,
                 // so the generation flow's second step survives a client restart.
@@ -228,35 +265,78 @@ impl Worker {
                 }
                 self.clear_progress(&job.id);
             }
+            // Cancelled mid-flight (cooperative checkpoint returned Err) or
+            // raced across a success boundary (cancel arrived between the
+            // inner step finishing and us reading the token here). Either way
+            // we honour the user's intent: terminal `cancelled`, no chain.
+            Err(CoreError::Cancelled) | Ok(()) => {
+                self.finalize_cancelled(&job).await;
+            }
             Err(e) => self.handle_failure(&job, &e).await,
         }
     }
 
+    /// Persist a `cancelled` terminal state and drop the live entry. Used by
+    /// the pre-flight check, by the cooperative cancel error path, and by the
+    /// "succeeded but cancel raced in" edge case. The repo write is guarded
+    /// by `status IN ('pending','running')`, so a parallel `mark_done` race
+    /// is a no-op.
+    async fn finalize_cancelled(&self, job: &meeting_core::entities::Job) {
+        let now = now_unix();
+        match self.job_repo.mark_cancelled(&job.id, now).await {
+            Ok(0) => info!(job_id = %job.id, "cancel arrived after terminal — no-op"),
+            Ok(_) => info!(job_id = %job.id, kind = %job.kind.as_str(), "job cancelled"),
+            Err(e) => error!(job_id = %job.id, "mark_cancelled failed: {e}"),
+        }
+        self.clear_progress(&job.id);
+    }
+
     /// Build a progress sink that publishes the transcriber's stage/percent
-    /// reports into the live-progress table under this job's id.
+    /// reports into the live-progress table under this job's id. Mutates the
+    /// existing entry in-place so the cancellation token survives sink calls.
     fn transcribe_sink(&self, job_id: &str) -> ProgressSink {
         let map = Arc::clone(&self.progress);
         let id = job_id.to_string();
         Arc::new(move |stage: PipelineStage, percent: u8| {
-            map.insert(
-                id.clone(),
-                JobProgress::new(stage, stage_sub(stage), percent),
-            );
+            let progress = JobProgress::new(stage, stage_sub(stage), percent);
+            match map.get_mut(&id) {
+                Some(mut entry) => entry.progress = progress,
+                None => {
+                    map.insert(
+                        id.clone(),
+                        LiveEntry {
+                            progress,
+                            cancel: CancellationToken::new(),
+                        },
+                    );
+                }
+            }
         })
     }
 
-    /// Transcribe (or re-transcribe) the meeting's audio and persist the result.
+    /// Transcribe (or re-transcribe) the meeting's audio and persist the
+    /// result. The cancellation token is threaded into
+    /// [`Transcriber::transcribe_cancelable`] so adapters that can interrupt
+    /// (e.g. Whisper via `set_abort_callback_safe`) stop at the next safe
+    /// checkpoint and surface `CoreError::Cancelled`.
     async fn run_transcribe(
         &self,
         job: &meeting_core::entities::Job,
         meeting: &Meeting,
+        cancel: CancellationToken,
     ) -> Result<(), meeting_core::CoreError> {
         self.set_stage(&job.id, PipelineStage::LoadingModel);
+        if cancel.is_cancelled() {
+            return Err(CoreError::Cancelled);
+        }
         let sink = self.transcribe_sink(&job.id);
         let transcript = self
             .transcriber
-            .transcribe_with_progress(&meeting.audio_path, sink)
+            .transcribe_cancelable(&meeting.audio_path, sink, cancel.clone())
             .await?;
+        if cancel.is_cancelled() {
+            return Err(CoreError::Cancelled);
+        }
         self.set_stage(&job.id, PipelineStage::WritingTranscript);
         match self
             .file_store
@@ -286,27 +366,38 @@ impl Worker {
         Ok(())
     }
 
-    /// Regenerate the protocol from the stored transcript via the LLM.
+    /// Regenerate the protocol from the stored transcript via the LLM. The
+    /// LLM call is awaited inside `tokio::select!` against the cancellation
+    /// token, so a `DELETE /api/v1/jobs/:id` interrupts a slow provider at
+    /// the next poll-cycle boundary (sub-second) rather than waiting for the
+    /// request to complete.
     async fn run_regenerate_protocol(
         &self,
         job: &meeting_core::entities::Job,
         meeting: &Meeting,
+        cancel: CancellationToken,
     ) -> Result<(), meeting_core::CoreError> {
         self.set_stage(&job.id, PipelineStage::GeneratingProtocol);
+        if cancel.is_cancelled() {
+            return Err(CoreError::Cancelled);
+        }
         let transcript = meeting
             .transcript_text
             .as_deref()
             .filter(|t| !t.is_empty())
             .ok_or_else(|| CoreError::Validation("meeting has no transcript".into()))?;
 
-        let protocol = generate_protocol(
-            Arc::clone(&self.llm),
-            Arc::clone(&self.templates),
-            transcript,
-            job.template_name.as_deref(),
-            Some(&meeting.name),
-        )
-        .await?;
+        let protocol = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(CoreError::Cancelled),
+            r = generate_protocol(
+                Arc::clone(&self.llm),
+                Arc::clone(&self.templates),
+                transcript,
+                job.template_name.as_deref(),
+                Some(&meeting.name),
+            ) => r?,
+        };
 
         match self
             .file_store
@@ -405,7 +496,7 @@ mod tests {
 
         let worker = make_worker(Arc::clone(&jr), Arc::clone(&mr));
         let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
-        worker.execute(claimed).await;
+        worker.execute(claimed, CancellationToken::new()).await;
 
         // The transcribe job is done...
         let t = jr.find_by_id(&job.id).await.unwrap().unwrap();
@@ -434,7 +525,7 @@ mod tests {
 
         let worker = make_worker(Arc::clone(&jr), Arc::clone(&mr));
         let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
-        worker.execute(claimed).await;
+        worker.execute(claimed, CancellationToken::new()).await;
 
         assert_eq!(
             jr.find_by_id(&job.id).await.unwrap().unwrap().status,
@@ -744,5 +835,168 @@ mod tests {
         gate.notify_one();
         t_run.abort();
         p_run.abort();
+    }
+
+    // ── Cancellation tests ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn precancelled_job_marks_cancelled_without_running() {
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+        let job = Job::new_transcribe(m.id.clone());
+        jr.enqueue(&job).await.unwrap();
+
+        let worker = make_worker(Arc::clone(&jr), Arc::clone(&mr));
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+
+        worker.execute(claimed, cancel).await;
+
+        let j = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert_eq!(j.status, JobStatus::Failed);
+        assert_eq!(
+            j.error_class,
+            Some(meeting_core::entities::ErrorClass::Cancelled)
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_during_transcribe_skips_then_protocol_chain() {
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+        let mut job = Job::new_reprocess_transcribe(m.id.clone());
+        job.then_protocol = true;
+        jr.enqueue(&job).await.unwrap();
+
+        // Gated transcriber that lets us cancel mid-flight.
+        let gate = Arc::new(Notify::new());
+        let entered = Arc::new(Notify::new());
+        let transcriber = Arc::new(GatedTranscriber {
+            gate: Arc::clone(&gate),
+            entered: Arc::clone(&entered),
+        });
+        let worker = worker_with_transcriber(
+            Arc::clone(&jr),
+            Arc::clone(&mr),
+            transcriber as Arc<dyn Transcriber>,
+            1,
+        );
+
+        let cancel = CancellationToken::new();
+        let cancel_for_exec = cancel.clone();
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        let job_id = claimed.id.clone();
+        let me = Arc::clone(&worker);
+        let exec = tokio::spawn(async move { me.execute(claimed, cancel_for_exec).await });
+
+        // Wait until the transcriber is inside, then cancel and release the gate
+        // so the inner future completes (the worker observes the post-call
+        // checkpoint and surfaces the cancel).
+        tokio::time::timeout(Duration::from_secs(2), entered.notified())
+            .await
+            .expect("transcribe should enter");
+        cancel.cancel();
+        gate.notify_one();
+
+        tokio::time::timeout(Duration::from_secs(2), exec)
+            .await
+            .expect("execute should return")
+            .unwrap();
+
+        let j = jr.find_by_id(&job_id).await.unwrap().unwrap();
+        assert_eq!(j.status, JobStatus::Failed);
+        assert_eq!(
+            j.error_class,
+            Some(meeting_core::entities::ErrorClass::Cancelled)
+        );
+        assert!(
+            jr.list_active().await.unwrap().is_empty(),
+            "then_protocol chain must NOT enqueue when the transcribe is cancelled"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_during_protocol_marks_cancelled() {
+        // A protocol job stuck inside a slow LLM call: cancel via select! → terminal cancelled.
+        use async_trait::async_trait;
+
+        struct GatedLlm {
+            gate: Arc<Notify>,
+            entered: Arc<Notify>,
+        }
+        #[async_trait]
+        impl meeting_core::ports::LlmProvider for GatedLlm {
+            async fn generate(
+                &self,
+                _transcript: &str,
+                _instructions: Option<&str>,
+            ) -> Result<String, CoreError> {
+                self.entered.notify_one();
+                self.gate.notified().await;
+                Ok("# Протокол".into())
+            }
+        }
+
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+        mr.save_transcript(&m.id, "тело транскрипта").await.unwrap();
+        let job = Job::new_regenerate_protocol(m.id.clone(), None);
+        jr.enqueue(&job).await.unwrap();
+
+        let gate = Arc::new(Notify::new());
+        let entered = Arc::new(Notify::new());
+        let llm: Arc<dyn meeting_core::ports::LlmProvider> = Arc::new(GatedLlm {
+            gate: Arc::clone(&gate),
+            entered: Arc::clone(&entered),
+        });
+
+        let worker = Arc::new(Worker::new(
+            Arc::clone(&jr) as Arc<dyn JobRepo>,
+            Arc::clone(&mr) as Arc<dyn MeetingRepo>,
+            FakeTranscriber::new("ok") as Arc<dyn Transcriber>,
+            FakeMeetingFileStore::new(),
+            llm,
+            FakeTemplateLoader::empty(),
+            Arc::new(DashMap::new()),
+            PROTOCOL_KINDS,
+            1,
+            "protocol",
+        ));
+
+        let cancel = CancellationToken::new();
+        let cancel_for_exec = cancel.clone();
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        let job_id = claimed.id.clone();
+        let me = Arc::clone(&worker);
+        let exec = tokio::spawn(async move { me.execute(claimed, cancel_for_exec).await });
+
+        tokio::time::timeout(Duration::from_secs(2), entered.notified())
+            .await
+            .expect("llm should be reached");
+        cancel.cancel();
+        // Note: select! prefers the cancel branch (biased); no need to release
+        // the gate. The GatedLlm future is simply dropped.
+
+        tokio::time::timeout(Duration::from_secs(2), exec)
+            .await
+            .expect("execute should return after select! cancel")
+            .unwrap();
+
+        let j = jr.find_by_id(&job_id).await.unwrap().unwrap();
+        assert_eq!(j.status, JobStatus::Failed);
+        assert_eq!(
+            j.error_class,
+            Some(meeting_core::entities::ErrorClass::Cancelled)
+        );
+
+        // Drop the now-unused gate to silence the unused warning.
+        drop(gate);
     }
 }

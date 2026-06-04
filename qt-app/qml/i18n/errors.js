@@ -50,6 +50,13 @@ function describe(errorClass, rawMessage) {
             hint: "Процесс обработки был остановлен. Попробуйте ещё раз.",
             settings: false
         }
+    case "cancelled":
+        return {
+            title: "Отменено",
+            hint: "Задача прервана по вашему запросу. Запустите её снова, если нужно.",
+            settings: false,
+            neutral: true
+        }
     case "unknown":
     default:
         return {

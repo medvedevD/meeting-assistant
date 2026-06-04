@@ -61,4 +61,19 @@ pub trait JobRepo: Send + Sync {
     /// Called once at worker startup to recover jobs that were interrupted by
     /// a previous process crash (e.g. `kill -9`). Returns the number of recovered jobs.
     async fn recover_running_jobs(&self, now_ts: i64) -> Result<u64, CoreError>;
+
+    /// Atomically transition a `pending` job to terminal `failed` with
+    /// `error_class='cancelled'`. Returns the number of rows actually changed:
+    /// 0 if the job was already non-pending (idempotent), 1 on success.
+    ///
+    /// Used by `DELETE /api/v1/jobs/:id` when the job has not yet been
+    /// claimed by a worker. See `plans/active/job-cancellation`.
+    async fn cancel_pending(&self, id: &str, now_ts: i64) -> Result<u64, CoreError>;
+
+    /// Mark a `pending`-or-`running` job as terminal `failed` with
+    /// `error_class='cancelled'`. Used by the worker after observing the
+    /// cancellation token at a safe checkpoint. Guarded by
+    /// `status IN ('pending','running')` so a race with `mark_done` /
+    /// `mark_permanently_failed` is a no-op (returns 0).
+    async fn mark_cancelled(&self, id: &str, now_ts: i64) -> Result<u64, CoreError>;
 }

@@ -374,6 +374,34 @@ impl JobRepo for FakeJobRepo {
         }
         Ok(count)
     }
+
+    async fn cancel_pending(&self, id: &str, now_ts: i64) -> Result<u64, CoreError> {
+        let mut store = self.store.lock().unwrap();
+        if let Some(j) = store.iter_mut().find(|j| j.id == id) {
+            if j.status == JobStatus::Pending {
+                j.status = JobStatus::Failed;
+                j.error_class = Some(crate::entities::ErrorClass::Cancelled);
+                j.last_error = Some("cancelled by user".into());
+                j.updated_at = now_ts;
+                return Ok(1);
+            }
+        }
+        Ok(0)
+    }
+
+    async fn mark_cancelled(&self, id: &str, now_ts: i64) -> Result<u64, CoreError> {
+        let mut store = self.store.lock().unwrap();
+        if let Some(j) = store.iter_mut().find(|j| j.id == id) {
+            if matches!(j.status, JobStatus::Pending | JobStatus::Running) {
+                j.status = JobStatus::Failed;
+                j.error_class = Some(crate::entities::ErrorClass::Cancelled);
+                j.last_error = Some("cancelled by user".into());
+                j.updated_at = now_ts;
+                return Ok(1);
+            }
+        }
+        Ok(0)
+    }
 }
 
 // ── FakeLlmProvider ──────────────────────────────────────────────────────────

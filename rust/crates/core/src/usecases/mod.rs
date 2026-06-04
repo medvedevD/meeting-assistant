@@ -10,6 +10,9 @@ pub use get_job_status::get_job_status;
 mod list_active_jobs;
 pub use list_active_jobs::list_active_jobs;
 
+mod cancel_job;
+pub use cancel_job::{cancel_job, CancelOutcome};
+
 mod generate_protocol;
 pub use generate_protocol::generate_protocol;
 

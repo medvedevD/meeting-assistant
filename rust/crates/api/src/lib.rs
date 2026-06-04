@@ -6,7 +6,7 @@ mod transcription_model_service;
 
 pub use router::{
     create_router, create_server_router, no_default_template, AppState, DefaultTemplateFn,
-    LiveProgress, VersionInfo,
+    LiveJobs, VersionInfo,
 };
 pub use settings_service::SettingsService;
 pub use template_service::{TemplateDto, TemplateError, TemplateService};

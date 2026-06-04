@@ -6,10 +6,84 @@ use meeting_core::{
     CoreError,
 };
 use serde::{Deserialize, Serialize};
+use std::ffi::c_void;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+/// Stable heap allocation passed to whisper.cpp as `abort_callback_user_data`.
+/// The only field is the atomic flag the C callback reads; no closures, no
+/// captures, no synchronisation primitives — so concurrent calls from
+/// whisper.cpp's inference threads are sound. See ADR-005 in
+/// `plans/active/job-cancellation`.
+#[repr(C)]
+struct AbortFlag {
+    cancelled: AtomicBool,
+}
+
+/// FFI abort callback. whisper.cpp invokes this between segments **from
+/// multiple inference threads concurrently**; the only operation is an
+/// atomic load, which is data-race-free.
+///
+/// # Safety
+/// `data` must point to an `AbortFlag` whose `Arc` is held alive for the
+/// entire duration of the surrounding `state.full(...)` call (enforced by
+/// `RealWhisperRunner::run` which holds the `Arc<AbortFlag>` across the
+/// `spawn_blocking` join). A null `data` is treated as "do not abort" so a
+/// mis-wired call site degrades gracefully.
+unsafe extern "C" fn abort_cb(data: *mut c_void) -> bool {
+    if data.is_null() {
+        return false;
+    }
+    // SAFETY: see fn-level safety note above.
+    let flag = unsafe { &*(data as *const AbortFlag) };
+    flag.cancelled.load(Ordering::Relaxed)
+}
+
+/// Bridge a `CancellationToken` to an `Arc<AbortFlag>` for the duration of a
+/// blocking Whisper inference. Spawns a watcher task that flips the flag if
+/// the token is cancelled; ensures the watcher exits (and the Arc is dropped)
+/// before the helper returns, so the heap pointer passed to whisper.cpp is
+/// always valid for as long as the FFI side might dereference it.
+///
+/// `f` runs the actual Whisper call and gets the same `Arc<AbortFlag>` to
+/// hand to `run_whisper`. The flag is dropped only after `f` returns *and*
+/// the watcher has joined — which is strictly after `state.full` returned.
+async fn with_abort_watcher<F, R>(cancel: CancellationToken, f: F) -> R
+where
+    F: FnOnce(Arc<AbortFlag>) -> R + Send + 'static,
+    R: Send + 'static,
+{
+    let flag = Arc::new(AbortFlag {
+        cancelled: AtomicBool::new(false),
+    });
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let watcher = {
+        let flag = Arc::clone(&flag);
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = cancel.cancelled() => flag.cancelled.store(true, Ordering::Relaxed),
+                _ = stop_rx => {}
+            }
+        })
+    };
+
+    let flag_for_blocking = Arc::clone(&flag);
+    let result = tokio::task::spawn_blocking(move || f(flag_for_blocking))
+        .await
+        .expect("spawn_blocking panicked");
+
+    // Stop and join the watcher before we drop our Arc, guaranteeing that
+    // by the time the last Arc<AbortFlag> dies, whisper.cpp has already
+    // returned from state.full inside `f`.
+    let _ = stop_tx.send(());
+    let _ = watcher.await;
+    drop(flag);
+
+    result
+}
 
 /// A progress sink that discards reports — used by the non-progress path.
 fn noop_sink() -> ProgressSink {
@@ -81,9 +155,10 @@ impl Transcriber for WhisperTranscriber {
         let path = audio_path.to_path_buf();
         let prefs = TranscriberPrefs::default();
         let sink = noop_sink();
-        tokio::task::spawn_blocking(move || run_whisper(&ctx, &path, &prefs, &sink))
-            .await
-            .map_err(|e| CoreError::Transcription(e.to_string()))?
+        with_abort_watcher(CancellationToken::new(), move |abort_flag| {
+            run_whisper(&ctx, &path, &prefs, &sink, &abort_flag)
+        })
+        .await
     }
 
     async fn transcribe_with_progress(
@@ -94,9 +169,25 @@ impl Transcriber for WhisperTranscriber {
         let ctx = Arc::clone(&self.ctx);
         let path = audio_path.to_path_buf();
         let prefs = TranscriberPrefs::default();
-        tokio::task::spawn_blocking(move || run_whisper(&ctx, &path, &prefs, &on_progress))
-            .await
-            .map_err(|e| CoreError::Transcription(e.to_string()))?
+        with_abort_watcher(CancellationToken::new(), move |abort_flag| {
+            run_whisper(&ctx, &path, &prefs, &on_progress, &abort_flag)
+        })
+        .await
+    }
+
+    async fn transcribe_cancelable(
+        &self,
+        audio_path: &Path,
+        on_progress: ProgressSink,
+        cancel: CancellationToken,
+    ) -> Result<Transcript, CoreError> {
+        let ctx = Arc::clone(&self.ctx);
+        let path = audio_path.to_path_buf();
+        let prefs = TranscriberPrefs::default();
+        with_abort_watcher(cancel, move |abort_flag| {
+            run_whisper(&ctx, &path, &prefs, &on_progress, &abort_flag)
+        })
+        .await
     }
 }
 
@@ -105,6 +196,7 @@ fn run_whisper(
     audio_path: &PathBuf,
     prefs: &TranscriberPrefs,
     on_progress: &ProgressSink,
+    abort_flag: &Arc<AbortFlag>,
 ) -> Result<Transcript, CoreError> {
     let t_total = std::time::Instant::now();
 
@@ -175,6 +267,21 @@ fn run_whisper(
         });
     }
 
+    // Cooperative abort via the unsafe FFI path (whisper-rs 0.16's
+    // `set_abort_callback_safe` has a broken trampoline that deadlocks on
+    // concurrent invocation — see ADR-005). We pass our own extern "C"
+    // callback + a stable `Arc<AbortFlag>` heap pointer. whisper.cpp calls
+    // `abort_cb` between segments from multiple inference threads; the
+    // callback does a single atomic load → race-free by construction.
+    //
+    // SAFETY: `abort_flag` is held alive by the caller across the entire
+    // `state.full(...)` call (RealWhisperRunner::run owns the Arc across
+    // `spawn_blocking.await`), so the raw pointer remains valid for whisper.cpp.
+    unsafe {
+        params.set_abort_callback(Some(abort_cb));
+        params.set_abort_callback_user_data(Arc::as_ptr(abort_flag) as *mut c_void);
+    }
+
     let (tx_stop, rx_stop) = std::sync::mpsc::channel::<()>();
     let ticker = {
         let mono = Arc::clone(&monotonic);
@@ -201,7 +308,20 @@ fn run_whisper(
     let inference_result = state.full(params, &samples);
     let _ = tx_stop.send(());
     let _ = ticker.join();
-    inference_result.map_err(|e| CoreError::Transcription(e.to_string()))?;
+    // The abort callback causes whisper.cpp to return an error when
+    // cancellation is requested. Reclassify so the worker terminates the job
+    // as `cancelled` rather than retrying it as a generic transcription error.
+    if let Err(e) = inference_result {
+        if abort_flag.cancelled.load(Ordering::Relaxed) {
+            return Err(CoreError::Cancelled);
+        }
+        return Err(CoreError::Transcription(e.to_string()));
+    }
+    // Late-arriving cancel that fired after `state.full` returned Ok but
+    // before we surface the result — honour user intent.
+    if abort_flag.cancelled.load(Ordering::Relaxed) {
+        return Err(CoreError::Cancelled);
+    }
     // Pin 100% on successful completion — best-effort closure signal before the
     // worker transitions to WritingTranscript (which would reset percent to 0).
     on_progress(PipelineStage::Transcribing, 100);
@@ -307,6 +427,7 @@ pub(crate) trait WhisperRunner: Send + Sync {
         audio_path: &Path,
         prefs: &TranscriberPrefs,
         on_progress: ProgressSink,
+        cancel: CancellationToken,
     ) -> Result<Transcript, CoreError>;
 }
 
@@ -348,13 +469,15 @@ impl WhisperRunner for RealWhisperRunner {
         audio_path: &Path,
         prefs: &TranscriberPrefs,
         on_progress: ProgressSink,
+        cancel: CancellationToken,
     ) -> Result<Transcript, CoreError> {
         let ctx = Arc::clone(&self.ctx);
         let path = audio_path.to_path_buf();
         let prefs = prefs.clone();
-        tokio::task::spawn_blocking(move || run_whisper(&ctx, &path, &prefs, &on_progress))
-            .await
-            .map_err(|e| CoreError::Transcription(e.to_string()))?
+        with_abort_watcher(cancel, move |abort_flag| {
+            run_whisper(&ctx, &path, &prefs, &on_progress, &abort_flag)
+        })
+        .await
     }
 }
 
@@ -494,13 +617,15 @@ impl LazyWhisperTranscriber {
 }
 
 impl LazyWhisperTranscriber {
-    /// Shared acquire → run → release path used by both `transcribe` and
-    /// `transcribe_with_progress`. The `on_progress` sink is forwarded to the
-    /// runner (a no-op sink for the plain path).
+    /// Shared acquire → run → release path used by `transcribe`,
+    /// `transcribe_with_progress`, and `transcribe_cancelable`. The
+    /// `on_progress` sink and `cancel` token are forwarded to the runner —
+    /// the plain path passes a no-op sink and a never-cancelled token.
     async fn transcribe_inner(
         &self,
         audio_path: &Path,
         on_progress: ProgressSink,
+        cancel: CancellationToken,
     ) -> Result<Transcript, CoreError> {
         let prefs = self.prefs.read().unwrap().clone();
         if let Some(error) = self.model_error.read().unwrap().clone() {
@@ -524,7 +649,7 @@ impl LazyWhisperTranscriber {
         }; // ← lock released, runner lives as Arc
 
         // --- 2. TRANSCRIBE (без lock) ---
-        let result = runner.run(audio_path, &prefs, on_progress).await;
+        let result = runner.run(audio_path, &prefs, on_progress, cancel).await;
 
         // --- 3. RELEASE ---
         {
@@ -552,7 +677,8 @@ fn model_path_error_to_core(error: ModelPathError) -> CoreError {
 #[async_trait]
 impl Transcriber for LazyWhisperTranscriber {
     async fn transcribe(&self, audio_path: &Path) -> Result<Transcript, CoreError> {
-        self.transcribe_inner(audio_path, noop_sink()).await
+        self.transcribe_inner(audio_path, noop_sink(), CancellationToken::new())
+            .await
     }
 
     async fn transcribe_with_progress(
@@ -560,7 +686,17 @@ impl Transcriber for LazyWhisperTranscriber {
         audio_path: &Path,
         on_progress: ProgressSink,
     ) -> Result<Transcript, CoreError> {
-        self.transcribe_inner(audio_path, on_progress).await
+        self.transcribe_inner(audio_path, on_progress, CancellationToken::new())
+            .await
+    }
+
+    async fn transcribe_cancelable(
+        &self,
+        audio_path: &Path,
+        on_progress: ProgressSink,
+        cancel: CancellationToken,
+    ) -> Result<Transcript, CoreError> {
+        self.transcribe_inner(audio_path, on_progress, cancel).await
     }
 }
 
@@ -597,6 +733,7 @@ mod tests {
             _audio_path: &Path,
             _prefs: &TranscriberPrefs,
             _on_progress: ProgressSink,
+            _cancel: CancellationToken,
         ) -> Result<Transcript, CoreError> {
             if self.fail_run {
                 return Err(CoreError::Transcription("fake run error".into()));

@@ -21,7 +21,7 @@ pub mod db;
 pub use db::{Db, SqliteJobRepo, SqliteMeetingRepo};
 
 mod worker;
-pub use worker::{LiveProgress, Worker, PROTOCOL_KINDS, TRANSCRIBE_KINDS};
+pub use worker::{LiveJobs, Worker, PROTOCOL_KINDS, TRANSCRIBE_KINDS};
 
 pub mod llm;
 pub use llm::{

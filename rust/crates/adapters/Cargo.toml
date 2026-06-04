@@ -10,6 +10,7 @@ hound = "3"
 rubato = "0.15"
 cpal = "0.15"
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 dashmap = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }

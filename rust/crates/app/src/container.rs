@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use meeting_adapters::{
     build_llm, resolve_transcription_model_path, AnthropicProvider, CpalAudioCapture, Db,
     FileTemplateLoader, FsMeetingFileStore, JsonSettingsStore, KeyringSecretStore,
-    LazyWhisperTranscriber, LiveProgress, SqliteJobRepo, SqliteMeetingRepo, SwappableLlm,
+    LazyWhisperTranscriber, LiveJobs, SqliteJobRepo, SqliteMeetingRepo, SwappableLlm,
     TranscriberPrefs, WhisperTranscriber, Worker, PROTOCOL_KINDS, TRANSCRIBE_KINDS,
 };
 use meeting_core::entities::meeting::now_unix;
@@ -45,9 +45,10 @@ pub struct Container {
     pub audio_capture: Arc<dyn AudioCapture>,
     pub file_store: Arc<dyn MeetingFileStore>,
     pub recordings_dir: PathBuf,
-    /// Live, in-memory job-progress table shared between the worker (writer)
-    /// and the `GET /jobs/:id` handler (reader). Never persisted.
-    pub progress: LiveProgress,
+    /// Live, in-memory job table shared between the worker (writer), the
+    /// `GET /jobs/:id` handler (reader), and the `DELETE /jobs/:id` handler
+    /// (cancellation-token signaller). Never persisted.
+    pub progress: LiveJobs,
     /// `None` in CLI (`new_desktop`) mode; `Some` for the sidecar.
     pub settings_handles: Option<SettingsHandles>,
 }

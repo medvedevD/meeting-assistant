@@ -113,6 +113,26 @@ QtObject {
 
     function clear(meetingId) { _untrack(meetingId); _touch() }
 
+    // ── cancel ───────────────────────────────────────────────────────────────
+    // Cooperative cancel of the live job for a meeting. Sends
+    // `DELETE /api/v1/jobs/:id`; the worker terminates at its next safe
+    // checkpoint and the poller surfaces status=failed, error_class=cancelled.
+    // Optimistically marks the entry as cancel-requested so the UI can show
+    // a transient "Прерывание..." state before the poller confirms.
+    function cancel(meetingId) {
+        var e = _jobs[meetingId]
+        if (!e || e.terminalAt !== 0 || !e.jobId)
+            return
+        var req = _reqComp.createObject(store)
+        if (req === null)
+            return
+        req.ok.connect(function () { req.destroy() })
+        req.fail.connect(function (s, err) { req.destroy() })
+        req.del("/api/v1/jobs/" + e.jobId)
+        _patch(meetingId, { "cancelRequested": true })
+        _touch()
+    }
+
     // ── internals ────────────────────────────────────────────────────────────
     function _touch() { version = version + 1 }
 
