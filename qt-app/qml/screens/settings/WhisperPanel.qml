@@ -38,6 +38,7 @@ ScrollView {
         langBox.setValue(tr.language || "ru")
         beamSpin.value = tr.beam_size || 1
         threadsSpin.value = tr.n_threads || 0
+        gpuSwitch.checked = backendAccelerated() && tr.use_gpu !== false
         refreshModels()
     }
     function catalogPath(model) {
@@ -124,6 +125,28 @@ ScrollView {
     function activeName() {
         var model = activeModel()
         return model ? (model.display_name || model.name || model.id) : qsTr("Модель не выбрана")
+    }
+    function backend() {
+        scr.rev
+        return t().backend || "cpu"
+    }
+    function backendAccelerated() {
+        return backend() !== "cpu"
+    }
+    function backendLabel() {
+        switch (backend()) {
+        case "metal":  return qsTr("Metal · GPU")
+        case "cuda":   return qsTr("CUDA · GPU")
+        case "vulkan": return qsTr("Vulkan · GPU")
+        default:       return qsTr("CPU")
+        }
+    }
+    // Help for the GPU toggle: if the build is accelerated, say what it uses;
+    // otherwise an honest, plain-language note (no dev jargon, no false promise).
+    function gpuHelp() {
+        if (backendAccelerated())
+            return qsTr("Использовать %1 для инференса. Применится при следующей транскрипции.").arg(backendLabel())
+        return qsTr("Транскрипция выполняется на процессоре. Ускорение на видеокарте в этой версии пока не поддерживается.")
     }
     function activeSize() {
         var model = activeModel()
@@ -557,14 +580,22 @@ ScrollView {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 4
-                    Text {
+                    RowLayout {
                         Layout.fillWidth: true
-                        text: qsTr("АКТИВНАЯ МОДЕЛЬ")
-                        font.family: Theme.fontUi
-                        font.pixelSize: Theme.fsMicro
-                        font.weight: Theme.wSemiBold
-                        font.letterSpacing: Theme.tracking(Theme.fsMicro, 0.14)
-                        color: Theme.ink3
+                        spacing: 8
+                        Text {
+                            Layout.fillWidth: true
+                            text: qsTr("АКТИВНАЯ МОДЕЛЬ")
+                            font.family: Theme.fontUi
+                            font.pixelSize: Theme.fsMicro
+                            font.weight: Theme.wSemiBold
+                            font.letterSpacing: Theme.tracking(Theme.fsMicro, 0.14)
+                            color: Theme.ink3
+                        }
+                        MeetyTag {
+                            text: panel.backendLabel()
+                            color: panel.backendAccelerated() ? Theme.accentTint : Theme.paper3
+                        }
                     }
                     RowLayout {
                         Layout.fillWidth: true
@@ -996,12 +1027,22 @@ ScrollView {
         SettingsRow {
             title: qsTr("Потоки CPU")
             help: qsTr("0 — автоматический выбор.")
-            dividerVisible: false
             MeetySpinBox {
                 id: threadsSpin
                 Layout.fillWidth: true
                 from: 0; to: 64
                 onValueModified: { panel.t().n_threads = value; scr.touch() }
+            }
+        }
+
+        SettingsRow {
+            title: qsTr("GPU-ускорение")
+            help: panel.gpuHelp()
+            dividerVisible: false
+            MeetySwitch {
+                id: gpuSwitch
+                enabled: panel.backendAccelerated()
+                onToggled: { panel.t().use_gpu = checked; scr.touch() }
             }
         }
     }
