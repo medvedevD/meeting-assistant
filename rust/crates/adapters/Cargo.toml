@@ -5,7 +5,11 @@ edition = "2021"
 
 [dependencies]
 meeting-core = { path = "../core" }
-whisper-rs = "0.16"
+# whisper-rs is declared in the per-target tables below, not here, so macOS can
+# default to the Metal backend (a system framework — no extra runtime install,
+# notarization-safe) while every other target stays CPU-only by default. CUDA
+# and Vulkan are opt-in via the `whisper-cuda` / `whisper-vulkan` features so the
+# portable packaging build is unchanged. See build.rs and ADR-006.
 hound = "3"
 rubato = "0.15"
 cpal = "0.15"
@@ -27,14 +31,33 @@ dirs = { workspace = true }
 # on platforms without a backend, KeyringSecretStore falls back to a 0600 file.
 keyring = "3"
 
+# Portable default: CPU-only Whisper on every target except macOS. CUDA/Vulkan
+# layer on top of this via the opt-in features below.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+whisper-rs = "0.16"
+
 # macOS system-audio capture via ScreenCaptureKit (audio-only; macOS 13.0 floor).
 # QtMultimedia/cpal cannot expose a macOS loopback device — see section-05.
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = { version = "=2.1.0", features = ["macos_13_0"] }
 keyring = { version = "3", features = ["apple-native"] }
+# Metal is on by default for macOS: it ships with the OS (no runtime install)
+# and needs no extra notarization/signing surface. This is the "cheapest win".
+whisper-rs = { version = "0.16", features = ["metal"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
+
+[features]
+# Opt-in GPU backends for portable (non-macOS) builds. Off by default so the
+# packaging pipeline's portable CPU build is unchanged. Enable exactly one for a
+# given build, e.g.:
+#   cargo build -p meeting-adapters --features whisper-cuda      # NVIDIA + CUDA SDK
+#   cargo build -p meeting-adapters --features whisper-vulkan    # cross-vendor + Vulkan SDK
+# macOS always links Metal (see the target table above); these are for
+# Linux/Windows users who have the matching toolchain installed.
+whisper-cuda = ["whisper-rs/cuda"]
+whisper-vulkan = ["whisper-rs/vulkan"]
 
 [dev-dependencies]
 meeting-core = { path = "../core", features = ["fakes"] }

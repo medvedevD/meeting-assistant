@@ -90,9 +90,21 @@ fn noop_sink() -> ProgressSink {
     Arc::new(|_stage: PipelineStage, _pct: u8| {})
 }
 
+/// The Whisper compute backend this binary was **compiled** against, decided by
+/// `build.rs` from the active cargo features + target OS. One of `"cpu"`,
+/// `"metal"`, `"cuda"`, `"vulkan"`.
+///
+/// This reflects the linked backend, not a live device probe: whisper.cpp
+/// silently falls back to CPU at runtime when the GPU runtime is missing (e.g. a
+/// `cuda` build on a host with no NVIDIA driver). Surfaced in the settings
+/// snapshot so users can see whether they got the accelerated build.
+pub fn whisper_backend() -> &'static str {
+    env!("MEETING_WHISPER_BACKEND")
+}
+
 // ── Transcriber preferences ───────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriberPrefs {
     /// BCP-47 language code ("ru", "en") or "auto" for detection. Default: "ru".
     #[serde(default = "default_language")]
@@ -103,6 +115,11 @@ pub struct TranscriberPrefs {
     /// Number of CPU threads for inference. 0 = auto (num_cpus::get_physical()).
     #[serde(default)]
     pub n_threads: u32,
+    /// Offload to the compiled GPU backend when available. No effect on a
+    /// CPU-only build (whisper.cpp has nothing to offload to). This is a
+    /// *context-creation* parameter, so toggling it reloads the model.
+    #[serde(default = "default_use_gpu")]
+    pub use_gpu: bool,
 }
 
 fn default_language() -> String {
@@ -111,13 +128,28 @@ fn default_language() -> String {
 fn default_beam_size() -> u32 {
     1
 }
+fn default_use_gpu() -> bool {
+    true
+}
+
+impl Default for TranscriberPrefs {
+    fn default() -> Self {
+        Self {
+            language: default_language(),
+            beam_size: default_beam_size(),
+            n_threads: 0,
+            use_gpu: true,
+        }
+    }
+}
 
 impl TranscriberPrefs {
-    pub fn new(language: impl Into<String>, beam_size: u32, n_threads: u32) -> Self {
+    pub fn new(language: impl Into<String>, beam_size: u32, n_threads: u32, use_gpu: bool) -> Self {
         Self {
             language: language.into(),
             beam_size,
             n_threads,
+            use_gpu,
         }
     }
 }
@@ -141,7 +173,8 @@ impl WhisperTranscriber {
             .and_then(|n| n.to_str())
             .unwrap_or(path);
         bench_log(&format!(
-            "model_loaded  model={model_name} load_ms={}",
+            "model_loaded  model={model_name} backend={} load_ms={}",
+            whisper_backend(),
             t.elapsed().as_millis()
         ));
         Ok(Self { ctx: Arc::new(ctx) })
@@ -432,10 +465,13 @@ pub(crate) trait WhisperRunner: Send + Sync {
 }
 
 pub(crate) type RunnerFactory =
-    Arc<dyn Fn(&Path) -> Result<Arc<dyn WhisperRunner>, CoreError> + Send + Sync>;
+    Arc<dyn Fn(&Path, bool) -> Result<Arc<dyn WhisperRunner>, CoreError> + Send + Sync>;
 
 pub(crate) struct LazyState {
     pub(crate) runner: Option<Arc<dyn WhisperRunner>>,
+    /// `use_gpu` the currently-loaded runner was built with. A mismatch with the
+    /// live prefs forces a reload, since GPU usage is baked in at context creation.
+    pub(crate) loaded_use_gpu: Option<bool>,
     pub(crate) active_count: usize,
     pub(crate) unload_handle: Option<tokio::task::AbortHandle>,
 }
@@ -444,6 +480,7 @@ impl Default for LazyState {
     fn default() -> Self {
         Self {
             runner: None,
+            loaded_use_gpu: None,
             active_count: 0,
             unload_handle: None,
         }
@@ -485,18 +522,18 @@ impl LazyWhisperTranscriber {
     /// Creates a production instance with given transcriber preferences.
     /// Does NOT load the model — loading is deferred to first transcription.
     pub fn new(model_path: PathBuf, prefs: TranscriberPrefs) -> Self {
-        let factory: RunnerFactory = Arc::new(|path: &Path| {
+        let factory: RunnerFactory = Arc::new(|path: &Path, use_gpu: bool| {
             let path_str = path
                 .to_str()
                 .ok_or_else(|| CoreError::Transcription("model path is not valid UTF-8".into()))?;
             let t = std::time::Instant::now();
-            let ctx =
-                WhisperContext::new_with_params(path_str, WhisperContextParameters::default())
-                    .map_err(|e| {
-                        CoreError::Transcription(format!(
-                            "model_missing: Модель не найдена или повреждена: {e}"
-                        ))
-                    })?;
+            let mut ctx_params = WhisperContextParameters::default();
+            ctx_params.use_gpu(use_gpu);
+            let ctx = WhisperContext::new_with_params(path_str, ctx_params).map_err(|e| {
+                CoreError::Transcription(format!(
+                    "model_missing: Модель не найдена или повреждена: {e}"
+                ))
+            })?;
             let model_name = path
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -543,11 +580,13 @@ impl LazyWhisperTranscriber {
         if let Some(error) = self.model_error.read().unwrap().clone() {
             return Err(model_path_error_to_core(error));
         }
+        let use_gpu = self.prefs.read().unwrap().use_gpu;
         let model_path = self.model_path.read().unwrap().clone();
         let mut state = self.state.lock().await;
         if state.runner.is_none() {
             tracing::info!("warm preloading whisper model: {:?}", model_path);
-            state.runner = Some((self.factory)(&model_path)?);
+            state.runner = Some((self.factory)(&model_path, use_gpu)?);
+            state.loaded_use_gpu = Some(use_gpu);
         }
         Ok(())
     }
@@ -605,6 +644,7 @@ impl LazyWhisperTranscriber {
     async fn unload_runner(&self) {
         let mut state = self.state.lock().await;
         state.runner = None;
+        state.loaded_use_gpu = None;
         if let Some(handle) = state.unload_handle.take() {
             handle.abort();
         }
@@ -636,10 +676,15 @@ impl LazyWhisperTranscriber {
         // --- 1. ACQUIRE ---
         let runner: Arc<dyn WhisperRunner> = {
             let mut state = self.state.lock().await;
-            if state.runner.is_none() {
-                tracing::info!("loading whisper model: {:?}", model_path);
+            // Reload when nothing is loaded, or when the `use_gpu` toggle changed
+            // since the runner was built — but only between jobs (active_count == 0)
+            // so we never swap a context out from under an in-flight transcription.
+            let gpu_changed = state.loaded_use_gpu != Some(prefs.use_gpu);
+            if state.runner.is_none() || (gpu_changed && state.active_count == 0) {
+                tracing::info!(use_gpu = prefs.use_gpu, "loading whisper model: {:?}", model_path);
                 // Early return on error — active_count and unload_handle are untouched
-                state.runner = Some((self.factory)(&model_path)?);
+                state.runner = Some((self.factory)(&model_path, prefs.use_gpu)?);
+                state.loaded_use_gpu = Some(prefs.use_gpu);
             }
             if let Some(handle) = state.unload_handle.take() {
                 handle.abort();
@@ -659,7 +704,9 @@ impl LazyWhisperTranscriber {
                 let state_clone = Arc::clone(&self.state);
                 let task = tokio::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(IDLE_UNLOAD_SECS)).await;
-                    state_clone.lock().await.runner = None;
+                    let mut state = state_clone.lock().await;
+                    state.runner = None;
+                    state.loaded_use_gpu = None;
                     tracing::info!("whisper model unloaded after {}s idle", IDLE_UNLOAD_SECS);
                 });
                 state.unload_handle = Some(task.abort_handle());
@@ -747,21 +794,21 @@ mod tests {
     }
 
     fn factory_ok(load_count: Arc<AtomicUsize>) -> RunnerFactory {
-        Arc::new(move |_path| {
+        Arc::new(move |_path, _use_gpu| {
             load_count.fetch_add(1, Ordering::SeqCst);
             Ok(Arc::new(FakeRunner { fail_run: false }) as Arc<dyn WhisperRunner>)
         })
     }
 
     fn factory_fail_load(load_count: Arc<AtomicUsize>) -> RunnerFactory {
-        Arc::new(move |_path| {
+        Arc::new(move |_path, _use_gpu| {
             load_count.fetch_add(1, Ordering::SeqCst);
             Err(CoreError::Transcription("model not found".into()))
         })
     }
 
     fn factory_fail_run(load_count: Arc<AtomicUsize>) -> RunnerFactory {
-        Arc::new(move |_path| {
+        Arc::new(move |_path, _use_gpu| {
             load_count.fetch_add(1, Ordering::SeqCst);
             Ok(Arc::new(FakeRunner { fail_run: true }) as Arc<dyn WhisperRunner>)
         })
@@ -771,7 +818,7 @@ mod tests {
         load_count: Arc<AtomicUsize>,
         should_fail: Arc<AtomicBool>,
     ) -> RunnerFactory {
-        Arc::new(move |_path| {
+        Arc::new(move |_path, _use_gpu| {
             load_count.fetch_add(1, Ordering::SeqCst);
             if should_fail.load(Ordering::SeqCst) {
                 return Err(CoreError::Transcription("model not found".into()));
@@ -786,6 +833,23 @@ mod tests {
 
     fn default_prefs() -> TranscriberPrefs {
         TranscriberPrefs::default()
+    }
+
+    // The build-time backend constant must always be one of the known values,
+    // and a default portable build (no GPU feature, non-macOS) must report CPU.
+    #[test]
+    fn backend_constant_is_known() {
+        let b = whisper_backend();
+        assert!(
+            matches!(b, "cpu" | "metal" | "cuda" | "vulkan"),
+            "unexpected backend: {b}"
+        );
+        #[cfg(all(
+            not(target_os = "macos"),
+            not(feature = "whisper-cuda"),
+            not(feature = "whisper-vulkan")
+        ))]
+        assert_eq!(b, "cpu", "portable default build must be CPU-only");
     }
 
     fn model_error(code: ModelPathErrorCode, path: Option<PathBuf>) -> ModelPathError {
@@ -1046,6 +1110,49 @@ mod tests {
             load_count.load(Ordering::SeqCst),
             2,
             "должна быть загрузка новой модели"
+        );
+    }
+
+    // Toggling `use_gpu` must reload the context (GPU usage is baked in at
+    // creation), and the factory must receive the new flag; an unchanged flag
+    // must not reload.
+    #[tokio::test]
+    async fn toggling_use_gpu_reloads_runner_with_new_flag() {
+        let load_count = Arc::new(AtomicUsize::new(0));
+        let last_use_gpu = Arc::new(std::sync::Mutex::new(None::<bool>));
+        let factory: RunnerFactory = {
+            let load_count = load_count.clone();
+            let last = last_use_gpu.clone();
+            Arc::new(move |_path, use_gpu| {
+                load_count.fetch_add(1, Ordering::SeqCst);
+                *last.lock().unwrap() = Some(use_gpu);
+                Ok(Arc::new(FakeRunner { fail_run: false }) as Arc<dyn WhisperRunner>)
+            })
+        };
+        let t = LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/model.bin"),
+            factory,
+            TranscriberPrefs::new("ru", 1, 0, true),
+        );
+
+        t.transcribe(audio()).await.unwrap();
+        assert_eq!(load_count.load(Ordering::SeqCst), 1);
+        assert_eq!(*last_use_gpu.lock().unwrap(), Some(true));
+
+        t.set_prefs(TranscriberPrefs::new("ru", 1, 0, false));
+        t.transcribe(audio()).await.unwrap();
+        assert_eq!(
+            load_count.load(Ordering::SeqCst),
+            2,
+            "use_gpu change must reload the context"
+        );
+        assert_eq!(*last_use_gpu.lock().unwrap(), Some(false));
+
+        t.transcribe(audio()).await.unwrap();
+        assert_eq!(
+            load_count.load(Ordering::SeqCst),
+            2,
+            "unchanged use_gpu must not reload"
         );
     }
 

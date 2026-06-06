@@ -143,6 +143,7 @@ impl Container {
             settings.transcriber.language.clone(),
             settings.transcriber.beam_size,
             settings.transcriber.n_threads,
+            settings.transcriber.use_gpu,
         );
         let transcriber_handle = Arc::new(match model_resolution {
             Ok(_) => LazyWhisperTranscriber::new(model, prefs),

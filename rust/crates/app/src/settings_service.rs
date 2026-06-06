@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use meeting_adapters::settings_store::PersistedSettings;
 use meeting_adapters::{
-    build_llm, probe_llm, resolve_transcription_model_path, JsonSettingsStore, ProviderKind,
-    TranscriberPrefs,
+    build_llm, probe_llm, resolve_transcription_model_path, whisper_backend, JsonSettingsStore,
+    ProviderKind, TranscriberPrefs,
 };
 use meeting_api::SettingsService;
 use serde_json::{json, Value};
@@ -42,6 +42,7 @@ impl AppSettingsService {
             settings.transcriber.language.clone(),
             settings.transcriber.beam_size,
             settings.transcriber.n_threads,
+            settings.transcriber.use_gpu,
         ));
         self.handles
             .transcriber
@@ -86,11 +87,16 @@ impl SettingsService for AppSettingsService {
                 "language": s.transcriber.language,
                 "beam_size": s.transcriber.beam_size,
                 "n_threads": s.transcriber.n_threads,
+                "use_gpu": s.transcriber.use_gpu,
                 "model_source": s.transcriber.model_source,
                 "model_id": s.transcriber.model_id,
                 "custom_model_path": s.transcriber.custom_model_path,
                 "custom_models": s.transcriber.custom_models,
                 "model_path": s.transcriber.custom_model_path,
+                // Read-only: compiled Whisper backend (cpu/metal/cuda/vulkan).
+                // Ignored on PUT (unknown to PersistedSettings). The UI offers the
+                // GPU toggle iff this is not "cpu". See ADR-010.
+                "backend": whisper_backend(),
             },
             "llm": {
                 "active": llm.active.as_str(),

@@ -46,6 +46,10 @@ pub struct PersistedTranscriberPrefs {
     /// CPU threads for inference. 0 = auto (physical cores). Default: 0.
     #[serde(default)]
     pub n_threads: u32,
+    /// Offload to the compiled GPU backend when available. No effect on CPU-only
+    /// builds. Default: true. See `whisper_backend()` / ADR-006.
+    #[serde(default = "default_use_gpu")]
+    pub use_gpu: bool,
     /// Managed catalog model or advanced custom path. Old `model_path` JSON is
     /// accepted as an alias for `custom_model_path` and normalized to
     /// `model_source = custom_path`.
@@ -84,6 +88,8 @@ struct PersistedTranscriberPrefsWire {
     beam_size: u32,
     #[serde(default)]
     n_threads: u32,
+    #[serde(default = "default_use_gpu")]
+    use_gpu: bool,
     #[serde(default)]
     model_source: TranscriptionModelSource,
     #[serde(default, deserialize_with = "empty_string_as_none")]
@@ -106,6 +112,7 @@ impl<'de> Deserialize<'de> for PersistedTranscriberPrefs {
             language: wire.language,
             beam_size: wire.beam_size,
             n_threads: wire.n_threads,
+            use_gpu: wire.use_gpu,
             model_source: wire.model_source,
             model_id: wire.model_id,
             custom_model_path: wire.custom_model_path.or(wire.model_path),
@@ -120,6 +127,10 @@ fn default_beam_size() -> u32 {
 
 fn default_language() -> String {
     "ru".to_string()
+}
+
+fn default_use_gpu() -> bool {
+    true
 }
 
 fn empty_string_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -140,6 +151,7 @@ impl Default for PersistedTranscriberPrefs {
             language: "ru".into(),
             beam_size: 1,
             n_threads: 0,
+            use_gpu: true,
             model_source: TranscriptionModelSource::Managed,
             model_id: None,
             custom_model_path: None,
