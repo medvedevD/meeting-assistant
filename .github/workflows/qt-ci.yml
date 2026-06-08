@@ -89,6 +89,7 @@ jobs:
           cmake -S qt-app -B qt-app/build \
             -DCMAKE_BUILD_TYPE=Release \
             -DMA_BUILD_TESTS=ON \
+            -DMA_ENABLE_QML_CACHEGEN=OFF \
             -DMA_SMOKE_SIDECAR="$PWD/${{ matrix.sidecar }}" \
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
 

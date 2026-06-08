@@ -106,9 +106,17 @@ set_source_files_properties(qml/theme/Theme.qml PROPERTIES
 set_source_files_properties(qml/ActiveJobsStore.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE)
 
+option(MA_ENABLE_QML_CACHEGEN
+    "Compile QML into cachegen C++ files for the GUI target" ON)
+set(_qml_cachegen_args)
+if(NOT MA_ENABLE_QML_CACHEGEN)
+    list(APPEND _qml_cachegen_args NO_CACHEGEN)
+endif()
+
 qt_add_qml_module(meeting-assistant-qt
     URI MeetingAssistant
     VERSION 1.0
+    ${_qml_cachegen_args}
     QML_FILES
         qml/Main.qml
         qml/AppShell.qml
