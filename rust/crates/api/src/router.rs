@@ -13,6 +13,9 @@ use meeting_core::ports::{
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tower_governor::{
+    governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor, GovernorLayer,
+};
 
 pub use meeting_core::LiveJobs;
 
@@ -127,10 +130,37 @@ pub fn create_server_router(
             min_protocol: crate::MIN_PROTOCOL_VERSION,
         });
 
-    api.merge(settings)
+    // Global rate limit on the authenticated surface. On loopback every peer is
+    // 127.0.0.1, so the legitimate GUI and a co-tenant abuser are
+    // indistinguishable by IP — a single global GCRA bucket (not per-IP, which
+    // would be identical here but demand ConnectInfo plumbing) is the keying
+    // that matches the threat. Steady ~100 req/s (one cell per 10 ms) with a
+    // burst of 50; the GUI sits far under this by design. The default handler
+    // rejects excess with `429 Too Many Requests` and an `x-ratelimit-after`
+    // retry hint. See plans/api-rate-limit/plan.md for the full rationale.
+    let governor = GovernorLayer {
+        config: Arc::new(
+            GovernorConfigBuilder::default()
+                .per_millisecond(10)
+                .burst_size(50)
+                .key_extractor(GlobalKeyExtractor)
+                .finish()
+                .expect("rate-limit period and burst are non-zero"),
+        ),
+    };
+
+    // The limiter is applied *outside* the per-router `require_bearer` gate
+    // (`.layer` wraps the already-merged auth routers, so it runs first). A
+    // brute-force loop that only ever yields 401s therefore still drains the
+    // bucket and trips the limiter. `/health` and `/version` are merged after
+    // and stay unthrottled.
+    let authed = api
+        .merge(settings)
         .merge(templates)
         .merge(transcription_models)
-        .merge(meta)
+        .layer(governor);
+
+    authed.merge(meta)
 }
 
 fn api_routes() -> Router<Arc<AppState>> {
@@ -486,6 +516,67 @@ mod tests {
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn brute_force_401s_are_rate_limited() {
+        // A co-tenant guessing tokens never gets past `require_bearer`, but the
+        // limiter sits ahead of it: enough 401-yielding requests must exhaust
+        // the global bucket and start returning 429. Burst is 50, so well over
+        // that count guarantees the limiter trips. All calls share one router
+        // instance so they hit the same Arc'd GCRA bucket.
+        let app = server();
+        let mut saw_429 = false;
+        for _ in 0..200 {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/api/v1/meetings")
+                        .header("Authorization", "Bearer not-the-token")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            match resp.status() {
+                StatusCode::UNAUTHORIZED => {}
+                StatusCode::TOO_MANY_REQUESTS => {
+                    saw_429 = true;
+                    break;
+                }
+                other => panic!("unexpected status {other} during brute force"),
+            }
+        }
+        assert!(
+            saw_429,
+            "brute-force 401 traffic must trip the rate limiter (429)"
+        );
+    }
+
+    #[tokio::test]
+    async fn health_is_not_rate_limited() {
+        // `/health` is merged outside the limiter; hammering it past the burst
+        // must never yield 429.
+        let app = server();
+        for _ in 0..200 {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/health")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::OK,
+                "/health must never be rate-limited"
+            );
+        }
     }
 
     #[tokio::test]
