@@ -145,6 +145,18 @@ impl ErrorClass {
         }
     }
 
+    /// Whether re-running the job could plausibly succeed. Transient faults
+    /// (network blips, rate limits, a killed worker) are worth a backoff retry;
+    /// configuration/content faults (bad or missing API key, corrupt audio, a
+    /// model that isn't selected/installed) will fail identically every time, so
+    /// the worker should surface them immediately instead of grinding retries.
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::NetworkTimeout | Self::ApiQuota | Self::WorkerKilled | Self::Unknown
+        )
+    }
+
     /// Map a terminal [`CoreError`] to a UI-facing error class. The LLM
     /// adapters already classify HTTP failures into the typed `Api*`/`Network`
     /// variants ([`crate::CoreError`]); transcription failures are inspected
@@ -327,5 +339,28 @@ mod tests {
             ErrorClass::from_core_error(&CoreError::Transcription("decode failed".into())),
             ErrorClass::Unknown,
         );
+    }
+
+    #[test]
+    fn retryable_classes_are_transient_only() {
+        // Transient — worth a backoff retry.
+        for c in [
+            ErrorClass::NetworkTimeout,
+            ErrorClass::ApiQuota,
+            ErrorClass::WorkerKilled,
+            ErrorClass::Unknown,
+        ] {
+            assert!(c.is_retryable(), "{} should retry", c.as_str());
+        }
+        // Permanent — re-running fails identically, so surface immediately.
+        for c in [
+            ErrorClass::ApiAuth,
+            ErrorClass::AudioCorrupt,
+            ErrorClass::ModelNotSelected,
+            ErrorClass::ModelMissing,
+            ErrorClass::Cancelled,
+        ] {
+            assert!(!c.is_retryable(), "{} should fail fast", c.as_str());
+        }
     }
 }

@@ -10,8 +10,8 @@ function describe(errorClass, rawMessage) {
     switch (errorClass) {
     case "api_auth":
         return {
-            title: "Ошибка авторизации API",
-            hint: "Проверьте API-ключ выбранного провайдера в настройках.",
+            title: "LLM не настроена",
+            hint: "API-ключ не задан или неверен. Укажите ключ выбранного провайдера в настройках.",
             settings: true
         }
     case "api_quota":

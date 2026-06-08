@@ -409,10 +409,13 @@ impl Worker {
         let attempts = job.attempts + 1;
         let now = now_unix();
         let msg = error.to_string();
+        let class = ErrorClass::from_core_error(error);
 
-        if attempts >= MAX_ATTEMPTS {
+        // Fail fast on faults a retry can't fix (missing/invalid API key,
+        // corrupt audio, model not configured): retrying just delays the
+        // already-actionable error in the UI. Transient faults still back off.
+        if attempts >= MAX_ATTEMPTS || !class.is_retryable() {
             // Persist the classified cause for the UI (only on terminal failure).
-            let class = ErrorClass::from_core_error(error);
             warn!(job_id = %job.id, attempts, error_class = class.as_str(), "job permanently failed: {msg}");
             let _ = self
                 .job_repo
@@ -488,6 +491,54 @@ mod tests {
             .expect("chained protocol job should be enqueued");
         assert_eq!(proto.meeting_id, m.id);
         assert_eq!(proto.template_name.as_deref(), Some("Командная встреча"));
+    }
+
+    #[tokio::test]
+    async fn protocol_auth_failure_fails_fast_without_retry() {
+        use meeting_core::entities::JobStatus;
+
+        struct FailingLlm;
+        #[async_trait::async_trait]
+        impl meeting_core::ports::LlmProvider for FailingLlm {
+            async fn generate(
+                &self,
+                _transcript: &str,
+                _instructions: Option<&str>,
+            ) -> Result<String, meeting_core::CoreError> {
+                Err(meeting_core::CoreError::ApiAuth("no API key configured".into()))
+            }
+        }
+
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+        mr.save_transcript(&m.id, "transcript body").await.unwrap();
+
+        let worker = Worker::new(
+            Arc::clone(&jr) as Arc<dyn JobRepo>,
+            Arc::clone(&mr) as Arc<dyn MeetingRepo>,
+            FakeTranscriber::new("ok") as Arc<dyn Transcriber>,
+            FakeMeetingFileStore::new(),
+            Arc::new(FailingLlm) as Arc<dyn meeting_core::ports::LlmProvider>,
+            FakeTemplateLoader::empty(),
+            meeting_core::LiveProgress::new(),
+            PROTOCOL_KINDS,
+            1,
+            "protocol",
+        );
+
+        let job = Job::new_regenerate_protocol(m.id.clone(), None);
+        jr.enqueue(&job).await.unwrap();
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        worker.execute(claimed, CancellationToken::new()).await;
+
+        // A missing/invalid key is permanent: the job must land Failed on the
+        // first attempt (not be re-queued as Pending for a backoff retry).
+        let after = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert_eq!(after.status, JobStatus::Failed);
+        assert_eq!(after.attempts, 1);
+        assert_eq!(after.error_class, Some(ErrorClass::ApiAuth));
     }
 
     #[tokio::test]
