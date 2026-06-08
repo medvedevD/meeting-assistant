@@ -90,6 +90,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DMA_BUILD_TESTS=ON \
             -DMA_ENABLE_QML_CACHEGEN=OFF \
+            -DMEETING_SERVER_BIN="$PWD/${{ matrix.sidecar }}" \
             -DMA_SMOKE_SIDECAR="$PWD/${{ matrix.sidecar }}" \
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
 
@@ -101,3 +102,16 @@ jobs:
       - name: Offscreen Qt smoke
         shell: bash
         run: ctest --test-dir qt-app/build -C Release --output-on-failure
+
+      # ── Downloadable two-binary bundle (GUI + sidecar + LGPL notices) ─────
+      - name: Stage app artifact
+        shell: bash
+        run: cmake --install qt-app/build --config Release --prefix dist/artifact
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: meeting-assistant-${{ runner.os }}-${{ runner.arch }}
+          path: dist/artifact
+          if-no-files-found: error
+          retention-days: 14
