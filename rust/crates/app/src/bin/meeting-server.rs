@@ -57,6 +57,9 @@ struct Args {
     parent_pid: Option<i32>,
     /// Inherited pipe read-end fd (POSIX). EOF on it == parent died (race-free).
     parent_pipe_fd: Option<i32>,
+    /// Development-only command: roll back the latest reversible DB migration
+    /// and exit without starting the loopback HTTP sidecar.
+    rollback_one: bool,
 }
 
 fn parse_args() -> Args {
@@ -69,6 +72,9 @@ fn parse_args() -> Args {
             }
             "--parent-pipe-fd" => {
                 args.parent_pipe_fd = it.next().and_then(|v| v.parse().ok());
+            }
+            "--rollback-one" => {
+                args.rollback_one = true;
             }
             other => {
                 tracing::warn!("ignoring unrecognised argument: {other}");
@@ -95,6 +101,14 @@ fn main() -> Result<()> {
     if !try_acquire_singleton()? {
         tracing::error!("another instance is already running — exiting");
         std::process::exit(EXIT_SINGLETON_BUSY);
+    }
+
+    if args.rollback_one {
+        let db = default_db_path();
+        let version = meeting_adapters::rollback_last_migration_at_path(&db)
+            .with_context(|| format!("failed to roll back latest migration in {db:?}"))?;
+        tracing::info!(version, db = %db.display(), "rolled back latest migration");
+        return Ok(());
     }
 
     let rt = tokio::runtime::Builder::new_multi_thread()

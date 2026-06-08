@@ -20,7 +20,7 @@ pub use secret_store::{
 };
 
 pub mod db;
-pub use db::{Db, SqliteJobRepo, SqliteMeetingRepo};
+pub use db::{rollback_last_migration_at_path, Db, SqliteJobRepo, SqliteMeetingRepo};
 
 mod worker;
 pub use worker::{LiveJobs, Worker, PROTOCOL_KINDS, TRANSCRIBE_KINDS};
