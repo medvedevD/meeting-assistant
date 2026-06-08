@@ -155,7 +155,7 @@ impl Container {
         let meeting_repo = Arc::new(SqliteMeetingRepo(Arc::clone(&db)));
         let job_repo = Arc::new(SqliteJobRepo(Arc::clone(&db)));
 
-        // ── LLM: active provider, with the effective key (env → keyring/file) ──
+        // ── LLM: active provider, with the stored key (keyring/vault/file) ────
         let active = settings.llm.active;
         let key = secrets.effective_key(active.as_str());
         let cfg = settings.llm.resolve(active, key);

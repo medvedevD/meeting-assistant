@@ -15,7 +15,9 @@ pub use transcription_models::{
 };
 
 pub mod secret_store;
-pub use secret_store::KeyringSecretStore;
+pub use secret_store::{
+    KeyringMechanism, KeyringSecretStore, SecretError, SecretStatus, VaultState,
+};
 
 pub mod db;
 pub use db::{Db, SqliteJobRepo, SqliteMeetingRepo};

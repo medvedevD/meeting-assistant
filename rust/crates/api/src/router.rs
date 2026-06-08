@@ -157,6 +157,30 @@ fn settings_routes() -> Router<Arc<dyn SettingsService>> {
         .route("/api/v1/settings", get(settings::get).put(settings::put))
         .route("/api/v1/settings/secret", put(settings::put_secret))
         .route("/api/v1/settings/test", post(settings::test))
+        .route(
+            "/api/v1/settings/secret-store/protect",
+            post(settings::protect_secret_store),
+        )
+        .route(
+            "/api/v1/settings/secret-store/unlock",
+            post(settings::unlock_secret_store),
+        )
+        .route(
+            "/api/v1/settings/secret-store/lock",
+            post(settings::lock_secret_store),
+        )
+        .route(
+            "/api/v1/settings/secret-store/passphrase",
+            post(settings::change_secret_passphrase),
+        )
+        .route(
+            "/api/v1/settings/secret-store/migrate",
+            post(settings::migrate_secret_store),
+        )
+        .route(
+            "/api/v1/settings/secret-store/reset",
+            post(settings::reset_secret_store),
+        )
 }
 
 fn template_routes() -> Router<Arc<dyn TemplateService>> {
@@ -258,6 +282,24 @@ mod tests {
             Ok(())
         }
         async fn test_provider(&self, _provider: String) -> Result<(), String> {
+            Ok(())
+        }
+        async fn protect_secret_store(&self, _passphrase: String) -> Result<(), String> {
+            Ok(())
+        }
+        async fn unlock_secret_store(&self, _passphrase: String) -> Result<(), String> {
+            Ok(())
+        }
+        async fn lock_secret_store(&self) -> Result<(), String> {
+            Ok(())
+        }
+        async fn change_secret_passphrase(&self, _old: String, _new: String) -> Result<(), String> {
+            Ok(())
+        }
+        async fn migrate_secret_store_to_keyring(&self, _passphrase: String) -> Result<(), String> {
+            Ok(())
+        }
+        async fn reset_secret_store(&self) -> Result<(), String> {
             Ok(())
         }
     }

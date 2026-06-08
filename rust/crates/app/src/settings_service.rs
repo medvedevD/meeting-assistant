@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use meeting_adapters::settings_store::PersistedSettings;
 use meeting_adapters::{
     build_llm, probe_llm, resolve_transcription_model_path, whisper_backend, JsonSettingsStore,
-    ProviderKind, TranscriberPrefs,
+    ProviderKind, SecretStatus, TranscriberPrefs, VaultState,
 };
 use meeting_api::SettingsService;
 use serde_json::{json, Value};
@@ -55,13 +55,82 @@ impl AppSettingsService {
     }
 }
 
-fn provider_view(cfg: &meeting_adapters::settings_store::ProviderCfg, has_key: bool) -> Value {
+/// Project the secret store's at-rest location onto the sanitized snapshot so
+/// the UI can disclose it honestly. `mechanism`/`path` are mutually exclusive:
+/// a keystore reports its mechanism, a file backend reports its path. Phase 1
+/// ships `keyring` and `plaintext`; `vault`/`locked` arrive in a later phase.
+fn secret_storage_view(status: SecretStatus) -> Value {
+    match status {
+        SecretStatus::Keyring {
+            mechanism,
+            pending_vault,
+        } => json!({
+            "kind": "keyring",
+            "state": "ready",
+            "mechanism": mechanism.as_id(),
+            "mechanism_detail": Value::Null,
+            "path": Value::Null,
+            // An orphaned vault the user can fold into the keystore.
+            "pending_migration": if pending_vault { json!("vault") } else { Value::Null },
+        }),
+        SecretStatus::Vault { state, path } => json!({
+            "kind": "vault",
+            "state": match state {
+                VaultState::Locked => "locked",
+                VaultState::Unlocked => "ready",
+            },
+            "mechanism": Value::Null,
+            "mechanism_detail": Value::Null,
+            "path": path.display().to_string(),
+        }),
+        SecretStatus::Plaintext { path } => json!({
+            "kind": "plaintext",
+            "state": "ready",
+            "mechanism": Value::Null,
+            "mechanism_detail": Value::Null,
+            "path": path.display().to_string(),
+        }),
+    }
+}
+
+fn provider_view(
+    cfg: &meeting_adapters::settings_store::ProviderCfg,
+    has_key: bool,
+    key_hint: Value,
+) -> Value {
     json!({
         "model": cfg.model,
         "max_tokens": cfg.max_tokens,
         "base_url": cfg.base_url,
         "has_key": has_key,
+        // Non-secret fingerprint so the UI can show *which* key is stored
+        // (last 4 chars + length) without ever sending the key itself.
+        "key_hint": key_hint,
     })
+}
+
+/// A safe, non-reversible fingerprint of a stored key: its last 4 characters
+/// and total length. `null` when no key is set.
+fn key_hint_value(stored: Option<&str>) -> Value {
+    match stored {
+        Some(k) if !k.is_empty() => {
+            let len = k.chars().count();
+            let last4: String = k.chars().skip(len.saturating_sub(4)).collect();
+            json!({ "last4": last4, "len": len })
+        }
+        _ => Value::Null,
+    }
+}
+
+/// Build a provider view for a key-bearing provider, reading the stored key
+/// once to derive both `has_key` and the fingerprint.
+fn keyed_provider_view(
+    secrets: &meeting_adapters::KeyringSecretStore,
+    provider: &str,
+    cfg: &meeting_adapters::settings_store::ProviderCfg,
+) -> Value {
+    let stored = secrets.get(provider).filter(|s| !s.is_empty());
+    provider_view(cfg, stored.is_some(), key_hint_value(stored.as_deref()))
 }
 
 #[async_trait]
@@ -100,13 +169,15 @@ impl SettingsService for AppSettingsService {
             },
             "llm": {
                 "active": llm.active.as_str(),
-                "anthropic": provider_view(&llm.anthropic, secrets.has_key("anthropic")),
-                "openai": provider_view(&llm.openai, secrets.has_key("openai")),
-                "gemini": provider_view(&llm.gemini, secrets.has_key("gemini")),
-                "mistral": provider_view(&llm.mistral, secrets.has_key("mistral")),
-                "ollama": provider_view(&llm.ollama, true),
+                // One `get` per provider: derive both has_key and the fingerprint
+                // from the same read (avoids a second keyring/vault round-trip).
+                "anthropic": keyed_provider_view(secrets, "anthropic", &llm.anthropic),
+                "openai": keyed_provider_view(secrets, "openai", &llm.openai),
+                "gemini": keyed_provider_view(secrets, "gemini", &llm.gemini),
+                "mistral": keyed_provider_view(secrets, "mistral", &llm.mistral),
+                "ollama": provider_view(&llm.ollama, true, Value::Null),
             },
-            "secrets_fallback": secrets.is_using_fallback(),
+            "secret_storage": secret_storage_view(secrets.status()),
         })
     }
 
@@ -146,5 +217,60 @@ impl SettingsService for AppSettingsService {
         }
         let cfg = settings.llm.resolve(kind, key);
         probe_llm(&cfg).await.map_err(|e| e.to_string())
+    }
+
+    async fn protect_secret_store(&self, passphrase: String) -> Result<(), String> {
+        self.handles
+            .secrets
+            .protect_with_passphrase(&passphrase)
+            .map_err(|e| e.to_string())
+        // Keys are unchanged (same values, now encrypted) — no LLM rebuild.
+    }
+
+    async fn unlock_secret_store(&self, passphrase: String) -> Result<(), String> {
+        self.handles
+            .secrets
+            .unlock(&passphrase)
+            .map_err(|e| e.to_string())?;
+        // Keys became readable — rebuild the active LLM so it picks them up.
+        self.rebuild_llm(&self.store().load());
+        Ok(())
+    }
+
+    async fn lock_secret_store(&self) -> Result<(), String> {
+        self.handles
+            .secrets
+            .lock()
+            .map_err(|e| e.to_string())?;
+        // Keys are no longer readable — rebuild so the active LLM reflects that.
+        self.rebuild_llm(&self.store().load());
+        Ok(())
+    }
+
+    async fn change_secret_passphrase(&self, old: String, new: String) -> Result<(), String> {
+        self.handles
+            .secrets
+            .change_passphrase(&old, &new)
+            .map_err(|e| e.to_string())
+    }
+
+    async fn migrate_secret_store_to_keyring(&self, passphrase: String) -> Result<(), String> {
+        self.handles
+            .secrets
+            .migrate_vault_to_keyring(&passphrase)
+            .map_err(|e| e.to_string())?;
+        // Keys now resolve from the keystore — rebuild the active LLM.
+        self.rebuild_llm(&self.store().load());
+        Ok(())
+    }
+
+    async fn reset_secret_store(&self) -> Result<(), String> {
+        self.handles
+            .secrets
+            .reset_store()
+            .map_err(|e| e.to_string())?;
+        // Keys are gone — rebuild so the active LLM reflects that.
+        self.rebuild_llm(&self.store().load());
+        Ok(())
     }
 }

@@ -23,4 +23,24 @@ pub trait SettingsService: Send + Sync {
 
     /// Cheap credential/connectivity probe for the "Test key" button.
     async fn test_provider(&self, provider: String) -> Result<(), String>;
+
+    /// Encrypt the plaintext fallback into a passphrase vault (and unlock it).
+    /// Only meaningful when the store is in the plaintext fallback.
+    async fn protect_secret_store(&self, passphrase: String) -> Result<(), String>;
+
+    /// Decrypt the vault for this session. `Err` on a wrong passphrase.
+    async fn unlock_secret_store(&self, passphrase: String) -> Result<(), String>;
+
+    /// Drop the decrypted keys from memory (vault returns to locked).
+    async fn lock_secret_store(&self) -> Result<(), String>;
+
+    /// Re-encrypt the vault under a new passphrase (verifies `old`).
+    async fn change_secret_passphrase(&self, old: String, new: String) -> Result<(), String>;
+
+    /// Import an orphaned vault's keys into the now-available keystore, then
+    /// delete the vault. `Err` on a wrong passphrase.
+    async fn migrate_secret_store_to_keyring(&self, passphrase: String) -> Result<(), String>;
+
+    /// Discard the secret store (forgotten-passphrase escape hatch). Keys lost.
+    async fn reset_secret_store(&self) -> Result<(), String>;
 }

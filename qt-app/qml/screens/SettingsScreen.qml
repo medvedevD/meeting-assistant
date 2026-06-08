@@ -251,10 +251,12 @@ Page {
                                    "вступит в силу после перезапуска приложения.")
                     }
                 }
-                // insecure-secrets banner (keyring unavailable → plaintext fallback)
+                // insecure-secrets banner (keyring unavailable → plaintext fallback).
+                // Only for the plaintext backend: a passphrase vault is encrypted,
+                // so the "без шифрования" copy below would not apply.
                 Rectangle {
                     Layout.fillWidth: true
-                    visible: SettingsStore.secretsFallback()
+                    visible: SettingsStore.secretStorage().kind === "plaintext"
                     implicitHeight: secretText.implicitHeight + 24
                     color: Theme.paper3
                     Text {

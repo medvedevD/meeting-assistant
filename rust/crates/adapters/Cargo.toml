@@ -30,6 +30,13 @@ dirs = { workspace = true }
 # OS keyring for API secrets. Native backends are enabled per-target below;
 # on platforms without a backend, KeyringSecretStore falls back to a 0600 file.
 keyring = "3"
+# Passphrase-encrypted vault fallback (keyring unavailable). Pure-Rust crypto:
+# Argon2id KDF + XChaCha20-Poly1305 AEAD. See ADR-013.
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+base64 = "0.22"
+zeroize = "1"
+getrandom = "0.2"
 
 # Portable default: CPU-only Whisper on every target except macOS. CUDA/Vulkan
 # layer on top of this via the opt-in features below.
@@ -47,6 +54,12 @@ whisper-rs = { version = "0.16", features = ["metal"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
+
+# Linux: talk to the real Secret Service (GNOME Keyring / KWallet) over D-Bus.
+# Without a backend feature, keyring 3 silently resolves to an in-memory mock —
+# keys would not persist and the UI would falsely report a working keystore.
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service"] }
 
 [features]
 # Opt-in GPU backends for portable (non-macOS) builds. Off by default so the
