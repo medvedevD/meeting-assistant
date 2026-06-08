@@ -1,5 +1,10 @@
 # Disclose Plaintext Secrets Fallback
 
+> **Promoted & expanded** → `plans/active/secret-storage/` (prd-v1.0 + plan-v1.0).
+> That plan supersedes this note: it covers the honest `secret_storage` contract,
+> the concrete keyring-mechanism disclosure, the Linux mock-keystore fix, and an
+> optional passphrase vault. This slice is Phase 1–2 there.
+
 ## Context
 
 [`KeyringSecretStore`](../rust/crates/adapters/src/secret_store.rs) falls back
