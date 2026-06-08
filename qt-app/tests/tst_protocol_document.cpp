@@ -9,6 +9,8 @@ class ProtocolDocumentTest : public QObject {
 private slots:
     void parsesEditorialMarkdownBlocks();
     void parsesDeepHeadingsWithoutVisibleHashes();
+    void prefersStructuredProtocolBlocks();
+    void hidesEmptyStructuredSections();
     void escapesInlineHtml();
 };
 
@@ -81,6 +83,90 @@ void ProtocolDocumentTest::parsesDeepHeadingsWithoutVisibleHashes() {
     QCOMPARE(blocks.at(3).toMap().value(QStringLiteral("level")).toInt(), 6);
     QCOMPARE(blocks.at(3).toMap().value(QStringLiteral("text")).toString(),
              QStringLiteral("Deep heading"));
+}
+
+void ProtocolDocumentTest::prefersStructuredProtocolBlocks() {
+    QQmlEngine engine;
+    engine.addImportPath(QStringLiteral(MA_PROTOCOL_QML_IMPORT_DIR));
+
+    QQmlComponent component(&engine);
+    std::unique_ptr<QObject> root = createDocument(engine, component);
+    QVERIFY2(root != nullptr, qPrintable(component.errorString()));
+
+    QVariantMap action;
+    action.insert(QStringLiteral("title"), QStringLiteral("Подготовить сборку"));
+    action.insert(QStringLiteral("owner"), QStringLiteral("Дима"));
+    action.insert(QStringLiteral("due"), QStringLiteral("пятница"));
+
+    QVariantMap topic;
+    topic.insert(QStringLiteral("title"), QStringLiteral("Риски"));
+    topic.insert(QStringLiteral("bullets"), QVariantList { QStringLiteral("Проверить интеграцию") });
+
+    QVariantMap structured;
+    structured.insert(QStringLiteral("title"), QStringLiteral("Структурный протокол"));
+    structured.insert(QStringLiteral("summary"), QVariantList { QStringLiteral("Короткий итог") });
+    structured.insert(QStringLiteral("topics"), QVariantList { topic });
+    structured.insert(QStringLiteral("decisions"), QVariantList { QStringLiteral("Выпускать MVP") });
+    structured.insert(QStringLiteral("actions"), QVariantList { action });
+    structured.insert(QStringLiteral("open_questions"), QVariantList { QStringLiteral("Кто проведет демо?") });
+
+    root->setProperty("markdown", QStringLiteral("# Markdown fallback"));
+    root->setProperty("structured", structured);
+
+    const QVariantList blocks = root->property("blocks").toList();
+    QVERIFY(blocks.size() >= 10);
+    QCOMPARE(blocks.at(0).toMap().value(QStringLiteral("type")).toString(), QStringLiteral("h1"));
+    QCOMPARE(blocks.at(0).toMap().value(QStringLiteral("text")).toString(),
+             QStringLiteral("Структурный протокол"));
+    QCOMPARE(blocks.at(1).toMap().value(QStringLiteral("type")).toString(), QStringLiteral("h2"));
+    QCOMPARE(blocks.at(2).toMap().value(QStringLiteral("type")).toString(), QStringLiteral("p"));
+    QCOMPARE(blocks.at(2).toMap().value(QStringLiteral("text")).toString(),
+             QStringLiteral("Короткий итог"));
+
+    bool sawActionsTable = false;
+    for (const QVariant &block : blocks) {
+        const QVariantMap map = block.toMap();
+        if (map.value(QStringLiteral("type")).toString() == QStringLiteral("table")) {
+            sawActionsTable = true;
+            const QVariantList rows = map.value(QStringLiteral("rows")).toList();
+            QCOMPARE(rows.at(0).toList().at(0).toString(), QStringLiteral("Подготовить сборку"));
+            QCOMPARE(rows.at(0).toList().at(1).toString(), QStringLiteral("Дима"));
+        }
+    }
+    QVERIFY(sawActionsTable);
+}
+
+void ProtocolDocumentTest::hidesEmptyStructuredSections() {
+    QQmlEngine engine;
+    engine.addImportPath(QStringLiteral(MA_PROTOCOL_QML_IMPORT_DIR));
+
+    QQmlComponent component(&engine);
+    std::unique_ptr<QObject> root = createDocument(engine, component);
+    QVERIFY2(root != nullptr, qPrintable(component.errorString()));
+
+    QVariantMap action;
+    action.insert(QStringLiteral("title"), QStringLiteral("Нет"));
+    action.insert(QStringLiteral("owner"), QString());
+    action.insert(QStringLiteral("due"), QString());
+
+    QVariantMap structured;
+    structured.insert(QStringLiteral("title"), QStringLiteral("Протокол"));
+    structured.insert(QStringLiteral("summary"), QVariantList { QStringLiteral("Итог есть") });
+    structured.insert(QStringLiteral("decisions"), QVariantList { QStringLiteral("Нет") });
+    structured.insert(QStringLiteral("actions"), QVariantList { action });
+    structured.insert(QStringLiteral("open_questions"), QVariantList { QStringLiteral("Не обсуждалось") });
+
+    root->setProperty("structured", structured);
+
+    const QVariantList blocks = root->property("blocks").toList();
+    for (const QVariant &block : blocks) {
+        const QVariantMap map = block.toMap();
+        const QString text = map.value(QStringLiteral("text")).toString();
+        QVERIFY(text != QStringLiteral("Решения"));
+        QVERIFY(text != QStringLiteral("Дальнейшие действия"));
+        QVERIFY(text != QStringLiteral("Открытые вопросы"));
+        QVERIFY(map.value(QStringLiteral("type")).toString() != QStringLiteral("table"));
+    }
 }
 
 void ProtocolDocumentTest::escapesInlineHtml() {

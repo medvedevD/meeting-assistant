@@ -1,9 +1,5 @@
-// Editorial Markdown renderer. The core emits the protocol as Markdown, but the
-// design's "editorial" look (serif H1, uppercase tracked H2 + hairline, serif
-// body, action-items table) can't come from Qt's MarkdownText. So we parse a
-// pragmatic Markdown subset into styled blocks: # / ## / ### / ####, paragraphs,
-// blockquotes, fenced code, bullet + numbered lists, GFM pipe tables, and inline
-// **bold** / *italic* / `code` / links.
+// Editorial protocol renderer. Prefer the backend's structured protocol model;
+// keep Markdown parsing as a compatibility fallback for old or ad-hoc output.
 import QtQuick
 import QtQuick.Layouts
 import MeetingAssistant
@@ -11,6 +7,7 @@ import MeetingAssistant
 ColumnLayout {
     id: doc
     property string markdown: ""
+    property var structured: null
     spacing: 0
 
     function _escape(s) {
@@ -239,7 +236,134 @@ ColumnLayout {
         return blocks
     }
 
-    readonly property var blocks: _shape(_parse(markdown))
+    function _hasStructured(s) {
+        return s && (s.title
+            || _cleanItems(s.summary).length > 0
+            || _cleanTopics(s.topics).length > 0
+            || _cleanItems(s.decisions).length > 0
+            || _cleanActions(s.actions).length > 0
+            || _cleanItems(s.open_questions).length > 0)
+    }
+    function _emptyMarker(v) {
+        var t = ((v || "") + "").trim().replace(/^[\s—-]+|[\s.—-]+$/g, "").toLowerCase()
+        return t.length === 0 || t === "нет" || t === "не применимо"
+                || t === "n/a" || t === "none" || t === "отсутствует"
+                || t === "отсутствуют" || t === "не обсуждалось"
+                || t === "не было" || t === "не выявлено"
+                || t === "нет данных" || t === "не указано"
+    }
+    function _cleanItems(items) {
+        if (!items)
+            return []
+        var out = []
+        for (var i = 0; i < items.length; ++i) {
+            if (!doc._emptyMarker(items[i]))
+                out.push(items[i])
+        }
+        return out
+    }
+    function _cleanTopics(topics) {
+        if (!topics)
+            return []
+        var out = []
+        for (var i = 0; i < topics.length; ++i) {
+            var topic = topics[i]
+            var bullets = doc._cleanItems(topic.bullets)
+            if (!doc._emptyMarker(topic.title) || bullets.length > 0)
+                out.push({ "title": topic.title || "", "bullets": bullets })
+        }
+        return out
+    }
+    function _cleanActions(actions) {
+        if (!actions)
+            return []
+        var out = []
+        for (var i = 0; i < actions.length; ++i) {
+            var action = actions[i]
+            if (!doc._emptyMarker(action.title))
+                out.push(action)
+        }
+        return out
+    }
+    function _section(out, title, items) {
+        var cleaned = doc._cleanItems(items)
+        if (cleaned.length === 0)
+            return
+        out.push({ "type": "h2", "text": title })
+        out.push({ "type": "ul", "items": cleaned })
+    }
+    function _structuredBlocks(s) {
+        var out = []
+        if (!doc._hasStructured(s))
+            return out
+
+        if (s.title)
+            out.push({ "type": "h1", "text": s.title })
+
+        var summary = doc._cleanItems(s.summary)
+        if (summary.length > 0) {
+            out.push({ "type": "h2", "text": qsTr("Краткое резюме") })
+            for (var i = 0; i < summary.length; ++i)
+                out.push({ "type": "p", "text": summary[i] })
+        }
+
+        var topics = doc._cleanTopics(s.topics)
+        if (topics.length > 0) {
+            out.push({ "type": "h2", "text": qsTr("Темы") })
+            for (var t = 0; t < topics.length; ++t) {
+                var topic = topics[t]
+                out.push({ "type": "h3", "text": topic.title || "" })
+                if (topic.bullets && topic.bullets.length > 0)
+                    out.push({ "type": "ul", "items": topic.bullets })
+            }
+        }
+
+        doc._section(out, qsTr("Решения"), s.decisions)
+
+        var actions = doc._cleanActions(s.actions)
+        if (actions.length > 0) {
+            out.push({ "type": "h2", "text": qsTr("Дальнейшие действия") })
+            var hasMeta = false
+            for (var m = 0; m < actions.length; ++m) {
+                if (!doc._emptyMarker(actions[m].owner)
+                        || !doc._emptyMarker(actions[m].due)) {
+                    hasMeta = true
+                    break
+                }
+            }
+            if (hasMeta) {
+                // Owner/срок carry signal — keep the tabular layout.
+                var rows = []
+                for (var a = 0; a < actions.length; ++a) {
+                    var action = actions[a]
+                    rows.push([
+                        action.title || "",
+                        action.owner || "",
+                        action.due || ""
+                    ])
+                }
+                out.push({
+                    "type": "table",
+                    "header": [qsTr("Действие"), qsTr("Ответственный"), qsTr("Срок")],
+                    "rows": rows
+                })
+            } else {
+                // No owner/срок anywhere — a table would be two empty columns
+                // beside cramped text, so render a plain bulleted list.
+                var items = []
+                for (var b = 0; b < actions.length; ++b)
+                    items.push(actions[b].title || "")
+                out.push({ "type": "ul", "items": items })
+            }
+        }
+
+        doc._section(out, qsTr("Открытые вопросы"), s.open_questions)
+        return out
+    }
+
+    readonly property var blocks: _hasStructured(structured)
+                                  ? _structuredBlocks(structured)
+                                  : _shape(_parse(markdown))
 
     // ── block delegates ───────────────────────────────────────────────────────
     Component {
@@ -248,7 +372,6 @@ ColumnLayout {
             property var blk
             Layout.fillWidth: true
             Layout.topMargin: 2
-            Layout.bottomMargin: 6
             text: blk ? doc._inline(blk.text) : ""
             textFormat: Text.StyledText
             wrapMode: Text.WordWrap
@@ -265,8 +388,7 @@ ColumnLayout {
         ColumnLayout {
             property var blk
             Layout.fillWidth: true
-            Layout.topMargin: 36
-            Layout.bottomMargin: 10
+            Layout.topMargin: 32
             spacing: 8
             Text {
                 Layout.fillWidth: true
@@ -287,7 +409,7 @@ ColumnLayout {
         ColumnLayout {
             property var blk
             Layout.fillWidth: true
-            Layout.bottomMargin: 34
+            Layout.topMargin: 8
             spacing: 6
             Repeater {
                 model: blk ? blk.items : []
@@ -311,7 +433,6 @@ ColumnLayout {
             property var blk
             Layout.fillWidth: true
             Layout.topMargin: 22
-            Layout.bottomMargin: 6
             text: blk ? doc._inline(blk.text) : ""
             textFormat: Text.StyledText
             wrapMode: Text.WordWrap
@@ -328,7 +449,6 @@ ColumnLayout {
             property var blk
             Layout.fillWidth: true
             Layout.topMargin: 16
-            Layout.bottomMargin: 8
             text: blk ? doc._inline(blk.text) : ""
             textFormat: Text.StyledText
             wrapMode: Text.WordWrap
@@ -343,7 +463,7 @@ ColumnLayout {
         Text {
             property var blk
             Layout.fillWidth: true
-            Layout.bottomMargin: 14
+            Layout.topMargin: 14
             text: blk ? doc._inline(blk.text) : ""
             textFormat: Text.StyledText
             wrapMode: Text.WordWrap
@@ -358,7 +478,7 @@ ColumnLayout {
         ColumnLayout {
             property var blk
             Layout.fillWidth: true
-            Layout.bottomMargin: 16
+            Layout.topMargin: 8
             spacing: 6
             Repeater {
                 model: blk ? blk.items : []
@@ -416,7 +536,7 @@ ColumnLayout {
         ColumnLayout {
             property var blk
             Layout.fillWidth: true
-            Layout.bottomMargin: 16
+            Layout.topMargin: 8
             spacing: 6
             Repeater {
                 model: blk ? blk.items : []
@@ -449,8 +569,7 @@ ColumnLayout {
         RowLayout {
             property var blk
             Layout.fillWidth: true
-            Layout.topMargin: 8
-            Layout.bottomMargin: 18
+            Layout.topMargin: 16
             spacing: 14
             Rectangle {
                 Layout.preferredWidth: 3
@@ -476,10 +595,9 @@ ColumnLayout {
         Rectangle {
             property var blk
             Layout.fillWidth: true
-            Layout.topMargin: 6
-            Layout.bottomMargin: 18
+            Layout.topMargin: 16
             implicitHeight: codeText.implicitHeight + 24
-            radius: Theme.r8
+            radius: Theme.rMd
             color: Theme.paperSub
             border.width: 1
             border.color: Theme.rule
@@ -503,8 +621,7 @@ ColumnLayout {
         Item {
             property var blk
             Layout.fillWidth: true
-            Layout.topMargin: 18
-            Layout.bottomMargin: 18
+            Layout.topMargin: 22
             implicitHeight: 1
             Rectangle {
                 anchors.left: parent.left
@@ -520,8 +637,7 @@ ColumnLayout {
         ColumnLayout {
             property var blk
             Layout.fillWidth: true
-            Layout.topMargin: 6
-            Layout.bottomMargin: 20
+            Layout.topMargin: 12
             spacing: 0
 
             // header
@@ -566,14 +682,15 @@ ColumnLayout {
                                 required property var modelData
                                 required property int index
                                 Layout.fillWidth: index === 0
-                                Layout.preferredWidth: index === 0 ? -1 : 120
+                                Layout.preferredWidth: index === 0 ? -1 : 140
                                 Layout.alignment: Qt.AlignTop
-                                topPadding: 10; bottomPadding: 10
+                                topPadding: 11; bottomPadding: 11
                                 text: doc._inline(modelData + "")
                                 textFormat: Text.StyledText
                                 wrapMode: Text.WordWrap
-                                font.family: Theme.fontUi
-                                font.pixelSize: 13
+                                font.family: Theme.fontSerif
+                                font.pixelSize: 15
+                                lineHeight: 1.4
                                 color: index === 0 ? Theme.ink : Theme.ink2
                             }
                         }
