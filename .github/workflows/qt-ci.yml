@@ -56,7 +56,8 @@ jobs:
             libgl1-mesa-dev libegl1 libxkbcommon-dev libxkbcommon-x11-0 \
             libfontconfig1 libfreetype6 libdbus-1-dev \
             libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
-            libxcb-render-util0 libxcb-xinerama0 libxcb-cursor0
+            libxcb-render-util0 libxcb-xinerama0 libxcb-cursor0 \
+            desktop-file-utils libfuse2t64
 
       - name: Install Qt 6.7
         uses: jurplel/install-qt-action@v4
@@ -86,13 +87,20 @@ jobs:
       - name: Configure qt-app (tests on)
         shell: bash
         run: |
-          cmake -S qt-app -B qt-app/build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DMA_BUILD_TESTS=ON \
-            -DMA_ENABLE_QML_CACHEGEN=OFF \
-            -DMEETING_SERVER_BIN="$PWD/${{ matrix.sidecar }}" \
-            -DMA_SMOKE_SIDECAR="$PWD/${{ matrix.sidecar }}" \
+          cmake_args=(
+            -S qt-app
+            -B qt-app/build
+            -DCMAKE_BUILD_TYPE=Release
+            -DMA_BUILD_TESTS=ON
+            -DMA_ENABLE_QML_CACHEGEN=OFF
+            -DMEETING_SERVER_BIN="$PWD/${{ matrix.sidecar }}"
+            -DMA_SMOKE_SIDECAR="$PWD/${{ matrix.sidecar }}"
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          )
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            cmake_args+=(-DMA_MACOS_APP_BUNDLE=ON)
+          fi
+          cmake "${cmake_args[@]}"
 
       - name: Build qt-app (GUI + tst_smoke)
         shell: bash
@@ -103,10 +111,82 @@ jobs:
         shell: bash
         run: ctest --test-dir qt-app/build -C Release --output-on-failure
 
-      # ── Downloadable two-binary bundle (GUI + sidecar + LGPL notices) ─────
-      - name: Stage app artifact
+      # ── Downloadable app artifact (GUI + sidecar + Qt runtime + notices) ──
+      - name: Build downloadable app artifact
         shell: bash
-        run: cmake --install qt-app/build --config Release --prefix dist/artifact
+        run: |
+          rm -rf dist/artifact
+
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            appdir="$PWD/dist/AppDir"
+            tools="$PWD/dist/.tools"
+            icon="$appdir/usr/share/icons/hicolor/512x512/apps/meeting-assistant.png"
+
+            rm -rf "$appdir"
+            cmake --install qt-app/build --config Release --prefix "$appdir/usr"
+            mkdir -p "$(dirname "$icon")" "$tools" dist/artifact
+            cp packaging/assets/meeting-assistant.png "$icon"
+
+            arch="$(uname -m)"
+            linuxdeploy="$tools/linuxdeploy-$arch.AppImage"
+            linuxdeploy_qt="$tools/linuxdeploy-plugin-qt-$arch.AppImage"
+            if [[ ! -x "$linuxdeploy" ]]; then
+              curl -fL --retry 3 -o "$linuxdeploy" \
+                "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$arch.AppImage"
+              chmod +x "$linuxdeploy"
+            fi
+            if [[ ! -x "$linuxdeploy_qt" ]]; then
+              curl -fL --retry 3 -o "$linuxdeploy_qt" \
+                "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-$arch.AppImage"
+              chmod +x "$linuxdeploy_qt"
+            fi
+
+            export APPIMAGE_EXTRACT_AND_RUN=1
+            export QML_SOURCES_PATHS="$PWD/qt-app/qml"
+            export PATH="$QT_ROOT_DIR/bin:$PATH"
+            export OUTPUT="MeetingAssistant-$arch.AppImage"
+
+            (
+              cd dist
+              "$linuxdeploy" --appdir "$appdir" --plugin qt \
+                --desktop-file "$appdir/usr/share/applications/meeting-assistant.desktop" \
+                --icon-file "$icon" \
+                --output appimage
+            )
+            mv "dist/$OUTPUT" dist/artifact/
+          else
+            cmake --install qt-app/build --config Release --prefix dist/artifact
+
+            if [[ "$RUNNER_OS" == "macOS" ]]; then
+              "$QT_ROOT_DIR/bin/macdeployqt" \
+                dist/artifact/MeetingAssistant.app \
+                -qmldir=qt-app/qml \
+                -verbose=1
+              rm -rf dist/artifact/MeetingAssistant.app/Contents/PlugIns/sqldrivers
+            elif [[ "$RUNNER_OS" == "Windows" ]]; then
+              "$QT_ROOT_DIR/bin/windeployqt.exe" \
+                --release \
+                --qmldir qt-app/qml \
+                --compiler-runtime \
+                --no-translations \
+                dist/artifact/meeting-assistant-qt.exe
+            fi
+          fi
+
+      - name: Verify downloadable app artifact
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            test -f dist/artifact/MeetingAssistant-$(uname -m).AppImage
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            test -x dist/artifact/MeetingAssistant.app/Contents/MacOS/MeetingAssistant
+            test -x dist/artifact/MeetingAssistant.app/Contents/MacOS/meeting-server
+            test -d dist/artifact/MeetingAssistant.app/Contents/Frameworks
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            test -f dist/artifact/meeting-assistant-qt.exe
+            test -f dist/artifact/meeting-server.exe
+            test -f dist/artifact/Qt6Core.dll
+          fi
 
       - name: Upload app artifact
         uses: actions/upload-artifact@v4
