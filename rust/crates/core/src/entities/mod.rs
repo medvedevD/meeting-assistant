@@ -8,4 +8,4 @@ pub mod job;
 pub use job::{ErrorClass, Job, JobKind, JobProgress, JobStatus, PipelineStage};
 
 mod protocol;
-pub use protocol::Protocol;
+pub use protocol::{Protocol, ProtocolAction, ProtocolTopic, StructuredProtocol};
