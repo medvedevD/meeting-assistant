@@ -8,37 +8,40 @@ Meeting Assistant is an AI-powered desktop app for recording, transcribing, and 
 
 ## Plans & Backlog
 
-Planning artifacts live in two top-level locations with an explicit lifecycle:
+**One task = one Markdown file** (kebab-case slug). Two folders, and the file moves from one to the other:
 
-- **`backlog/<slug>.md`** — single Markdown file per future idea (kebab-case slug, e.g. `backlog/structured-protocol-rendering.md`). One item per file; no monolithic `BACKLOG.md`.
-- **`plans/active/<task-slug>/`** — folder per task **currently in flight**. Contains the PRD and any related docs (`prd-v1.0.md`, `plan-v1.0.md`, research notes, interview transcripts, etc.).
-- **`plans/done/<task-slug>/`** — same shape as `active/`, archive of plans whose closing commit has landed.
+- **`backlog/<slug>.md`** — a future idea. Needs only **Problem + Sketch** (a paragraph or two).
+- **`plans/<slug>.md`** — a task currently in flight.
+
+Use a folder (`plans/<slug>/` with the plan at `plan.md`) **only** when a task genuinely needs side files — research notes, transcripts, a standalone ADR. Otherwise a single file is the default.
+
+There is **no `done/` archive**. A finished plan is deleted — git keeps the full history (`git log -- plans/<slug>.md` recovers it). Anything worth remembering long-term is folded into a living doc (this file, or an ADR) *before* the plan is deleted; the plan file itself is disposable process scaffolding.
 
 ### Plan content
 
-Every plan in `plans/active/<slug>/` must contain at minimum:
+An active plan is one file with, at minimum:
 
 1. **Problem** — what's broken or missing (1–3 sentences).
 2. **Scope** — explicit in/out lists; bound the change.
 3. **Deliverables** — file-level change list + test plan.
-4. **Closing step** — final task: "make the closing commit that performs `git mv plans/active/<slug> plans/done/<slug>`".
+4. **Decisions** *(optional)* — inline ADR notes when a choice needs recording.
 
-Backlog items (`backlog/<slug>.md`) require only **Problem + Sketch of approach** (a paragraph or two). They graduate into the structure above when promoted to `active/`.
+No separate PRD/plan documents, no `-vX.Y` filename suffix — git is the history.
 
-### Lifecycle rules
+### Lifecycle
 
 | Transition | Action |
 |---|---|
-| New small idea | Create `backlog/<slug>.md`. |
-| New large initiative (already prioritized, skips backlog) | Create `plans/active/<slug>/prd-v1.0.md` directly. |
-| Backlog → Active (promotion) | In the same commit: `git mv backlog/<slug>.md plans/active/<slug>/prd-v1.0.md` (or another appropriate doc name). **Never leave the item in both places** — one item, one location. |
-| Backlog → Done (skipped active) | If the implementation shipped before the item was ever promoted to `active/` (work outran the doc — common for backlog items that already contain a near-PRD), the closing commit performs `git mv backlog/<slug>.md plans/done/<slug>/prd-v1.0.md`. Same closing-commit principle as Active → Done; the item skips `active/` entirely. |
-| Active → Done (completion) | Make a small **closing commit** that performs `git mv plans/active/<slug> plans/done/<slug>` after the implementation is committed and the feature works on the working branch. The plan stays in `active/` until this specific commit lands — not when the work is "almost done" or a PR is open, only when the closing commit is made. A later merge to `main` requires no further action — the plan is already in `done/`. |
-| Cancellation | Delete the `backlog/<slug>.md` or `plans/active/<slug>/` in a dedicated commit with a one-line reason in the commit message. Never silently move to `done/`. |
+| New idea | Create `backlog/<slug>.md`. A large, already-prioritized initiative may start directly at `plans/<slug>.md`. |
+| Promote (backlog → active) | `git mv backlog/<slug>.md plans/<slug>.md`, then flesh out the plan content. Same slug, same file — **never leave a copy in `backlog/`**. |
+| Complete | First fold any durable decisions into RULES.md / an ADR. Then the task's final commit — the one that lands the working implementation — also `git rm`s the plan. Code and plan removal ride in the **same commit**. |
+| Cancel | The same `git rm`, in a dedicated commit with a one-line reason in the message. |
+
+Completion and cancellation are the same mechanical step (`git rm <plan>`); the only difference is whether the work shipped. If work ships before an item is ever promoted, that final commit simply `git rm`s `backlog/<slug>.md`.
 
 ### Forbidden locations
 
-Never use any of: `docs/prds/`, `.Codex/plans/`, `.agents/plans/`, `.claude/plans/`, or ad-hoc top-level files. Tools or skills that generate planning docs must write to `plans/active/<slug>/` (or `backlog/<slug>.md` for a single-file idea), overriding their defaults.
+Never use any of: `docs/prds/`, `.Codex/plans/`, `.agents/plans/`, `.claude/plans/`, or ad-hoc top-level files. Tools or skills that generate planning docs must write to `plans/<slug>.md` (or `backlog/<slug>.md`), overriding their defaults.
 
 ## Development Commands
 
