@@ -8,18 +8,18 @@ Meeting Assistant is an AI-powered desktop app for recording, transcribing, and 
 
 ## Plans & Backlog
 
-**One task = one Markdown file** (kebab-case slug). Two folders, and the file moves from one to the other:
+**One task = one kebab-case slug.** Two folders, and the task moves from one to the other:
 
-- **`backlog/<slug>.md`** — a future idea. Needs only **Problem + Sketch** (a paragraph or two).
-- **`plans/<slug>.md`** — a task currently in flight.
+- **`backlog/<slug>.md`** — a future idea, a single file. Needs only **Problem + Sketch** (a paragraph or two).
+- **`plans/<slug>/`** — a task currently in flight, **always a folder** with the plan at `plan.md`. Side files (research notes, transcripts, a standalone ADR) live next to it in the same folder.
 
-Use a folder (`plans/<slug>/` with the plan at `plan.md`) **only** when a task genuinely needs side files — research notes, transcripts, a standalone ADR. Otherwise a single file is the default.
+An active plan always gets its own folder, even when `plan.md` is the only file in it — this keeps a consistent home for any side files the task accrues and a stable path to link to.
 
-There is **no `done/` archive**. A finished plan is deleted — git keeps the full history (`git log -- plans/<slug>.md` recovers it). Anything worth remembering long-term is folded into a living doc (this file, or an ADR) *before* the plan is deleted; the plan file itself is disposable process scaffolding.
+There is **no `done/` archive**. A finished plan folder is deleted — git keeps the full history (`git log -- plans/<slug>/` recovers it). Anything worth remembering long-term is folded into a living doc (this file, or an ADR) *before* the plan is deleted; the plan folder itself is disposable process scaffolding.
 
 ### Plan content
 
-An active plan is one file with, at minimum:
+An active plan is `plans/<slug>/plan.md` with, at minimum:
 
 1. **Problem** — what's broken or missing (1–3 sentences).
 2. **Scope** — explicit in/out lists; bound the change.
@@ -32,16 +32,16 @@ No separate PRD/plan documents, no `-vX.Y` filename suffix — git is the histor
 
 | Transition | Action |
 |---|---|
-| New idea | Create `backlog/<slug>.md`. A large, already-prioritized initiative may start directly at `plans/<slug>.md`. |
-| Promote (backlog → active) | `git mv backlog/<slug>.md plans/<slug>.md`, then flesh out the plan content. Same slug, same file — **never leave a copy in `backlog/`**. |
-| Complete | First fold any durable decisions into RULES.md / an ADR. Then the task's final commit — the one that lands the working implementation — also `git rm`s the plan. Code and plan removal ride in the **same commit**. |
-| Cancel | The same `git rm`, in a dedicated commit with a one-line reason in the message. |
+| New idea | Create `backlog/<slug>.md`. A large, already-prioritized initiative may start directly at `plans/<slug>/plan.md`. |
+| Promote (backlog → active) | `git mv backlog/<slug>.md plans/<slug>/plan.md`, then flesh out the plan content. Same slug — **never leave a copy in `backlog/`**. |
+| Complete | First fold any durable decisions into RULES.md / an ADR. Then the task's final commit — the one that lands the working implementation — also `git rm -r`s the plan folder. Code and plan removal ride in the **same commit**. |
+| Cancel | The same `git rm -r`, in a dedicated commit with a one-line reason in the message. |
 
-Completion and cancellation are the same mechanical step (`git rm <plan>`); the only difference is whether the work shipped. If work ships before an item is ever promoted, that final commit simply `git rm`s `backlog/<slug>.md`.
+Completion and cancellation are the same mechanical step (`git rm -r plans/<slug>/`); the only difference is whether the work shipped. If work ships before an item is ever promoted, that final commit simply `git rm`s `backlog/<slug>.md`.
 
 ### Forbidden locations
 
-Never use any of: `docs/prds/`, `.Codex/plans/`, `.agents/plans/`, `.claude/plans/`, or ad-hoc top-level files. Tools or skills that generate planning docs must write to `plans/<slug>.md` (or `backlog/<slug>.md`), overriding their defaults.
+Never use any of: `docs/prds/`, `.Codex/plans/`, `.agents/plans/`, `.claude/plans/`, or ad-hoc top-level files. Tools or skills that generate planning docs must write to `plans/<slug>/plan.md` (or `backlog/<slug>.md`), overriding their defaults.
 
 ## Development Commands
 
