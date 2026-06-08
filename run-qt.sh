@@ -127,10 +127,6 @@ fi
 cp -f "$SIDECAR" "$(dirname "$GUI_BIN")/meeting-server"
 echo "✓ Sidecar staged next to GUI: $(dirname "$GUI_BIN")/meeting-server"
 
-if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-    echo "Warning: ANTHROPIC_API_KEY is not set — protocol generation will fail."
-fi
-
 if [[ $RUN -eq 0 ]]; then
     echo "→ Build complete (--no-run). GUI: $GUI_BIN"
     exit 0

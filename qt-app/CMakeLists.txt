@@ -173,6 +173,18 @@ qt_add_resources(meeting-assistant-qt "controls_conf"
     PREFIX "/"
     FILES qtquickcontrols2.conf)
 
+# Shared Qt (QT6_IS_SHARED_LIBS_BUILD): the QML engine resolves and loads its
+# plugins at runtime, so the static plugin-import scan run at target
+# finalization is pure noise here — it warns that style-impl plugin targets
+# (Fusion/Basic/Material/Shapes/Dialogs/labs.models …) "do not exist in the
+# current scope" because this distro Qt doesn't export those static targets.
+# Skip the scan for a shared build; keep it for a static Qt, where those
+# plugins must actually be linked into the executable.
+if(QT6_IS_SHARED_LIBS_BUILD)
+    set_target_properties(meeting-assistant-qt PROPERTIES
+        QT_QML_MODULE_NO_IMPORT_SCAN ON)
+endif()
+
 target_link_libraries(meeting-assistant-qt PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
