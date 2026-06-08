@@ -6,18 +6,105 @@ use meeting_core::{
     CoreError,
 };
 use serde::{Deserialize, Serialize};
+use std::ffi::c_void;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+/// Stable heap allocation passed to whisper.cpp as `abort_callback_user_data`.
+/// The only field is the atomic flag the C callback reads; no closures, no
+/// captures, no synchronisation primitives — so concurrent calls from
+/// whisper.cpp's inference threads are sound. See ADR-005 in
+/// `plans/active/job-cancellation`.
+#[repr(C)]
+struct AbortFlag {
+    cancelled: AtomicBool,
+}
+
+/// FFI abort callback. whisper.cpp invokes this between segments **from
+/// multiple inference threads concurrently**; the only operation is an
+/// atomic load, which is data-race-free.
+///
+/// # Safety
+/// `data` must point to an `AbortFlag` whose `Arc` is held alive for the
+/// entire duration of the surrounding `state.full(...)` call (enforced by
+/// `RealWhisperRunner::run` which holds the `Arc<AbortFlag>` across the
+/// `spawn_blocking` join). A null `data` is treated as "do not abort" so a
+/// mis-wired call site degrades gracefully.
+unsafe extern "C" fn abort_cb(data: *mut c_void) -> bool {
+    if data.is_null() {
+        return false;
+    }
+    // SAFETY: see fn-level safety note above.
+    let flag = unsafe { &*(data as *const AbortFlag) };
+    flag.cancelled.load(Ordering::Relaxed)
+}
+
+/// Bridge a `CancellationToken` to an `Arc<AbortFlag>` for the duration of a
+/// blocking Whisper inference. Spawns a watcher task that flips the flag if
+/// the token is cancelled; ensures the watcher exits (and the Arc is dropped)
+/// before the helper returns, so the heap pointer passed to whisper.cpp is
+/// always valid for as long as the FFI side might dereference it.
+///
+/// `f` runs the actual Whisper call and gets the same `Arc<AbortFlag>` to
+/// hand to `run_whisper`. The flag is dropped only after `f` returns *and*
+/// the watcher has joined — which is strictly after `state.full` returned.
+async fn with_abort_watcher<F, R>(cancel: CancellationToken, f: F) -> R
+where
+    F: FnOnce(Arc<AbortFlag>) -> R + Send + 'static,
+    R: Send + 'static,
+{
+    let flag = Arc::new(AbortFlag {
+        cancelled: AtomicBool::new(false),
+    });
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let watcher = {
+        let flag = Arc::clone(&flag);
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = cancel.cancelled() => flag.cancelled.store(true, Ordering::Relaxed),
+                _ = stop_rx => {}
+            }
+        })
+    };
+
+    let flag_for_blocking = Arc::clone(&flag);
+    let result = tokio::task::spawn_blocking(move || f(flag_for_blocking))
+        .await
+        .expect("spawn_blocking panicked");
+
+    // Stop and join the watcher before we drop our Arc, guaranteeing that
+    // by the time the last Arc<AbortFlag> dies, whisper.cpp has already
+    // returned from state.full inside `f`.
+    let _ = stop_tx.send(());
+    let _ = watcher.await;
+    drop(flag);
+
+    result
+}
 
 /// A progress sink that discards reports — used by the non-progress path.
 fn noop_sink() -> ProgressSink {
     Arc::new(|_stage: PipelineStage, _pct: u8| {})
 }
 
+/// The Whisper compute backend this binary was **compiled** against, decided by
+/// `build.rs` from the active cargo features + target OS. One of `"cpu"`,
+/// `"metal"`, `"cuda"`, `"vulkan"`.
+///
+/// This reflects the linked backend, not a live device probe: whisper.cpp
+/// silently falls back to CPU at runtime when the GPU runtime is missing (e.g. a
+/// `cuda` build on a host with no NVIDIA driver). Surfaced in the settings
+/// snapshot so users can see whether they got the accelerated build.
+pub fn whisper_backend() -> &'static str {
+    env!("MEETING_WHISPER_BACKEND")
+}
+
 // ── Transcriber preferences ───────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriberPrefs {
     /// BCP-47 language code ("ru", "en") or "auto" for detection. Default: "ru".
     #[serde(default = "default_language")]
@@ -28,6 +115,11 @@ pub struct TranscriberPrefs {
     /// Number of CPU threads for inference. 0 = auto (num_cpus::get_physical()).
     #[serde(default)]
     pub n_threads: u32,
+    /// Offload to the compiled GPU backend when available. No effect on a
+    /// CPU-only build (whisper.cpp has nothing to offload to). This is a
+    /// *context-creation* parameter, so toggling it reloads the model.
+    #[serde(default = "default_use_gpu")]
+    pub use_gpu: bool,
 }
 
 fn default_language() -> String {
@@ -36,13 +128,28 @@ fn default_language() -> String {
 fn default_beam_size() -> u32 {
     1
 }
+fn default_use_gpu() -> bool {
+    true
+}
+
+impl Default for TranscriberPrefs {
+    fn default() -> Self {
+        Self {
+            language: default_language(),
+            beam_size: default_beam_size(),
+            n_threads: 0,
+            use_gpu: true,
+        }
+    }
+}
 
 impl TranscriberPrefs {
-    pub fn new(language: impl Into<String>, beam_size: u32, n_threads: u32) -> Self {
+    pub fn new(language: impl Into<String>, beam_size: u32, n_threads: u32, use_gpu: bool) -> Self {
         Self {
             language: language.into(),
             beam_size,
             n_threads,
+            use_gpu,
         }
     }
 }
@@ -66,7 +173,8 @@ impl WhisperTranscriber {
             .and_then(|n| n.to_str())
             .unwrap_or(path);
         bench_log(&format!(
-            "model_loaded  model={model_name} load_ms={}",
+            "model_loaded  model={model_name} backend={} load_ms={}",
+            whisper_backend(),
             t.elapsed().as_millis()
         ));
         Ok(Self { ctx: Arc::new(ctx) })
@@ -80,9 +188,10 @@ impl Transcriber for WhisperTranscriber {
         let path = audio_path.to_path_buf();
         let prefs = TranscriberPrefs::default();
         let sink = noop_sink();
-        tokio::task::spawn_blocking(move || run_whisper(&ctx, &path, &prefs, &sink))
-            .await
-            .map_err(|e| CoreError::Transcription(e.to_string()))?
+        with_abort_watcher(CancellationToken::new(), move |abort_flag| {
+            run_whisper(&ctx, &path, &prefs, &sink, &abort_flag)
+        })
+        .await
     }
 
     async fn transcribe_with_progress(
@@ -93,9 +202,25 @@ impl Transcriber for WhisperTranscriber {
         let ctx = Arc::clone(&self.ctx);
         let path = audio_path.to_path_buf();
         let prefs = TranscriberPrefs::default();
-        tokio::task::spawn_blocking(move || run_whisper(&ctx, &path, &prefs, &on_progress))
-            .await
-            .map_err(|e| CoreError::Transcription(e.to_string()))?
+        with_abort_watcher(CancellationToken::new(), move |abort_flag| {
+            run_whisper(&ctx, &path, &prefs, &on_progress, &abort_flag)
+        })
+        .await
+    }
+
+    async fn transcribe_cancelable(
+        &self,
+        audio_path: &Path,
+        on_progress: ProgressSink,
+        cancel: CancellationToken,
+    ) -> Result<Transcript, CoreError> {
+        let ctx = Arc::clone(&self.ctx);
+        let path = audio_path.to_path_buf();
+        let prefs = TranscriberPrefs::default();
+        with_abort_watcher(cancel, move |abort_flag| {
+            run_whisper(&ctx, &path, &prefs, &on_progress, &abort_flag)
+        })
+        .await
     }
 }
 
@@ -104,6 +229,7 @@ fn run_whisper(
     audio_path: &PathBuf,
     prefs: &TranscriberPrefs,
     on_progress: &ProgressSink,
+    abort_flag: &Arc<AbortFlag>,
 ) -> Result<Transcript, CoreError> {
     let t_total = std::time::Instant::now();
 
@@ -149,19 +275,89 @@ fn run_whisper(
     params.set_print_timestamps(false);
 
     // Stream inference progress (0–100) into the live-progress sink, inside the
-    // Transcribing stage. The callback runs on the inference thread.
+    // Transcribing stage. Two feeds merge through a monotonic-up guard so neither
+    // can roll the bar backward:
+    //   1. whisper.cpp's own callback (may fire only 0–1 times on short audio
+    //      with one segment — the bar would otherwise sit at 0% the whole run);
+    //   2. a 500ms synthetic ticker driven by an asymptotic ETA based on the
+    //      audio duration, so the UI shows movement even when (1) is silent.
     on_progress(PipelineStage::Transcribing, 0);
-    {
+    let max_pct = Arc::new(AtomicU8::new(0));
+    let monotonic: ProgressSink = {
         let sink = Arc::clone(on_progress);
+        let mp = Arc::clone(&max_pct);
+        Arc::new(move |stage, p| {
+            let prev = mp.load(Ordering::Relaxed);
+            let m = p.max(prev);
+            mp.store(m, Ordering::Relaxed);
+            sink(stage, m);
+        })
+    };
+    {
+        let mono = Arc::clone(&monotonic);
         params.set_progress_callback_safe(move |p: i32| {
-            sink(PipelineStage::Transcribing, p.clamp(0, 100) as u8);
+            mono(PipelineStage::Transcribing, p.clamp(0, 100) as u8);
         });
     }
 
+    // Cooperative abort via the unsafe FFI path (whisper-rs 0.16's
+    // `set_abort_callback_safe` has a broken trampoline that deadlocks on
+    // concurrent invocation — see ADR-005). We pass our own extern "C"
+    // callback + a stable `Arc<AbortFlag>` heap pointer. whisper.cpp calls
+    // `abort_cb` between segments from multiple inference threads; the
+    // callback does a single atomic load → race-free by construction.
+    //
+    // SAFETY: `abort_flag` is held alive by the caller across the entire
+    // `state.full(...)` call (RealWhisperRunner::run owns the Arc across
+    // `spawn_blocking.await`), so the raw pointer remains valid for whisper.cpp.
+    unsafe {
+        params.set_abort_callback(Some(abort_cb));
+        params.set_abort_callback_user_data(Arc::as_ptr(abort_flag) as *mut c_void);
+    }
+
+    let (tx_stop, rx_stop) = std::sync::mpsc::channel::<()>();
+    let ticker = {
+        let mono = Arc::clone(&monotonic);
+        // Optimistic ETA: typical CPU RTF for whisper-large-v3-turbo is ~1–1.8,
+        // so picking a target shorter than `audio_duration_s` lets the asymptote
+        // reach a "near-done" reading by the time inference actually finishes.
+        // Cap at 99 (not 100) — final 100% is pinned explicitly on success below
+        // so synthetic progress never *claims* completion.
+        let eta_s = (audio_duration_s * 0.7).max(2.0);
+        let started = std::time::Instant::now();
+        std::thread::spawn(move || loop {
+            match rx_stop.recv_timeout(std::time::Duration::from_millis(500)) {
+                Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    let elapsed = started.elapsed().as_secs_f64();
+                    let pct = (99.0 * (1.0 - (-elapsed / eta_s).exp())).round() as u8;
+                    mono(PipelineStage::Transcribing, pct);
+                }
+            }
+        })
+    };
+
     let t = std::time::Instant::now();
-    state
-        .full(params, &samples)
-        .map_err(|e| CoreError::Transcription(e.to_string()))?;
+    let inference_result = state.full(params, &samples);
+    let _ = tx_stop.send(());
+    let _ = ticker.join();
+    // The abort callback causes whisper.cpp to return an error when
+    // cancellation is requested. Reclassify so the worker terminates the job
+    // as `cancelled` rather than retrying it as a generic transcription error.
+    if let Err(e) = inference_result {
+        if abort_flag.cancelled.load(Ordering::Relaxed) {
+            return Err(CoreError::Cancelled);
+        }
+        return Err(CoreError::Transcription(e.to_string()));
+    }
+    // Late-arriving cancel that fired after `state.full` returned Ok but
+    // before we surface the result — honour user intent.
+    if abort_flag.cancelled.load(Ordering::Relaxed) {
+        return Err(CoreError::Cancelled);
+    }
+    // Pin 100% on successful completion — best-effort closure signal before the
+    // worker transitions to WritingTranscript (which would reset percent to 0).
+    on_progress(PipelineStage::Transcribing, 100);
     let infer_ms = t.elapsed().as_millis();
     let rtf = infer_ms as f64 / 1000.0 / audio_duration_s;
     bench_log(&format!("inference_done  infer_ms={infer_ms} rtf={rtf:.2}"));
@@ -264,14 +460,18 @@ pub(crate) trait WhisperRunner: Send + Sync {
         audio_path: &Path,
         prefs: &TranscriberPrefs,
         on_progress: ProgressSink,
+        cancel: CancellationToken,
     ) -> Result<Transcript, CoreError>;
 }
 
 pub(crate) type RunnerFactory =
-    Arc<dyn Fn(&Path) -> Result<Arc<dyn WhisperRunner>, CoreError> + Send + Sync>;
+    Arc<dyn Fn(&Path, bool) -> Result<Arc<dyn WhisperRunner>, CoreError> + Send + Sync>;
 
 pub(crate) struct LazyState {
     pub(crate) runner: Option<Arc<dyn WhisperRunner>>,
+    /// `use_gpu` the currently-loaded runner was built with. A mismatch with the
+    /// live prefs forces a reload, since GPU usage is baked in at context creation.
+    pub(crate) loaded_use_gpu: Option<bool>,
     pub(crate) active_count: usize,
     pub(crate) unload_handle: Option<tokio::task::AbortHandle>,
 }
@@ -280,6 +480,7 @@ impl Default for LazyState {
     fn default() -> Self {
         Self {
             runner: None,
+            loaded_use_gpu: None,
             active_count: 0,
             unload_handle: None,
         }
@@ -305,13 +506,15 @@ impl WhisperRunner for RealWhisperRunner {
         audio_path: &Path,
         prefs: &TranscriberPrefs,
         on_progress: ProgressSink,
+        cancel: CancellationToken,
     ) -> Result<Transcript, CoreError> {
         let ctx = Arc::clone(&self.ctx);
         let path = audio_path.to_path_buf();
         let prefs = prefs.clone();
-        tokio::task::spawn_blocking(move || run_whisper(&ctx, &path, &prefs, &on_progress))
-            .await
-            .map_err(|e| CoreError::Transcription(e.to_string()))?
+        with_abort_watcher(cancel, move |abort_flag| {
+            run_whisper(&ctx, &path, &prefs, &on_progress, &abort_flag)
+        })
+        .await
     }
 }
 
@@ -319,18 +522,18 @@ impl LazyWhisperTranscriber {
     /// Creates a production instance with given transcriber preferences.
     /// Does NOT load the model — loading is deferred to first transcription.
     pub fn new(model_path: PathBuf, prefs: TranscriberPrefs) -> Self {
-        let factory: RunnerFactory = Arc::new(|path: &Path| {
+        let factory: RunnerFactory = Arc::new(|path: &Path, use_gpu: bool| {
             let path_str = path
                 .to_str()
                 .ok_or_else(|| CoreError::Transcription("model path is not valid UTF-8".into()))?;
             let t = std::time::Instant::now();
-            let ctx =
-                WhisperContext::new_with_params(path_str, WhisperContextParameters::default())
-                    .map_err(|e| {
-                        CoreError::Transcription(format!(
-                            "model_missing: Модель не найдена или повреждена: {e}"
-                        ))
-                    })?;
+            let mut ctx_params = WhisperContextParameters::default();
+            ctx_params.use_gpu(use_gpu);
+            let ctx = WhisperContext::new_with_params(path_str, ctx_params).map_err(|e| {
+                CoreError::Transcription(format!(
+                    "model_missing: Модель не найдена или повреждена: {e}"
+                ))
+            })?;
             let model_name = path
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -377,11 +580,13 @@ impl LazyWhisperTranscriber {
         if let Some(error) = self.model_error.read().unwrap().clone() {
             return Err(model_path_error_to_core(error));
         }
+        let use_gpu = self.prefs.read().unwrap().use_gpu;
         let model_path = self.model_path.read().unwrap().clone();
         let mut state = self.state.lock().await;
         if state.runner.is_none() {
             tracing::info!("warm preloading whisper model: {:?}", model_path);
-            state.runner = Some((self.factory)(&model_path)?);
+            state.runner = Some((self.factory)(&model_path, use_gpu)?);
+            state.loaded_use_gpu = Some(use_gpu);
         }
         Ok(())
     }
@@ -439,6 +644,7 @@ impl LazyWhisperTranscriber {
     async fn unload_runner(&self) {
         let mut state = self.state.lock().await;
         state.runner = None;
+        state.loaded_use_gpu = None;
         if let Some(handle) = state.unload_handle.take() {
             handle.abort();
         }
@@ -451,13 +657,15 @@ impl LazyWhisperTranscriber {
 }
 
 impl LazyWhisperTranscriber {
-    /// Shared acquire → run → release path used by both `transcribe` and
-    /// `transcribe_with_progress`. The `on_progress` sink is forwarded to the
-    /// runner (a no-op sink for the plain path).
+    /// Shared acquire → run → release path used by `transcribe`,
+    /// `transcribe_with_progress`, and `transcribe_cancelable`. The
+    /// `on_progress` sink and `cancel` token are forwarded to the runner —
+    /// the plain path passes a no-op sink and a never-cancelled token.
     async fn transcribe_inner(
         &self,
         audio_path: &Path,
         on_progress: ProgressSink,
+        cancel: CancellationToken,
     ) -> Result<Transcript, CoreError> {
         let prefs = self.prefs.read().unwrap().clone();
         if let Some(error) = self.model_error.read().unwrap().clone() {
@@ -468,10 +676,15 @@ impl LazyWhisperTranscriber {
         // --- 1. ACQUIRE ---
         let runner: Arc<dyn WhisperRunner> = {
             let mut state = self.state.lock().await;
-            if state.runner.is_none() {
-                tracing::info!("loading whisper model: {:?}", model_path);
+            // Reload when nothing is loaded, or when the `use_gpu` toggle changed
+            // since the runner was built — but only between jobs (active_count == 0)
+            // so we never swap a context out from under an in-flight transcription.
+            let gpu_changed = state.loaded_use_gpu != Some(prefs.use_gpu);
+            if state.runner.is_none() || (gpu_changed && state.active_count == 0) {
+                tracing::info!(use_gpu = prefs.use_gpu, "loading whisper model: {:?}", model_path);
                 // Early return on error — active_count and unload_handle are untouched
-                state.runner = Some((self.factory)(&model_path)?);
+                state.runner = Some((self.factory)(&model_path, prefs.use_gpu)?);
+                state.loaded_use_gpu = Some(prefs.use_gpu);
             }
             if let Some(handle) = state.unload_handle.take() {
                 handle.abort();
@@ -481,7 +694,7 @@ impl LazyWhisperTranscriber {
         }; // ← lock released, runner lives as Arc
 
         // --- 2. TRANSCRIBE (без lock) ---
-        let result = runner.run(audio_path, &prefs, on_progress).await;
+        let result = runner.run(audio_path, &prefs, on_progress, cancel).await;
 
         // --- 3. RELEASE ---
         {
@@ -491,7 +704,9 @@ impl LazyWhisperTranscriber {
                 let state_clone = Arc::clone(&self.state);
                 let task = tokio::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(IDLE_UNLOAD_SECS)).await;
-                    state_clone.lock().await.runner = None;
+                    let mut state = state_clone.lock().await;
+                    state.runner = None;
+                    state.loaded_use_gpu = None;
                     tracing::info!("whisper model unloaded after {}s idle", IDLE_UNLOAD_SECS);
                 });
                 state.unload_handle = Some(task.abort_handle());
@@ -509,7 +724,8 @@ fn model_path_error_to_core(error: ModelPathError) -> CoreError {
 #[async_trait]
 impl Transcriber for LazyWhisperTranscriber {
     async fn transcribe(&self, audio_path: &Path) -> Result<Transcript, CoreError> {
-        self.transcribe_inner(audio_path, noop_sink()).await
+        self.transcribe_inner(audio_path, noop_sink(), CancellationToken::new())
+            .await
     }
 
     async fn transcribe_with_progress(
@@ -517,7 +733,17 @@ impl Transcriber for LazyWhisperTranscriber {
         audio_path: &Path,
         on_progress: ProgressSink,
     ) -> Result<Transcript, CoreError> {
-        self.transcribe_inner(audio_path, on_progress).await
+        self.transcribe_inner(audio_path, on_progress, CancellationToken::new())
+            .await
+    }
+
+    async fn transcribe_cancelable(
+        &self,
+        audio_path: &Path,
+        on_progress: ProgressSink,
+        cancel: CancellationToken,
+    ) -> Result<Transcript, CoreError> {
+        self.transcribe_inner(audio_path, on_progress, cancel).await
     }
 }
 
@@ -554,6 +780,7 @@ mod tests {
             _audio_path: &Path,
             _prefs: &TranscriberPrefs,
             _on_progress: ProgressSink,
+            _cancel: CancellationToken,
         ) -> Result<Transcript, CoreError> {
             if self.fail_run {
                 return Err(CoreError::Transcription("fake run error".into()));
@@ -567,21 +794,21 @@ mod tests {
     }
 
     fn factory_ok(load_count: Arc<AtomicUsize>) -> RunnerFactory {
-        Arc::new(move |_path| {
+        Arc::new(move |_path, _use_gpu| {
             load_count.fetch_add(1, Ordering::SeqCst);
             Ok(Arc::new(FakeRunner { fail_run: false }) as Arc<dyn WhisperRunner>)
         })
     }
 
     fn factory_fail_load(load_count: Arc<AtomicUsize>) -> RunnerFactory {
-        Arc::new(move |_path| {
+        Arc::new(move |_path, _use_gpu| {
             load_count.fetch_add(1, Ordering::SeqCst);
             Err(CoreError::Transcription("model not found".into()))
         })
     }
 
     fn factory_fail_run(load_count: Arc<AtomicUsize>) -> RunnerFactory {
-        Arc::new(move |_path| {
+        Arc::new(move |_path, _use_gpu| {
             load_count.fetch_add(1, Ordering::SeqCst);
             Ok(Arc::new(FakeRunner { fail_run: true }) as Arc<dyn WhisperRunner>)
         })
@@ -591,7 +818,7 @@ mod tests {
         load_count: Arc<AtomicUsize>,
         should_fail: Arc<AtomicBool>,
     ) -> RunnerFactory {
-        Arc::new(move |_path| {
+        Arc::new(move |_path, _use_gpu| {
             load_count.fetch_add(1, Ordering::SeqCst);
             if should_fail.load(Ordering::SeqCst) {
                 return Err(CoreError::Transcription("model not found".into()));
@@ -606,6 +833,23 @@ mod tests {
 
     fn default_prefs() -> TranscriberPrefs {
         TranscriberPrefs::default()
+    }
+
+    // The build-time backend constant must always be one of the known values,
+    // and a default portable build (no GPU feature, non-macOS) must report CPU.
+    #[test]
+    fn backend_constant_is_known() {
+        let b = whisper_backend();
+        assert!(
+            matches!(b, "cpu" | "metal" | "cuda" | "vulkan"),
+            "unexpected backend: {b}"
+        );
+        #[cfg(all(
+            not(target_os = "macos"),
+            not(feature = "whisper-cuda"),
+            not(feature = "whisper-vulkan")
+        ))]
+        assert_eq!(b, "cpu", "portable default build must be CPU-only");
     }
 
     fn model_error(code: ModelPathErrorCode, path: Option<PathBuf>) -> ModelPathError {
@@ -866,6 +1110,49 @@ mod tests {
             load_count.load(Ordering::SeqCst),
             2,
             "должна быть загрузка новой модели"
+        );
+    }
+
+    // Toggling `use_gpu` must reload the context (GPU usage is baked in at
+    // creation), and the factory must receive the new flag; an unchanged flag
+    // must not reload.
+    #[tokio::test]
+    async fn toggling_use_gpu_reloads_runner_with_new_flag() {
+        let load_count = Arc::new(AtomicUsize::new(0));
+        let last_use_gpu = Arc::new(std::sync::Mutex::new(None::<bool>));
+        let factory: RunnerFactory = {
+            let load_count = load_count.clone();
+            let last = last_use_gpu.clone();
+            Arc::new(move |_path, use_gpu| {
+                load_count.fetch_add(1, Ordering::SeqCst);
+                *last.lock().unwrap() = Some(use_gpu);
+                Ok(Arc::new(FakeRunner { fail_run: false }) as Arc<dyn WhisperRunner>)
+            })
+        };
+        let t = LazyWhisperTranscriber::new_with_factory(
+            PathBuf::from("/model.bin"),
+            factory,
+            TranscriberPrefs::new("ru", 1, 0, true),
+        );
+
+        t.transcribe(audio()).await.unwrap();
+        assert_eq!(load_count.load(Ordering::SeqCst), 1);
+        assert_eq!(*last_use_gpu.lock().unwrap(), Some(true));
+
+        t.set_prefs(TranscriberPrefs::new("ru", 1, 0, false));
+        t.transcribe(audio()).await.unwrap();
+        assert_eq!(
+            load_count.load(Ordering::SeqCst),
+            2,
+            "use_gpu change must reload the context"
+        );
+        assert_eq!(*last_use_gpu.lock().unwrap(), Some(false));
+
+        t.transcribe(audio()).await.unwrap();
+        assert_eq!(
+            load_count.load(Ordering::SeqCst),
+            2,
+            "unchanged use_gpu must not reload"
         );
     }
 

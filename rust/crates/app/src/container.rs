@@ -2,14 +2,28 @@ use anyhow::{Context, Result};
 use meeting_adapters::{
     build_llm, resolve_transcription_model_path, AnthropicProvider, CpalAudioCapture, Db,
     FileTemplateLoader, FsMeetingFileStore, JsonSettingsStore, KeyringSecretStore,
-    LazyWhisperTranscriber, LiveProgress, SqliteJobRepo, SqliteMeetingRepo, SwappableLlm,
-    TranscriberPrefs, WhisperTranscriber, Worker,
+    LazyWhisperTranscriber, LiveJobs, SqliteJobRepo, SqliteMeetingRepo, SwappableLlm,
+    TranscriberPrefs, WhisperTranscriber, Worker, PROTOCOL_KINDS, TRANSCRIBE_KINDS,
 };
+use meeting_core::entities::meeting::now_unix;
 use meeting_core::ports::{
     AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// Default cap on concurrent IO-bound protocol jobs. Protects against accidental
+/// rate-limit storms (bulk-regen after a template change) while leaving room for
+/// useful parallelism on the LLM provider.
+const DEFAULT_IO_POOL: usize = 4;
+
+/// Handles returned by [`Container::spawn_workers`] — one set per worker.
+pub struct WorkerHandles {
+    pub transcribe_join: tokio::task::JoinHandle<()>,
+    pub transcribe_shutdown: tokio::sync::oneshot::Sender<()>,
+    pub protocol_join: tokio::task::JoinHandle<()>,
+    pub protocol_shutdown: tokio::sync::oneshot::Sender<()>,
+}
 
 /// Concrete handles the composition layer keeps so it can apply settings
 /// changes at runtime (hot-swap LLM, update transcriber prefs/model, swap
@@ -31,9 +45,10 @@ pub struct Container {
     pub audio_capture: Arc<dyn AudioCapture>,
     pub file_store: Arc<dyn MeetingFileStore>,
     pub recordings_dir: PathBuf,
-    /// Live, in-memory job-progress table shared between the worker (writer)
-    /// and the `GET /jobs/:id` handler (reader). Never persisted.
-    pub progress: LiveProgress,
+    /// Live, in-memory job table shared between the worker (writer), the
+    /// `GET /jobs/:id` handler (reader), and the `DELETE /jobs/:id` handler
+    /// (cancellation-token signaller). Never persisted.
+    pub progress: LiveJobs,
     /// `None` in CLI (`new_desktop`) mode; `Some` for the sidecar.
     pub settings_handles: Option<SettingsHandles>,
 }
@@ -65,7 +80,7 @@ impl Container {
             audio_capture,
             file_store,
             recordings_dir,
-            progress: Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             settings_handles: None,
         })
     }
@@ -128,6 +143,7 @@ impl Container {
             settings.transcriber.language.clone(),
             settings.transcriber.beam_size,
             settings.transcriber.n_threads,
+            settings.transcriber.use_gpu,
         );
         let transcriber_handle = Arc::new(match model_resolution {
             Ok(_) => LazyWhisperTranscriber::new(model, prefs),
@@ -139,7 +155,7 @@ impl Container {
         let meeting_repo = Arc::new(SqliteMeetingRepo(Arc::clone(&db)));
         let job_repo = Arc::new(SqliteJobRepo(Arc::clone(&db)));
 
-        // ── LLM: active provider, with the effective key (env → keyring/file) ──
+        // ── LLM: active provider, with the stored key (keyring/vault/file) ────
         let active = settings.llm.active;
         let key = secrets.effective_key(active.as_str());
         let cfg = settings.llm.resolve(active, key);
@@ -161,7 +177,7 @@ impl Container {
             audio_capture,
             file_store,
             recordings_dir,
-            progress: Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             settings_handles: Some(SettingsHandles {
                 settings_store,
                 secrets,
@@ -172,16 +188,48 @@ impl Container {
         })
     }
 
-    /// Spawn the background worker. Returns the join handle and a sender to request
-    /// graceful shutdown (worker finishes current job then exits).
-    pub fn spawn_worker(
-        &self,
-    ) -> (
-        tokio::task::JoinHandle<()>,
-        tokio::sync::oneshot::Sender<()>,
-    ) {
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-        let worker = Worker::new(
+    /// Spawn the two background workers (transcribe + protocol) and run the
+    /// one-shot crash recovery before either claims its first job. Returns
+    /// per-worker join handles and shutdown senders.
+    ///
+    /// Pool sizing: `cpu_pool = max(1, num_cpus::get_physical() / max(1, threads_per_job))`
+    /// where `threads_per_job` is `n_threads` from settings (0 → `num_cpus`,
+    /// same convention as the Whisper inference path). `io_pool = 4`
+    /// (rate-limit guard for the LLM provider). Both are fixed at startup —
+    /// changing `n_threads` at runtime applies to new transcriptions but does
+    /// not resize the pool (restart-required, consistent with `db_path`).
+    pub async fn spawn_workers(&self) -> WorkerHandles {
+        // One-shot crash recovery: reset `running` rows to `pending` for jobs
+        // interrupted by the previous process. Best-effort: a failure here is
+        // logged but does not block worker startup (the next iteration of
+        // claim_pending_kind would just see no pending jobs and idle-sleep).
+        match self.job_repo.recover_running_jobs(now_unix()).await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!(count = n, "recovered interrupted jobs from previous run"),
+            Err(e) => tracing::error!("recover_running_jobs failed: {e}"),
+        }
+
+        let threads_per_job = self
+            .settings_handles
+            .as_ref()
+            .map(|h| h.settings_store.load().transcriber.n_threads as usize)
+            .unwrap_or(0);
+        let threads_per_job = if threads_per_job == 0 {
+            num_cpus::get_physical()
+        } else {
+            threads_per_job
+        };
+        let cpu_pool = (num_cpus::get_physical() / threads_per_job.max(1)).max(1);
+        let io_pool = DEFAULT_IO_POOL;
+        tracing::info!(
+            cpu_pool,
+            io_pool,
+            threads_per_job,
+            "worker pools sized"
+        );
+
+        let (transcribe_shutdown, t_rx) = tokio::sync::oneshot::channel::<()>();
+        let transcribe_worker = Arc::new(Worker::new(
             Arc::clone(&self.job_repo),
             Arc::clone(&self.meeting_repo),
             Arc::clone(&self.transcriber),
@@ -189,9 +237,33 @@ impl Container {
             Arc::clone(&self.llm),
             Arc::clone(&self.templates),
             Arc::clone(&self.progress),
-        );
-        let handle = tokio::spawn(worker.run(shutdown_rx));
-        (handle, shutdown_tx)
+            TRANSCRIBE_KINDS,
+            cpu_pool,
+            "transcribe",
+        ));
+        let transcribe_join = tokio::spawn(transcribe_worker.run(t_rx));
+
+        let (protocol_shutdown, p_rx) = tokio::sync::oneshot::channel::<()>();
+        let protocol_worker = Arc::new(Worker::new(
+            Arc::clone(&self.job_repo),
+            Arc::clone(&self.meeting_repo),
+            Arc::clone(&self.transcriber),
+            Arc::clone(&self.file_store),
+            Arc::clone(&self.llm),
+            Arc::clone(&self.templates),
+            Arc::clone(&self.progress),
+            PROTOCOL_KINDS,
+            io_pool,
+            "protocol",
+        ));
+        let protocol_join = tokio::spawn(protocol_worker.run(p_rx));
+
+        WorkerHandles {
+            transcribe_join,
+            transcribe_shutdown,
+            protocol_join,
+            protocol_shutdown,
+        }
     }
 }
 
@@ -215,15 +287,10 @@ pub fn default_recordings_dir() -> PathBuf {
 }
 
 pub fn default_prompts_dir() -> PathBuf {
-    // Shared with Python: repo-root/prompts/
-    // Walk up from the binary location or fall back to CWD/prompts
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| {
-            // <repo>/rust/target/debug/meeting-assistant → <repo>/prompts
-            p.ancestors().nth(4).map(|root| root.join("prompts"))
-        })
-        .unwrap_or_else(|| PathBuf::from("prompts"))
+    // Writable, per-user, survives upgrades (like the db and models dirs). The
+    // bundled templates are embedded in the binary and seeded here at startup by
+    // `backfill_templates`; `settings.paths.prompts` still overrides this.
+    xdg_data_dir().join("meeting-assistant/prompts")
 }
 
 fn xdg_data_dir() -> PathBuf {

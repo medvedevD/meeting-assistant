@@ -49,6 +49,15 @@ Page {
         return (m < 10 ? "0" : "") + m + ":" + (sec < 10 ? "0" : "") + sec
     }
 
+    function levelHeight(index, total, tick) {
+        var center = (total - 1) / 2
+        var distance = Math.abs(index - center) / center
+        var base = 0.32 + (1.0 - distance) * 0.28
+        var pulse = Math.sin(tick * 0.42 + index * 0.72) * 0.18
+        var ripple = Math.sin(tick * 0.18 - index * 0.35) * 0.08
+        return Math.max(0.2, Math.min(1.0, base + pulse + ripple))
+    }
+
     function sourceIndex() {
         if (source === "mic") return 0
         if (source === "system") return 1
@@ -627,7 +636,41 @@ Page {
                     font.weight: Theme.wRegular
                     font.letterSpacing: Theme.tracking(76, -0.025)
                     color: Theme.ink
-                    opacity: 0.92 + 0.08 * Math.abs(Math.sin(scr.visualTick / 6.0))
+                }
+                Item {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.preferredWidth: Math.min(320, parent.width * 0.6)
+                    Layout.preferredHeight: 34
+                    Accessible.ignored: true
+
+                    readonly property int barCount: 23
+
+                    Rectangle {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width
+                        height: 1
+                        radius: 0.5
+                        color: Theme.rule
+                    }
+                    Row {
+                        anchors.centerIn: parent
+                        height: parent.height
+                        spacing: 5
+
+                        Repeater {
+                            model: parent.parent.barCount
+                            Rectangle {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 3
+                                height: 4 + 28 * scr.levelHeight(index, parent.parent.barCount, scr.visualTick)
+                                radius: 1.5
+                                color: index === Math.floor(parent.parent.barCount / 2)
+                                       ? Theme.rec
+                                       : Qt.rgba(Theme.rec.r, Theme.rec.g, Theme.rec.b, 0.46)
+                            }
+                        }
+                    }
                 }
                 Text {
                     Layout.alignment: Qt.AlignHCenter
@@ -639,12 +682,6 @@ Page {
                     font.pixelSize: 20
                     font.italic: true
                     color: Theme.ink2
-                }
-                Rectangle {
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: Math.min(360, parent.width * 0.65)
-                    height: 1
-                    color: Theme.rule
                 }
                 RowLayout {
                     Layout.alignment: Qt.AlignHCenter

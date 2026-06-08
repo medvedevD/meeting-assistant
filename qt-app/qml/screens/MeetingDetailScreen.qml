@@ -1,7 +1,6 @@
 // MeetingDetailScreen — Meety redesign (qt-redesign Phase 3). Content-bar +
-// Editorial protocol render. Protocol is Markdown (the core emits markdown), so
-// "editorial" = MarkdownText styled with the serif face on warm paper, in a
-// centred reading column. Behaviour (reprocess / delete / progress) unchanged.
+// Editorial protocol render in a centred reading column. Behaviour (reprocess /
+// delete / progress) unchanged.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -19,6 +18,7 @@ Page {
 
     // Persisted protocol, loaded from the backend (GET /api/v1/meetings/:id).
     property string protocol: ""
+    property var structuredProtocol: null
     readonly property bool hasProtocol: protocol.length > 0
 
     // Active reprocess job (transcribe / protocol) lives in ActiveJobsStore so it
@@ -27,6 +27,12 @@ Page {
                                      ActiveJobsStore.entryFor(meetingId))
     readonly property bool jobActive: jobEntry !== null && jobEntry.terminalAt === 0
     property string actionNote: ""
+
+    // One reading measure shared by the header bar, the inline progress, and the
+    // protocol body so the page reads as a single centred document instead of a
+    // full-width header floating above a tiny centred column. Structural rules
+    // stay full-width to keep the window anchored.
+    readonly property int readingWidth: Math.min(760, pageBody.width - 96)
 
     background: Rectangle { color: Theme.paper }
 
@@ -62,6 +68,8 @@ Page {
         id: protocolReq
         onOk: function (j) {
             scr.protocol = (j && j.protocol) ? j.protocol : ""
+            scr.structuredProtocol = (j && j.structured_protocol)
+                                   ? j.structured_protocol : null
             if (!scr.hasProtocol && scr.shell.selectedId === scr.meetingId
                     && !ActiveJobsStore.isActive(scr.meetingId))
                 scr.shell.showNoProtocol({
@@ -122,6 +130,31 @@ Page {
     }
 
     MeetyDialog {
+        id: confirmCancel
+        preferredWidth: 420
+        title: qsTr("Прервать обработку?")
+        onAccepted: ActiveJobsStore.cancel(scr.meetingId)
+
+        Text {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            lineHeight: 1.35
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBodyLg
+            color: Theme.ink2
+            text: qsTr("Текущая задача будет помечена как отменённая. Уже выполненная часть транскрипта или протокола сохранится.")
+        }
+
+        footer: MeetyDialogActions {
+            dialog: confirmCancel
+            cancelText: qsTr("Назад")
+            confirmText: qsTr("Прервать")
+            confirmVariant: "accent"
+            confirmIconName: "close"
+        }
+    }
+
+    MeetyDialog {
         id: confirmDelete
         preferredWidth: 420
         title: qsTr("Удалить встречу?")
@@ -147,14 +180,15 @@ Page {
     }
 
     ColumnLayout {
+        id: pageBody
         anchors.fill: parent
         spacing: 0
 
         // ── content-bar (detail) ─────────────────────────────────────────────
         RowLayout {
             Layout.fillWidth: true
-            Layout.leftMargin: 24
-            Layout.rightMargin: 24
+            Layout.maximumWidth: scr.readingWidth
+            Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: 16
             Layout.bottomMargin: 16
             spacing: 12
@@ -223,8 +257,8 @@ Page {
         // ── inline reprocess progress + note ─────────────────────────────────
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.leftMargin: 24
-            Layout.rightMargin: 24
+            Layout.maximumWidth: scr.readingWidth
+            Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: (scr.jobEntry !== null
                                || scr.actionNote.length > 0) ? 16 : 0
             spacing: 10
@@ -232,11 +266,34 @@ Page {
             MeetyCard {
                 visible: scr.jobEntry !== null
                 Layout.fillWidth: true
-                PipelineProgress {
+                ColumnLayout {
                     width: parent ? parent.width : 0
-                    apiClient: api
-                    sourceJob: scr.jobEntry ? scr.jobEntry.job : null
-                    onOpenSettings: scr.shell.showSettings()
+                    spacing: 12
+                    PipelineProgress {
+                        Layout.fillWidth: true
+                        apiClient: api
+                        sourceJob: scr.jobEntry ? scr.jobEntry.job : null
+                        onOpenSettings: scr.shell.showSettings()
+                    }
+                    // Cancel affordance lives next to the progress so the
+                    // user sees the way to stop a running job in the same
+                    // visual context as what's happening. Hidden once the
+                    // user has clicked it (transient "Прерывание…" state)
+                    // and after the job reaches a terminal state.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        visible: scr.jobActive
+                        Item { Layout.fillWidth: true }
+                        MeetyButton {
+                            variant: "ghost"
+                            iconName: "close"
+                            text: (scr.jobEntry && scr.jobEntry.cancelRequested === true)
+                                  ? qsTr("Прерывание…")
+                                  : qsTr("Прервать")
+                            enabled: !(scr.jobEntry && scr.jobEntry.cancelRequested === true)
+                            onClicked: confirmCancel.open()
+                        }
+                    }
                 }
             }
             Text {
@@ -265,7 +322,7 @@ Page {
 
                 ColumnLayout {
                     id: article
-                    width: Math.min(680, parent.width - 64)
+                    width: scr.readingWidth
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: 40
                     spacing: 0
@@ -284,6 +341,7 @@ Page {
                     ProtocolDocument {
                         Layout.fillWidth: true
                         markdown: scr.protocol
+                        structured: scr.structuredProtocol
                     }
                 }
             }

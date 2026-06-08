@@ -108,6 +108,10 @@ pub enum ErrorClass {
     WorkerKilled,
     ModelNotSelected,
     ModelMissing,
+    /// User-initiated cancellation via `DELETE /api/v1/jobs/:id`. Distinct
+    /// from `WorkerKilled` (process-level termination) and from the retry
+    /// path — see `plans/active/job-cancellation`.
+    Cancelled,
     Unknown,
 }
 
@@ -121,6 +125,7 @@ impl ErrorClass {
             Self::WorkerKilled => "worker_killed",
             Self::ModelNotSelected => "model_not_selected",
             Self::ModelMissing => "model_missing",
+            Self::Cancelled => "cancelled",
             Self::Unknown => "unknown",
         }
     }
@@ -134,9 +139,22 @@ impl ErrorClass {
             "worker_killed" => Some(Self::WorkerKilled),
             "model_not_selected" => Some(Self::ModelNotSelected),
             "model_missing" => Some(Self::ModelMissing),
+            "cancelled" => Some(Self::Cancelled),
             "unknown" => Some(Self::Unknown),
             _ => None,
         }
+    }
+
+    /// Whether re-running the job could plausibly succeed. Transient faults
+    /// (network blips, rate limits, a killed worker) are worth a backoff retry;
+    /// configuration/content faults (bad or missing API key, corrupt audio, a
+    /// model that isn't selected/installed) will fail identically every time, so
+    /// the worker should surface them immediately instead of grinding retries.
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::NetworkTimeout | Self::ApiQuota | Self::WorkerKilled | Self::Unknown
+        )
     }
 
     /// Map a terminal [`CoreError`] to a UI-facing error class. The LLM
@@ -151,6 +169,7 @@ impl ErrorClass {
             ApiTimeout(_) | Network(_) => Self::NetworkTimeout,
             AudioCorrupt(_) => Self::AudioCorrupt,
             WorkerKilled(_) => Self::WorkerKilled,
+            Cancelled => Self::Cancelled,
             // The Whisper loader reports a model-load failure as a
             // `Transcription` error with this signature (RU/EN). Anything else
             // from transcription is an audio/decoding problem we can't pin down.
@@ -266,6 +285,7 @@ mod tests {
             ErrorClass::WorkerKilled,
             ErrorClass::ModelNotSelected,
             ErrorClass::ModelMissing,
+            ErrorClass::Cancelled,
             ErrorClass::Unknown,
         ] {
             assert_eq!(ErrorClass::from_str(c.as_str()), Some(c));
@@ -300,6 +320,10 @@ mod tests {
             ErrorClass::WorkerKilled
         );
         assert_eq!(
+            ErrorClass::from_core_error(&CoreError::Cancelled),
+            ErrorClass::Cancelled
+        );
+        assert_eq!(
             ErrorClass::from_core_error(&CoreError::Transcription(
                 "model_not_selected: transcription model is not selected".into()
             )),
@@ -315,5 +339,28 @@ mod tests {
             ErrorClass::from_core_error(&CoreError::Transcription("decode failed".into())),
             ErrorClass::Unknown,
         );
+    }
+
+    #[test]
+    fn retryable_classes_are_transient_only() {
+        // Transient — worth a backoff retry.
+        for c in [
+            ErrorClass::NetworkTimeout,
+            ErrorClass::ApiQuota,
+            ErrorClass::WorkerKilled,
+            ErrorClass::Unknown,
+        ] {
+            assert!(c.is_retryable(), "{} should retry", c.as_str());
+        }
+        // Permanent — re-running fails identically, so surface immediately.
+        for c in [
+            ErrorClass::ApiAuth,
+            ErrorClass::AudioCorrupt,
+            ErrorClass::ModelNotSelected,
+            ErrorClass::ModelMissing,
+            ErrorClass::Cancelled,
+        ] {
+            assert!(!c.is_retryable(), "{} should fail fast", c.as_str());
+        }
     }
 }

@@ -7,19 +7,17 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use dashmap::DashMap;
-use meeting_core::entities::JobProgress;
 use meeting_core::ports::{
     AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber,
 };
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tower_governor::{
+    governor::GovernorConfigBuilder, key_extractor::GlobalKeyExtractor, GovernorLayer,
+};
 
-/// Live, in-memory job-progress table keyed by job id. Shared with the worker
-/// (the writer); the `GET /jobs/:id` handler reads it. Never persisted
-/// (decision #11).
-pub type LiveProgress = Arc<DashMap<String, JobProgress>>;
+pub use meeting_core::LiveJobs;
 
 /// Resolves the configured `default_template` name when a protocol request
 /// omits one. Decision #3: settings never leak into the core; the API layer
@@ -50,8 +48,11 @@ pub struct AppState {
     pub file_store: Arc<dyn MeetingFileStore>,
     /// Directory where per-meeting recording subdirs are created.
     pub recordings_dir: PathBuf,
-    /// Live, in-memory job-progress table (shared with the worker).
-    pub progress: LiveProgress,
+    /// Live, in-memory job table (shared with the worker). Each entry holds
+    /// both the in-flight progress snapshot and a cancellation token; the
+    /// `DELETE /api/v1/jobs/:id` handler signals the token to stop a running
+    /// job at its next safe checkpoint.
+    pub progress: LiveJobs,
     /// Resolves the configured default template when a protocol request omits
     /// one (decision #3 — the API layer resolves it before the use-case runs).
     pub default_template: DefaultTemplateFn,
@@ -129,17 +130,45 @@ pub fn create_server_router(
             min_protocol: crate::MIN_PROTOCOL_VERSION,
         });
 
-    api.merge(settings)
+    // Global rate limit on the authenticated surface. On loopback every peer is
+    // 127.0.0.1, so the legitimate GUI and a co-tenant abuser are
+    // indistinguishable by IP — a single global GCRA bucket (not per-IP, which
+    // would be identical here but demand ConnectInfo plumbing) is the keying
+    // that matches the threat. Steady ~100 req/s (one cell per 10 ms) with a
+    // burst of 50; the GUI sits far under this by design. The default handler
+    // rejects excess with `429 Too Many Requests` and an `x-ratelimit-after`
+    // retry hint. See plans/api-rate-limit/plan.md for the full rationale.
+    let governor = GovernorLayer {
+        config: Arc::new(
+            GovernorConfigBuilder::default()
+                .per_millisecond(10)
+                .burst_size(50)
+                .key_extractor(GlobalKeyExtractor)
+                .finish()
+                .expect("rate-limit period and burst are non-zero"),
+        ),
+    };
+
+    // The limiter is applied *outside* the per-router `require_bearer` gate
+    // (`.layer` wraps the already-merged auth routers, so it runs first). A
+    // brute-force loop that only ever yields 401s therefore still drains the
+    // bucket and trips the limiter. `/health` and `/version` are merged after
+    // and stay unthrottled.
+    let authed = api
+        .merge(settings)
         .merge(templates)
         .merge(transcription_models)
-        .merge(meta)
+        .layer(governor);
+
+    authed.merge(meta)
 }
 
 fn api_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/v1/jobs", post(jobs::submit))
         .route("/api/v1/active-jobs", get(jobs::active))
-        .route("/api/v1/jobs/:id", get(jobs::status))
+        .route("/api/v1/jobs/:id/events", get(jobs::events))
+        .route("/api/v1/jobs/:id", get(jobs::status).delete(jobs::cancel))
         .route("/api/v1/protocols", post(protocols::generate))
         .route("/api/v1/recordings", post(recordings::start))
         .route("/api/v1/recordings/:id/stop", post(recordings::stop))
@@ -158,6 +187,30 @@ fn settings_routes() -> Router<Arc<dyn SettingsService>> {
         .route("/api/v1/settings", get(settings::get).put(settings::put))
         .route("/api/v1/settings/secret", put(settings::put_secret))
         .route("/api/v1/settings/test", post(settings::test))
+        .route(
+            "/api/v1/settings/secret-store/protect",
+            post(settings::protect_secret_store),
+        )
+        .route(
+            "/api/v1/settings/secret-store/unlock",
+            post(settings::unlock_secret_store),
+        )
+        .route(
+            "/api/v1/settings/secret-store/lock",
+            post(settings::lock_secret_store),
+        )
+        .route(
+            "/api/v1/settings/secret-store/passphrase",
+            post(settings::change_secret_passphrase),
+        )
+        .route(
+            "/api/v1/settings/secret-store/migrate",
+            post(settings::migrate_secret_store),
+        )
+        .route(
+            "/api/v1/settings/secret-store/reset",
+            post(settings::reset_secret_store),
+        )
 }
 
 fn template_routes() -> Router<Arc<dyn TemplateService>> {
@@ -261,6 +314,24 @@ mod tests {
         async fn test_provider(&self, _provider: String) -> Result<(), String> {
             Ok(())
         }
+        async fn protect_secret_store(&self, _passphrase: String) -> Result<(), String> {
+            Ok(())
+        }
+        async fn unlock_secret_store(&self, _passphrase: String) -> Result<(), String> {
+            Ok(())
+        }
+        async fn lock_secret_store(&self) -> Result<(), String> {
+            Ok(())
+        }
+        async fn change_secret_passphrase(&self, _old: String, _new: String) -> Result<(), String> {
+            Ok(())
+        }
+        async fn migrate_secret_store_to_keyring(&self, _passphrase: String) -> Result<(), String> {
+            Ok(())
+        }
+        async fn reset_secret_store(&self) -> Result<(), String> {
+            Ok(())
+        }
     }
 
     struct FakeTemplates;
@@ -335,7 +406,7 @@ mod tests {
                 audio_capture: FakeAudioCapture::new(),
                 file_store: FakeMeetingFileStore::new(),
                 recordings_dir: PathBuf::from("/tmp"),
-                progress: std::sync::Arc::new(dashmap::DashMap::new()),
+                progress: meeting_core::LiveProgress::new(),
                 default_template: super::no_default_template(),
             },
             Arc::new(FakeSettings),
@@ -350,7 +421,9 @@ mod tests {
     const API_ROUTES: &[(&str, &str)] = &[
         ("POST", "/api/v1/jobs"),
         ("GET", "/api/v1/active-jobs"),
+        ("GET", "/api/v1/jobs/abc/events"),
         ("GET", "/api/v1/jobs/abc"),
+        ("DELETE", "/api/v1/jobs/abc"),
         ("POST", "/api/v1/protocols"),
         ("POST", "/api/v1/recordings"),
         ("POST", "/api/v1/recordings/abc/stop"),
@@ -443,6 +516,67 @@ mod tests {
         let bytes = resp.into_body().collect().await.unwrap().to_bytes();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn brute_force_401s_are_rate_limited() {
+        // A co-tenant guessing tokens never gets past `require_bearer`, but the
+        // limiter sits ahead of it: enough 401-yielding requests must exhaust
+        // the global bucket and start returning 429. Burst is 50, so well over
+        // that count guarantees the limiter trips. All calls share one router
+        // instance so they hit the same Arc'd GCRA bucket.
+        let app = server();
+        let mut saw_429 = false;
+        for _ in 0..200 {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/api/v1/meetings")
+                        .header("Authorization", "Bearer not-the-token")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            match resp.status() {
+                StatusCode::UNAUTHORIZED => {}
+                StatusCode::TOO_MANY_REQUESTS => {
+                    saw_429 = true;
+                    break;
+                }
+                other => panic!("unexpected status {other} during brute force"),
+            }
+        }
+        assert!(
+            saw_429,
+            "brute-force 401 traffic must trip the rate limiter (429)"
+        );
+    }
+
+    #[tokio::test]
+    async fn health_is_not_rate_limited() {
+        // `/health` is merged outside the limiter; hammering it past the burst
+        // must never yield 429.
+        let app = server();
+        for _ in 0..200 {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/health")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::OK,
+                "/health must never be rate-limited"
+            );
+        }
     }
 
     #[tokio::test]

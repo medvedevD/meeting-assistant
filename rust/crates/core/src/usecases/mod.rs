@@ -1,6 +1,9 @@
 mod transcribe_audio;
 pub use transcribe_audio::transcribe_audio_file;
 
+mod transcript_render;
+pub use transcript_render::{format_date_dmy, render_markdown, TranscriptMeta};
+
 mod submit_transcription_job;
 pub use submit_transcription_job::submit_transcription_job;
 
@@ -9,6 +12,9 @@ pub use get_job_status::get_job_status;
 
 mod list_active_jobs;
 pub use list_active_jobs::list_active_jobs;
+
+mod cancel_job;
+pub use cancel_job::{cancel_job, CancelOutcome};
 
 mod generate_protocol;
 pub use generate_protocol::generate_protocol;
@@ -36,6 +42,9 @@ pub use regenerate_protocol::regenerate_protocol;
 
 mod delete_meeting;
 pub use delete_meeting::{delete_meeting, DeleteMode};
+
+mod backfill_templates;
+pub use backfill_templates::backfill_templates;
 
 mod templates;
 pub use templates::{

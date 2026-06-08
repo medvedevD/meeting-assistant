@@ -8,25 +8,40 @@ Meeting Assistant is an AI-powered desktop app for recording, transcribing, and 
 
 ## Plans & Backlog
 
-Planning artifacts live in two top-level locations with an explicit lifecycle:
+**One task = one kebab-case slug.** Two folders, and the task moves from one to the other:
 
-- **`backlog/<slug>.md`** — single Markdown file per future idea (kebab-case slug, e.g. `backlog/structured-protocol-rendering.md`). One item per file; no monolithic `BACKLOG.md`.
-- **`plans/active/<task-slug>/`** — folder per task **currently in flight**. Contains the PRD and any related docs (`prd-v1.0.md`, `plan-v1.0.md`, research notes, interview transcripts, etc.).
-- **`plans/done/<task-slug>/`** — same shape as `active/`, archive of plans whose code has shipped to `main`.
+- **`backlog/<slug>.md`** — a future idea, a single file. Needs only **Problem + Sketch** (a paragraph or two).
+- **`plans/<slug>/`** — a task currently in flight, **always a folder** with the plan at `plan.md`. Side files (research notes, transcripts, a standalone ADR) live next to it in the same folder.
 
-### Lifecycle rules
+An active plan always gets its own folder, even when `plan.md` is the only file in it — this keeps a consistent home for any side files the task accrues and a stable path to link to.
+
+There is **no `done/` archive**. A finished plan folder is deleted — git keeps the full history (`git log -- plans/<slug>/` recovers it). Anything worth remembering long-term is folded into a living doc (this file, or an ADR) *before* the plan is deleted; the plan folder itself is disposable process scaffolding.
+
+### Plan content
+
+An active plan is `plans/<slug>/plan.md` with, at minimum:
+
+1. **Problem** — what's broken or missing (1–3 sentences).
+2. **Scope** — explicit in/out lists; bound the change.
+3. **Deliverables** — file-level change list + test plan.
+4. **Decisions** *(optional)* — inline ADR notes when a choice needs recording.
+
+No separate PRD/plan documents, no `-vX.Y` filename suffix — git is the history.
+
+### Lifecycle
 
 | Transition | Action |
 |---|---|
-| New small idea | Create `backlog/<slug>.md`. |
-| New large initiative (already prioritized, skips backlog) | Create `plans/active/<slug>/prd-v1.0.md` directly. |
-| Backlog → Active (promotion) | In the same commit: `git mv backlog/<slug>.md plans/active/<slug>/prd-v1.0.md` (or another appropriate doc name). **Never leave the item in both places** — one item, one location. |
-| Active → Done (completion) | When the implementation is **committed to the current working branch and the feature works as the plan describes**, `git mv plans/active/<slug> plans/done/<slug>`. Trigger is shipped code, not PR-open or "almost done". A later merge to `main` requires no further action — the plan is already in `done/`. |
-| Cancellation | Delete the `backlog/<slug>.md` or `plans/active/<slug>/` in a dedicated commit with a one-line reason in the commit message. Never silently move to `done/`. |
+| New idea | Create `backlog/<slug>.md`. A large, already-prioritized initiative may start directly at `plans/<slug>/plan.md`. |
+| Promote (backlog → active) | `git mv backlog/<slug>.md plans/<slug>/plan.md`, then flesh out the plan content. Same slug — **never leave a copy in `backlog/`**. |
+| Complete | First fold any durable decisions into RULES.md / an ADR. Then the task's final commit — the one that lands the working implementation — also `git rm -r`s the plan folder. Code and plan removal ride in the **same commit**. |
+| Cancel | The same `git rm -r`, in a dedicated commit with a one-line reason in the message. |
+
+Completion and cancellation are the same mechanical step (`git rm -r plans/<slug>/`); the only difference is whether the work shipped. If work ships before an item is ever promoted, that final commit simply `git rm`s `backlog/<slug>.md`.
 
 ### Forbidden locations
 
-Never use any of: `docs/prds/`, `.Codex/plans/`, `.agents/plans/`, `.claude/plans/`, or ad-hoc top-level files. Tools or skills that generate planning docs must write to `plans/active/<slug>/` (or `backlog/<slug>.md` for a single-file idea), overriding their defaults.
+Never use any of: `docs/prds/`, `.Codex/plans/`, `.agents/plans/`, `.claude/plans/`, or ad-hoc top-level files. Tools or skills that generate planning docs must write to `plans/<slug>/plan.md` (or `backlog/<slug>.md`), overriding their defaults.
 
 ## Development Commands
 
@@ -107,7 +122,12 @@ Key domain flow: `StartRecording` → audio captured via `AudioCapture` port →
 
 ### Prompts
 
-LLM prompt templates live in `/prompts/` (Russian language). The `TemplateLoader` port reads these at runtime.
+LLM prompt templates are Russian-language `.md` files. Two distinct roles:
+
+- **Bundle (read-only, compile-time):** `/prompts/` is the source of truth, **embedded into the binary** via `include_str!` (`EmbeddedBundle`, mirroring the `MIGRATIONS` const). Shipping a new bundled template = drop a `.md` in `/prompts/` + add one line to `BUNDLED`.
+- **Writable store (runtime):** the `TemplateLoader` port reads/writes a per-user dir, default `default_prompts_dir()` = `$XDG_DATA_HOME/meeting-assistant/prompts/` (override via `settings.paths.prompts`). User edits live here and survive upgrades.
+
+On startup (sidecar `run()` and every CLI command) `backfill_templates` seeds the writable dir from the embedded bundle: writes only **missing** names, never overwrites, and skips `settings.removed_bundled_templates` (tombstones for bundled templates the user deleted — maintained by `AppTemplateService` on delete/save/rename). This makes a newly shipped template appear on upgrade without disturbing user customisations. Note: `/prompts/` is **no longer** the runtime dir — edits there only change the embed source and require a rebuild.
 
 ### Settings persistence and hot-swap
 
@@ -131,10 +151,6 @@ The `LlmProvider` port is intentionally minimal (`generate(transcript, instructi
 ### Voice Activity Detection (VAD) — not implemented (decided Phase 6)
 
 VAD is intentionally **not** wired into the Whisper transcriber. `whisper-rs` VAD requires bundling and managing a **separate silero model file**, which adds packaging/notarization surface (an extra signed asset, download/version management) without changing transcription correctness — Whisper's own decoding handles silence acceptably. Given the shipping focus (signing/notarization/updater), the cost outweighs the benefit for now. Revisit only if real recordings show meaningful wasted compute on long silences; if added, plan it as its own task (model acquisition + settings UI for `vad`/`vad_threshold` + transcriber wiring).
-
-## Environment
-
-`ANTHROPIC_API_KEY` must be set for protocol generation. The app shows a warning on startup if missing.
 
 ## Key Files
 

@@ -97,6 +97,12 @@ QtObject {
     // ── enqueue ──────────────────────────────────────────────────────────────
     // Single reprocess job, no chaining (menu "Перетранскрибировать" / "Перегенерировать").
     function reprocess(meetingId, kind, templateName) {
+        // Pre-flight: a protocol job needs a working LLM. Surface "LLM не
+        // настроена" up front instead of enqueuing a job that can only fail.
+        if (kind === "protocol" && !llmReady()) {
+            _failPreflight(meetingId, "protocol")
+            return
+        }
         _enqueue(meetingId, kind, templateName, false)
     }
 
@@ -105,13 +111,54 @@ QtObject {
     // the protocol step on success (then_protocol); the client adopts that
     // backend-enqueued protocol job when the transcription finishes.
     function startGeneration(meetingId, hasTranscript, templateName) {
-        if (hasTranscript === true)
+        if (hasTranscript === true) {
+            // Direct protocol → pre-flight the LLM. (The no-transcript path still
+            // runs transcription, which needs no key; its chained protocol step
+            // fails fast server-side if the LLM is unconfigured.)
+            if (!llmReady()) {
+                _failPreflight(meetingId, "protocol")
+                return
+            }
             _enqueue(meetingId, "protocol", templateName, false)
-        else
+        } else {
             _enqueue(meetingId, "transcribe", templateName, true)
+        }
+    }
+
+    // True when the active LLM provider can actually be called: Ollama needs no
+    // key; every other provider needs a stored/env key (and an unlocked vault,
+    // which `has_key` already reflects). Returns true when settings haven't
+    // loaded yet — we only block when we positively know there is no key.
+    function llmReady() {
+        if (!SettingsStore.loaded)
+            return true
+        var active = SettingsStore.llm().active || "anthropic"
+        if (active === "ollama")
+            return true
+        return SettingsStore.providerCfg(active).has_key === true
     }
 
     function clear(meetingId) { _untrack(meetingId); _touch() }
+
+    // ── cancel ───────────────────────────────────────────────────────────────
+    // Cooperative cancel of the live job for a meeting. Sends
+    // `DELETE /api/v1/jobs/:id`; the worker terminates at its next safe
+    // checkpoint and the poller surfaces status=failed, error_class=cancelled.
+    // Optimistically marks the entry as cancel-requested so the UI can show
+    // a transient "Прерывание..." state before the poller confirms.
+    function cancel(meetingId) {
+        var e = _jobs[meetingId]
+        if (!e || e.terminalAt !== 0 || !e.jobId)
+            return
+        var req = _reqComp.createObject(store)
+        if (req === null)
+            return
+        req.ok.connect(function () { req.destroy() })
+        req.fail.connect(function (s, err) { req.destroy() })
+        req.del("/api/v1/jobs/" + e.jobId)
+        _patch(meetingId, { "cancelRequested": true })
+        _touch()
+    }
 
     // ── internals ────────────────────────────────────────────────────────────
     function _touch() { version = version + 1 }
@@ -203,6 +250,22 @@ QtObject {
         var job = { "status": "failed", "error_class": "unknown", "last_error": error }
         _patch(meetingId, { "job": job, "status": "failed" })
         _onTerminal(meetingId, "failed", job)
+        _touch()
+    }
+
+    // Synthesize a terminal failed entry client-side (no job posted) so the UI
+    // shows the same error card as a real failure. Used for pre-flight when the
+    // job is doomed before it starts (e.g. the active LLM has no key).
+    function _failPreflight(meetingId, kind) {
+        if (!meetingId)
+            return
+        _untrack(meetingId)
+        var job = { "status": "failed", "error_class": "api_auth", "last_error": "" }
+        _jobs[meetingId] = {
+            "jobId": "", "kind": kind, "status": "failed", "job": job,
+            "terminalAt": 0, "poller": null, "sweepTimer": null
+        }
+        _finalize(meetingId, "failed", job)
         _touch()
     }
 

@@ -1,5 +1,5 @@
 mod whisper;
-pub use whisper::{LazyWhisperTranscriber, TranscriberPrefs, WhisperTranscriber};
+pub use whisper::{whisper_backend, LazyWhisperTranscriber, TranscriberPrefs, WhisperTranscriber};
 
 mod fs_meeting_file_store;
 pub use fs_meeting_file_store::FsMeetingFileStore;
@@ -15,13 +15,15 @@ pub use transcription_models::{
 };
 
 pub mod secret_store;
-pub use secret_store::KeyringSecretStore;
+pub use secret_store::{
+    KeyringMechanism, KeyringSecretStore, SecretError, SecretStatus, VaultState,
+};
 
 pub mod db;
-pub use db::{Db, SqliteJobRepo, SqliteMeetingRepo};
+pub use db::{rollback_last_migration_at_path, Db, SqliteJobRepo, SqliteMeetingRepo};
 
 mod worker;
-pub use worker::{LiveProgress, Worker};
+pub use worker::{LiveJobs, Worker, PROTOCOL_KINDS, TRANSCRIBE_KINDS};
 
 pub mod llm;
 pub use llm::{
@@ -31,6 +33,9 @@ pub use llm::{
 
 pub mod templates;
 pub use templates::FileTemplateLoader;
+
+mod template_bundle;
+pub use template_bundle::EmbeddedBundle;
 
 pub mod audio;
 pub use audio::{run_recovery, CpalAudioCapture, RecoveryReport, WavRecovery};

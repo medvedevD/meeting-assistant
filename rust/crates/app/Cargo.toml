@@ -13,6 +13,16 @@ path = "src/main.rs"
 name = "meeting-server"
 path = "src/bin/meeting-server.rs"
 
+[features]
+# Passthrough GPU backends to meeting-adapters so the sidecar binary can be built
+# with acceleration in one flag, e.g.:
+#   cargo build --bin meeting-server --release --features whisper-cuda
+# Requires the matching toolkit installed (CUDA Toolkit / Vulkan SDK). Off by
+# default — the portable build stays CPU-only (macOS still gets Metal). See
+# plans/.../whisper-gpu-acceleration and ADR-006.
+whisper-cuda = ["meeting-adapters/whisper-cuda"]
+whisper-vulkan = ["meeting-adapters/whisper-vulkan"]
+
 [dependencies]
 meeting-core = { path = "../core" }
 meeting-adapters = { path = "../adapters" }
@@ -31,6 +41,7 @@ getrandom = "0.2"
 dirs = { workspace = true }
 async-trait = { workspace = true }
 sha1 = "0.10"
+num_cpus = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

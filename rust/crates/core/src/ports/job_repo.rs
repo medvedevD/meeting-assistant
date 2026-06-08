@@ -1,5 +1,16 @@
-use crate::{entities::Job, CoreError};
+use crate::{
+    entities::{Job, JobKind},
+    CoreError,
+};
 use async_trait::async_trait;
+
+/// All `JobKind`s. Used by [`JobRepo::claim_pending`] as the unfiltered
+/// shorthand and by tests that don't care which kind they claim.
+pub const ALL_JOB_KINDS: &[JobKind] = &[
+    JobKind::Transcribe,
+    JobKind::ReprocessTranscribe,
+    JobKind::RegenerateProtocol,
+];
 
 #[async_trait]
 pub trait JobRepo: Send + Sync {
@@ -8,8 +19,21 @@ pub trait JobRepo: Send + Sync {
     /// List in-flight jobs (`pending` or `running`), oldest first. Used to seed
     /// the UI's active-jobs view after an app restart.
     async fn list_active(&self) -> Result<Vec<Job>, CoreError>;
-    /// Atomically claim one pending job whose retry_after <= now_ts.
-    async fn claim_pending(&self, now_ts: i64) -> Result<Option<Job>, CoreError>;
+    /// Atomically claim one pending job whose `kind` is in `kinds` and whose
+    /// `retry_after <= now_ts`. The split worker-pool architecture
+    /// ([`plans/active/worker-concurrency-pool`]) uses this to run a
+    /// CPU-bound transcribe worker and an IO-bound protocol worker that each
+    /// claim disjoint kinds.
+    async fn claim_pending_kind(
+        &self,
+        kinds: &[JobKind],
+        now_ts: i64,
+    ) -> Result<Option<Job>, CoreError>;
+    /// Convenience wrapper that claims any kind. Used by tests; production
+    /// workers call [`Self::claim_pending_kind`] with their disjoint filter.
+    async fn claim_pending(&self, now_ts: i64) -> Result<Option<Job>, CoreError> {
+        self.claim_pending_kind(ALL_JOB_KINDS, now_ts).await
+    }
     async fn mark_done(&self, id: &str, now_ts: i64) -> Result<(), CoreError>;
     /// Reset job to pending for a future retry attempt.
     async fn reset_for_retry(
@@ -37,4 +61,19 @@ pub trait JobRepo: Send + Sync {
     /// Called once at worker startup to recover jobs that were interrupted by
     /// a previous process crash (e.g. `kill -9`). Returns the number of recovered jobs.
     async fn recover_running_jobs(&self, now_ts: i64) -> Result<u64, CoreError>;
+
+    /// Atomically transition a `pending` job to terminal `failed` with
+    /// `error_class='cancelled'`. Returns the number of rows actually changed:
+    /// 0 if the job was already non-pending (idempotent), 1 on success.
+    ///
+    /// Used by `DELETE /api/v1/jobs/:id` when the job has not yet been
+    /// claimed by a worker. See `plans/active/job-cancellation`.
+    async fn cancel_pending(&self, id: &str, now_ts: i64) -> Result<u64, CoreError>;
+
+    /// Mark a `pending`-or-`running` job as terminal `failed` with
+    /// `error_class='cancelled'`. Used by the worker after observing the
+    /// cancellation token at a safe checkpoint. Guarded by
+    /// `status IN ('pending','running')` so a race with `mark_done` /
+    /// `mark_permanently_failed` is a no-op (returns 0).
+    async fn mark_cancelled(&self, id: &str, now_ts: i64) -> Result<u64, CoreError>;
 }

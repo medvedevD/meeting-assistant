@@ -104,23 +104,44 @@ impl JobRepo for SqliteJobRepo {
         .map_err(|e| CoreError::Storage(e.to_string()))
     }
 
-    async fn claim_pending(&self, now_ts: i64) -> Result<Option<Job>, CoreError> {
+    async fn claim_pending_kind(
+        &self,
+        kinds: &[JobKind],
+        now_ts: i64,
+    ) -> Result<Option<Job>, CoreError> {
+        if kinds.is_empty() {
+            return Ok(None);
+        }
         let db = Arc::clone(&self.0);
+        let kind_strs: Vec<String> = kinds.iter().map(|k| k.as_str().to_string()).collect();
 
         tokio::task::spawn_blocking(move || {
             let mut conn = db.conn.lock().unwrap();
             let tx = conn.transaction()?;
 
+            // Build `?2, ?3, ?4, …` for the kind IN-list (rusqlite has no
+            // dynamic IN sugar without the `rarray` feature; the list is at
+            // most 3 entries, so an inline build is the simplest path).
+            let placeholders: String = (0..kind_strs.len())
+                .map(|i| format!("?{}", i + 2))
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT {SELECT_COLS} FROM jobs
+                 WHERE status='pending' AND retry_after <= ?1
+                   AND kind IN ({placeholders})
+                 ORDER BY created_at LIMIT 1"
+            );
+
+            let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::with_capacity(1 + kind_strs.len());
+            params.push(Box::new(now_ts));
+            for k in &kind_strs {
+                params.push(Box::new(k.clone()));
+            }
+            let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+
             let mut job = tx
-                .query_row(
-                    &format!(
-                        "SELECT {SELECT_COLS} FROM jobs
-                     WHERE status='pending' AND retry_after <= ?1
-                     ORDER BY created_at LIMIT 1"
-                    ),
-                    [now_ts],
-                    row_to_job,
-                )
+                .query_row(&sql, param_refs.as_slice(), row_to_job)
                 .optional()?;
 
             if let Some(ref mut j) = job {
@@ -225,6 +246,46 @@ impl JobRepo for SqliteJobRepo {
                  last_error='interrupted by process restart', updated_at=?1
                  WHERE status='running'",
                 rusqlite::params![now_ts],
+            )?;
+            Ok::<_, rusqlite::Error>(n as u64)
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+        .map_err(|e| CoreError::Storage(e.to_string()))
+    }
+
+    async fn cancel_pending(&self, id: &str, now_ts: i64) -> Result<u64, CoreError> {
+        let db = Arc::clone(&self.0);
+        let id = id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = db.conn.lock().unwrap();
+            let n = conn.execute(
+                "UPDATE jobs SET status='failed', error_class='cancelled',
+                 last_error='cancelled by user', updated_at=?1
+                 WHERE id=?2 AND status='pending'",
+                rusqlite::params![now_ts, id],
+            )?;
+            Ok::<_, rusqlite::Error>(n as u64)
+        })
+        .await
+        .map_err(|e| CoreError::Storage(e.to_string()))?
+        .map_err(|e| CoreError::Storage(e.to_string()))
+    }
+
+    async fn mark_cancelled(&self, id: &str, now_ts: i64) -> Result<u64, CoreError> {
+        let db = Arc::clone(&self.0);
+        let id = id.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let conn = db.conn.lock().unwrap();
+            // Guard: only flip from a non-terminal state. A race with mark_done
+            // or mark_permanently_failed becomes a no-op (0 rows changed).
+            let n = conn.execute(
+                "UPDATE jobs SET status='failed', error_class='cancelled',
+                 last_error='cancelled by user', updated_at=?1
+                 WHERE id=?2 AND status IN ('pending','running')",
+                rusqlite::params![now_ts, id],
             )?;
             Ok::<_, rusqlite::Error>(n as u64)
         })
@@ -403,6 +464,105 @@ mod tests {
     async fn list_active_empty_when_no_jobs() {
         let (_, jr) = make_repos();
         assert!(jr.list_active().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancel_pending_marks_failed_with_cancelled_class() {
+        let (mr, jr) = make_repos();
+        let m = insert_meeting(&mr).await;
+        let job = Job::new_transcribe(m.id);
+        jr.enqueue(&job).await.unwrap();
+
+        let n = jr.cancel_pending(&job.id, 7777).await.unwrap();
+        assert_eq!(n, 1, "one row should be cancelled");
+
+        let j = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert_eq!(j.status, JobStatus::Failed);
+        assert_eq!(
+            j.error_class,
+            Some(meeting_core::entities::ErrorClass::Cancelled)
+        );
+        assert_eq!(j.last_error.as_deref(), Some("cancelled by user"));
+        assert_eq!(j.updated_at, 7777);
+    }
+
+    #[tokio::test]
+    async fn cancel_pending_is_noop_on_running_job() {
+        let (mr, jr) = make_repos();
+        let m = insert_meeting(&mr).await;
+        let job = Job::new_transcribe(m.id);
+        jr.enqueue(&job).await.unwrap();
+        jr.claim_pending(i64::MAX).await.unwrap();
+
+        let n = jr.cancel_pending(&job.id, 1).await.unwrap();
+        assert_eq!(n, 0, "cancel_pending must not touch a running row");
+
+        let j = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert_eq!(j.status, JobStatus::Running);
+        assert!(j.error_class.is_none());
+    }
+
+    #[tokio::test]
+    async fn cancel_pending_is_noop_on_unknown_job() {
+        let (_, jr) = make_repos();
+        let n = jr.cancel_pending("ghost", 1).await.unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[tokio::test]
+    async fn mark_cancelled_flips_running_job_to_failed_cancelled() {
+        let (mr, jr) = make_repos();
+        let m = insert_meeting(&mr).await;
+        let job = Job::new_transcribe(m.id);
+        jr.enqueue(&job).await.unwrap();
+        jr.claim_pending(i64::MAX).await.unwrap();
+
+        let n = jr.mark_cancelled(&job.id, 9000).await.unwrap();
+        assert_eq!(n, 1);
+
+        let j = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert_eq!(j.status, JobStatus::Failed);
+        assert_eq!(
+            j.error_class,
+            Some(meeting_core::entities::ErrorClass::Cancelled)
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_cancelled_is_noop_on_done_job() {
+        let (mr, jr) = make_repos();
+        let m = insert_meeting(&mr).await;
+        let job = Job::new_transcribe(m.id);
+        jr.enqueue(&job).await.unwrap();
+        jr.mark_done(&job.id, 1).await.unwrap();
+
+        let n = jr.mark_cancelled(&job.id, 2).await.unwrap();
+        assert_eq!(n, 0, "mark_cancelled must not overwrite a done row");
+
+        let j = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert_eq!(j.status, JobStatus::Done);
+        assert!(j.error_class.is_none());
+    }
+
+    #[tokio::test]
+    async fn mark_cancelled_is_noop_on_already_failed_job() {
+        let (mr, jr) = make_repos();
+        let m = insert_meeting(&mr).await;
+        let job = Job::new_transcribe(m.id);
+        jr.enqueue(&job).await.unwrap();
+        jr.mark_permanently_failed(&job.id, "boom", Some("api_auth"), 5, 1)
+            .await
+            .unwrap();
+
+        let n = jr.mark_cancelled(&job.id, 2).await.unwrap();
+        assert_eq!(n, 0);
+
+        let j = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert_eq!(
+            j.error_class,
+            Some(meeting_core::entities::ErrorClass::ApiAuth),
+            "original error_class must be preserved"
+        );
     }
 
     #[tokio::test]

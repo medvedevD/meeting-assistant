@@ -5,11 +5,16 @@ edition = "2021"
 
 [dependencies]
 meeting-core = { path = "../core" }
-whisper-rs = "0.16"
+# whisper-rs is declared in the per-target tables below, not here, so macOS can
+# default to the Metal backend (a system framework — no extra runtime install,
+# notarization-safe) while every other target stays CPU-only by default. CUDA
+# and Vulkan are opt-in via the `whisper-cuda` / `whisper-vulkan` features so the
+# portable packaging build is unchanged. See build.rs and ADR-006.
 hound = "3"
 rubato = "0.15"
 cpal = "0.15"
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 dashmap = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
@@ -25,15 +30,47 @@ dirs = { workspace = true }
 # OS keyring for API secrets. Native backends are enabled per-target below;
 # on platforms without a backend, KeyringSecretStore falls back to a 0600 file.
 keyring = "3"
+# Passphrase-encrypted vault fallback (keyring unavailable). Pure-Rust crypto:
+# Argon2id KDF + XChaCha20-Poly1305 AEAD. See ADR-013.
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+base64 = "0.22"
+zeroize = "1"
+getrandom = "0.2"
+
+# Portable default: CPU-only Whisper on every target except macOS. CUDA/Vulkan
+# layer on top of this via the opt-in features below.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+whisper-rs = "0.16"
 
 # macOS system-audio capture via ScreenCaptureKit (audio-only; macOS 13.0 floor).
 # QtMultimedia/cpal cannot expose a macOS loopback device — see section-05.
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = { version = "=2.1.0", features = ["macos_13_0"] }
 keyring = { version = "3", features = ["apple-native"] }
+# Metal is on by default for macOS: it ships with the OS (no runtime install)
+# and needs no extra notarization/signing surface. This is the "cheapest win".
+whisper-rs = { version = "0.16", features = ["metal"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
+
+# Linux: talk to the real Secret Service (GNOME Keyring / KWallet) over D-Bus.
+# Without a backend feature, keyring 3 silently resolves to an in-memory mock —
+# keys would not persist and the UI would falsely report a working keystore.
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service"] }
+
+[features]
+# Opt-in GPU backends for portable (non-macOS) builds. Off by default so the
+# packaging pipeline's portable CPU build is unchanged. Enable exactly one for a
+# given build, e.g.:
+#   cargo build -p meeting-adapters --features whisper-cuda      # NVIDIA + CUDA SDK
+#   cargo build -p meeting-adapters --features whisper-vulkan    # cross-vendor + Vulkan SDK
+# macOS always links Metal (see the target table above); these are for
+# Linux/Windows users who have the matching toolchain installed.
+whisper-cuda = ["whisper-rs/cuda"]
+whisper-vulkan = ["whisper-rs/vulkan"]
 
 [dev-dependencies]
 meeting-core = { path = "../core", features = ["fakes"] }

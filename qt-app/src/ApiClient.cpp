@@ -34,6 +34,20 @@ int ApiClient::del(const QString &path) {
     return send("DELETE", path, {}, /*hasBody=*/false);
 }
 
+QNetworkReply *ApiClient::streamGet(const QString &path) {
+    if (!m_configured)
+        return nullptr;
+
+    QNetworkRequest req{QUrl(m_baseUrl + path)};
+    req.setRawHeader(QByteArrayLiteral("Authorization"), m_bearer);
+    req.setRawHeader(QByteArrayLiteral("Accept"),
+                     QByteArrayLiteral("text/event-stream"));
+    // Always hit the network: an event stream must never be served from cache.
+    req.setAttribute(QNetworkRequest::CacheLoadControlAttribute,
+                     QNetworkRequest::AlwaysNetwork);
+    return m_net->get(req);
+}
+
 int ApiClient::send(const QByteArray &verb, const QString &path,
                      const QVariantMap &body, bool hasBody) {
     const int id = m_nextId++;

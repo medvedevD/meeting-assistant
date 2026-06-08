@@ -5,11 +5,13 @@
 # next to the GUI binary (so SidecarManager finds it via applicationDirPath),
 # then runs the GUI.
 #
-# Usage: ./run-qt.sh [--debug] [--skip-rust] [--skip-build] [--no-run]
+# Usage: ./run-qt.sh [--debug] [--skip-rust] [--skip-build] [--no-run] [--cuda|--vulkan]
 #   --debug       Debug build of the Rust sidecar (default: release)
 #   --skip-rust   Don't rebuild the Rust sidecar
 #   --skip-build  Don't reconfigure/rebuild the Qt app
 #   --no-run      Build only; do not launch the GUI
+#   --cuda        Build the sidecar with the CUDA Whisper backend (needs CUDA Toolkit)
+#   --vulkan      Build the sidecar with the Vulkan Whisper backend (needs Vulkan SDK)
 #
 # Dev-only:
 #   FIRST_RUN=1 ./run-qt.sh
@@ -30,6 +32,7 @@ PROFILE="release"
 SKIP_RUST=0
 SKIP_BUILD=0
 RUN=1
+WHISPER_FEATURE=""
 
 for arg in "$@"; do
     case "$arg" in
@@ -37,6 +40,8 @@ for arg in "$@"; do
         --skip-rust)  SKIP_RUST=1 ;;
         --skip-build) SKIP_BUILD=1 ;;
         --no-run)     RUN=0 ;;
+        --cuda)       WHISPER_FEATURE="whisper-cuda" ;;
+        --vulkan)     WHISPER_FEATURE="whisper-vulkan" ;;
         *) echo "Unknown argument: $arg" >&2; exit 1 ;;
     esac
 done
@@ -71,8 +76,14 @@ detect_qt_prefix() {
 if [[ $SKIP_RUST -eq 0 ]]; then
     RELEASE_FLAG="--release"
     [[ "$PROFILE" == "debug" ]] && RELEASE_FLAG=""
-    echo "→ Building meeting-server sidecar ($PROFILE)..."
-    cargo build $RELEASE_FLAG --manifest-path "$RUST_DIR/Cargo.toml" --bin meeting-server
+    FEATURE_FLAG=""
+    if [[ -n "$WHISPER_FEATURE" ]]; then
+        FEATURE_FLAG="--features $WHISPER_FEATURE"
+        echo "→ Building meeting-server sidecar ($PROFILE, $WHISPER_FEATURE)..."
+    else
+        echo "→ Building meeting-server sidecar ($PROFILE)..."
+    fi
+    cargo build $RELEASE_FLAG $FEATURE_FLAG --manifest-path "$RUST_DIR/Cargo.toml" --bin meeting-server
     echo "✓ Sidecar built"
 fi
 
@@ -115,10 +126,6 @@ fi
 # applicationDirPath() (mirrors the section-07 packaging layout).
 cp -f "$SIDECAR" "$(dirname "$GUI_BIN")/meeting-server"
 echo "✓ Sidecar staged next to GUI: $(dirname "$GUI_BIN")/meeting-server"
-
-if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-    echo "Warning: ANTHROPIC_API_KEY is not set — protocol generation will fail."
-fi
 
 if [[ $RUN -eq 0 ]]; then
     echo "→ Build complete (--no-run). GUI: $GUI_BIN"

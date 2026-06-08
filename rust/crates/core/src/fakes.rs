@@ -1,8 +1,8 @@
 use crate::{
-    entities::{Job, JobStatus, Meeting, Segment, Transcript},
+    entities::{Job, JobKind, JobStatus, Meeting, Segment, Transcript},
     ports::{
         AudioCapture, CaptureSource, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo,
-        TemplateLoader, Transcriber,
+        TemplateBundle, TemplateLoader, Transcriber,
     },
     CoreError,
 };
@@ -295,11 +295,17 @@ impl JobRepo for FakeJobRepo {
         Ok(jobs)
     }
 
-    async fn claim_pending(&self, now_ts: i64) -> Result<Option<Job>, CoreError> {
+    async fn claim_pending_kind(
+        &self,
+        kinds: &[JobKind],
+        now_ts: i64,
+    ) -> Result<Option<Job>, CoreError> {
         let mut store = self.store.lock().unwrap();
-        let idx = store
-            .iter()
-            .position(|j| j.status == JobStatus::Pending && j.retry_after <= now_ts);
+        let idx = store.iter().position(|j| {
+            j.status == JobStatus::Pending
+                && j.retry_after <= now_ts
+                && kinds.iter().any(|k| k == &j.kind)
+        });
         if let Some(i) = idx {
             store[i].status = JobStatus::Running;
             store[i].updated_at = now_ts;
@@ -367,6 +373,34 @@ impl JobRepo for FakeJobRepo {
             count += 1;
         }
         Ok(count)
+    }
+
+    async fn cancel_pending(&self, id: &str, now_ts: i64) -> Result<u64, CoreError> {
+        let mut store = self.store.lock().unwrap();
+        if let Some(j) = store.iter_mut().find(|j| j.id == id) {
+            if j.status == JobStatus::Pending {
+                j.status = JobStatus::Failed;
+                j.error_class = Some(crate::entities::ErrorClass::Cancelled);
+                j.last_error = Some("cancelled by user".into());
+                j.updated_at = now_ts;
+                return Ok(1);
+            }
+        }
+        Ok(0)
+    }
+
+    async fn mark_cancelled(&self, id: &str, now_ts: i64) -> Result<u64, CoreError> {
+        let mut store = self.store.lock().unwrap();
+        if let Some(j) = store.iter_mut().find(|j| j.id == id) {
+            if matches!(j.status, JobStatus::Pending | JobStatus::Running) {
+                j.status = JobStatus::Failed;
+                j.error_class = Some(crate::entities::ErrorClass::Cancelled);
+                j.last_error = Some("cancelled by user".into());
+                j.updated_at = now_ts;
+                return Ok(1);
+            }
+        }
+        Ok(0)
     }
 }
 
@@ -515,5 +549,57 @@ impl AudioCapture for FakeAudioCapture {
 
     fn is_active(&self, session_id: &str) -> bool {
         self.active.lock().unwrap().contains(session_id)
+    }
+}
+
+// ── FakeTemplateBundle ───────────────────────────────────────────────────────
+
+pub struct FakeTemplateBundle {
+    entries: Vec<(String, String)>,
+}
+
+impl FakeTemplateBundle {
+    pub fn new(
+        entries: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+    ) -> Self {
+        Self {
+            entries: entries
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+        }
+    }
+}
+
+impl TemplateBundle for FakeTemplateBundle {
+    fn entries(&self) -> Vec<(String, String)> {
+        self.entries.clone()
+    }
+}
+
+// ── Port ⇄ fake compile-time contract ────────────────────────────────────────
+//
+// Each binding coerces a fake into its port's trait object. The module compiles
+// only while every fake still satisfies its port trait — a signature change to a
+// port (new method, changed argument) that leaves a fake stale becomes a build
+// error here, at `cargo test -p meeting-core`, instead of surfacing later in
+// whichever downstream test happens to exercise the changed method.
+//
+// Zero runtime cost: the bindings live entirely in the test build and never run.
+// Add one line per new port/fake pair so the contract stays exhaustive.
+#[cfg(test)]
+mod port_fake_contract {
+    use super::*;
+
+    #[test]
+    fn every_fake_satisfies_its_port() {
+        let _: Arc<dyn Transcriber> = FakeTranscriber::new("");
+        let _: Arc<dyn MeetingRepo> = FakeMeetingRepo::new();
+        let _: Arc<dyn MeetingFileStore> = FakeMeetingFileStore::new();
+        let _: Arc<dyn JobRepo> = FakeJobRepo::new();
+        let _: Arc<dyn LlmProvider> = FakeLlmProvider::new("");
+        let _: Arc<dyn TemplateLoader> = FakeTemplateLoader::empty();
+        let _: Arc<dyn TemplateBundle> = Arc::new(FakeTemplateBundle::new([("a", "b")]));
+        let _: Arc<dyn AudioCapture> = FakeAudioCapture::new();
     }
 }

@@ -5,8 +5,8 @@
 //
 // Shape mirrors the sidecar snapshot (see settings_service.rs): paths{},
 // recording{}, default_template, transcriber{}, llm{active, <provider>{model,
-// max_tokens, base_url, has_key}}, secrets_fallback. The snapshot's read-only
-// extras (has_key, secrets_fallback) round-trip harmlessly through PUT — the
+// max_tokens, base_url, has_key}}, secret_storage. The snapshot's read-only
+// extras (has_key, secret_storage) round-trip harmlessly through PUT — the
 // Rust DTO ignores unknown fields.
 pragma Singleton
 import QtQuick
@@ -28,7 +28,12 @@ QtObject {
     function transcriber()  { return snapshot.transcriber || ({}) }
     function llm()          { return snapshot.llm || ({}) }
     function defaultTemplate() { return snapshot.default_template || "" }
-    function secretsFallback() { return snapshot.secrets_fallback === true }
+    // Where API keys live at rest, for honest disclosure:
+    // { kind: "keyring"|"vault"|"plaintext", state: "ready"|"locked",
+    //   mechanism: <id>|null, mechanism_detail: <str>|null, path: <str>|null }
+    function secretStorage() {
+        return snapshot.secret_storage || ({ kind: "keyring", state: "ready" })
+    }
 
     function providerCfg(kind) {
         var l = llm()
@@ -65,9 +70,40 @@ QtObject {
         _test.post("/api/v1/settings/test", { "provider": provider })
     }
 
+    // ── secret-store lifecycle (passphrase vault) ───────────────────────────
+    // Each posts then refreshes the snapshot so secret_storage flips. All take
+    // an optional `onDone(success, error)`.
+    function protectSecretStore(passphrase, onDone) {
+        store._storeCb = onDone || null
+        _store.post("/api/v1/settings/secret-store/protect", { "passphrase": passphrase })
+    }
+    function unlockSecretStore(passphrase, onDone) {
+        store._storeCb = onDone || null
+        _store.post("/api/v1/settings/secret-store/unlock", { "passphrase": passphrase })
+    }
+    function lockSecretStore(onDone) {
+        store._storeCb = onDone || null
+        _store.post("/api/v1/settings/secret-store/lock", {})
+    }
+    function changeSecretPassphrase(oldPass, newPass, onDone) {
+        store._storeCb = onDone || null
+        _store.post("/api/v1/settings/secret-store/passphrase", { "old": oldPass, "new": newPass })
+    }
+    // Fold an orphaned vault into the now-available keystore.
+    function migrateSecretStore(passphrase, onDone) {
+        store._storeCb = onDone || null
+        _store.post("/api/v1/settings/secret-store/migrate", { "passphrase": passphrase })
+    }
+    // Discard the store (forgotten passphrase). Keys are lost.
+    function resetSecretStore(onDone) {
+        store._storeCb = onDone || null
+        _store.post("/api/v1/settings/secret-store/reset", {})
+    }
+
     property var _applyCb: null
     property var _secretCb: null
     property var _testCb: null
+    property var _storeCb: null
 
     property Request _get: Request {
         onOk: function (json) {
@@ -113,6 +149,18 @@ QtObject {
         onFail: function (s, e) {
             var msg = s > 0 ? qsTr("HTTP %1: %2").arg(s).arg(e) : e
             if (store._testCb) { store._testCb(false, msg); store._testCb = null }
+        }
+    }
+
+    property Request _store: Request {
+        onOk: function (json) {
+            // Re-pull so secret_storage (kind/state) reflects the new backend.
+            store.refresh()
+            if (store._storeCb) { store._storeCb(true, ""); store._storeCb = null }
+        }
+        onFail: function (s, e) {
+            var msg = s > 0 ? qsTr("HTTP %1: %2").arg(s).arg(e) : e
+            if (store._storeCb) { store._storeCb(false, msg); store._storeCb = null }
         }
     }
 }

@@ -44,7 +44,7 @@ ColumnLayout {
     readonly property bool done: status === "done"
     readonly property int displayPercent: done ? 100 : Math.max(0, Math.min(100, percent))
     readonly property bool indeterminate: !failed && !done
-                                      && (displayPercent === 0 || stage === "queued"
+                                      && (stage === "queued"
                                           || stage === "generating_protocol")
     property bool terminalEmitted: false
 
@@ -261,7 +261,7 @@ ColumnLayout {
                 elide: Text.ElideRight
             }
             Text {
-                visible: root.displayPercent > 0 && !root.indeterminate
+                visible: !root.indeterminate
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 color: Theme.ink3
@@ -272,17 +272,22 @@ ColumnLayout {
 
     // ── failure ───────────────────────────────────────────────────────────────
     ColumnLayout {
+        id: failureBlock
         Layout.fillWidth: true
         visible: root.failed
         spacing: 8
+        // Cancelled is a user-initiated terminal, not a problem — render the
+        // headline in neutral ink rather than the red error colour.
+        readonly property var _err: Errors.describe(root.errorClass, root.job.last_error)
+        readonly property bool _neutral: _err && _err.neutral === true
         Text {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
-            color: Theme.rec
+            color: failureBlock._neutral ? Theme.ink : Theme.rec
             font.family: Theme.fontUi
             font.pixelSize: Theme.fsBodyLg
             font.weight: Theme.wSemiBold
-            text: Errors.describe(root.errorClass, root.job.last_error).title
+            text: failureBlock._err.title
         }
         Text {
             Layout.fillWidth: true
@@ -290,10 +295,10 @@ ColumnLayout {
             font.family: Theme.fontUi
             font.pixelSize: Theme.fsBody
             color: Theme.ink2
-            text: Errors.describe(root.errorClass, root.job.last_error).hint
+            text: failureBlock._err.hint
         }
         Rectangle {
-            visible: Errors.describe(root.errorClass, root.job.last_error).settings
+            visible: failureBlock._err.settings
             Layout.alignment: Qt.AlignLeft
             implicitWidth: settingsLabel.implicitWidth + 26
             implicitHeight: 34

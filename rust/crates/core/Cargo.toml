@@ -11,6 +11,6 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 async-trait = { workspace = true }
 uuid = { workspace = true }
-
-[dev-dependencies]
+dashmap = { workspace = true }
+tokio-util = { workspace = true }
 tokio = { workspace = true }

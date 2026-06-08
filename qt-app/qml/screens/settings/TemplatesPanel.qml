@@ -42,7 +42,7 @@ ScrollView {
             if (panel.selected.length === 0 && panel.templates.length > 0)
                 panel.select(panel.templates[0].name)
             else if (panel.selected.length > 0)
-                panel.editor.text = panel.bodyOf(panel.selected)
+                editor.text = panel.bodyOf(panel.selected)
         }
         onFail: function (s, e) { panel.status = qsTr("Ошибка загрузки шаблонов: %1").arg(e) }
     }

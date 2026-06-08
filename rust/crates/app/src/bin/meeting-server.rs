@@ -57,6 +57,9 @@ struct Args {
     parent_pid: Option<i32>,
     /// Inherited pipe read-end fd (POSIX). EOF on it == parent died (race-free).
     parent_pipe_fd: Option<i32>,
+    /// Development-only command: roll back the latest reversible DB migration
+    /// and exit without starting the loopback HTTP sidecar.
+    rollback_one: bool,
 }
 
 fn parse_args() -> Args {
@@ -69,6 +72,9 @@ fn parse_args() -> Args {
             }
             "--parent-pipe-fd" => {
                 args.parent_pipe_fd = it.next().and_then(|v| v.parse().ok());
+            }
+            "--rollback-one" => {
+                args.rollback_one = true;
             }
             other => {
                 tracing::warn!("ignoring unrecognised argument: {other}");
@@ -97,6 +103,14 @@ fn main() -> Result<()> {
         std::process::exit(EXIT_SINGLETON_BUSY);
     }
 
+    if args.rollback_one {
+        let db = default_db_path();
+        let version = meeting_adapters::rollback_last_migration_at_path(&db)
+            .with_context(|| format!("failed to roll back latest migration in {db:?}"))?;
+        tracing::info!(version, db = %db.display(), "rolled back latest migration");
+        return Ok(());
+    }
+
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
@@ -121,6 +135,28 @@ async fn run(args: Args) -> Result<()> {
         .settings_handles
         .take()
         .expect("sidecar container must carry settings handles");
+
+    // Seed any bundled prompt template missing from the (effective) prompts dir:
+    // first run, or a template newly shipped in this release. Honours deliberate
+    // deletions and never overwrites an existing file, so user edits survive.
+    // Best-effort: a failure here must not stop the sidecar from serving.
+    {
+        let removed = handles.settings_store.load().removed_bundled_templates;
+        match meeting_core::usecases::backfill_templates(
+            &meeting_adapters::EmbeddedBundle,
+            handles.templates.as_ref(),
+            &removed,
+        )
+        .await
+        {
+            Ok(seeded) if !seeded.is_empty() => {
+                tracing::info!(?seeded, "seeded bundled prompt templates")
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("template backfill failed: {e}"),
+        }
+    }
+
     // The template service shares the same live handles (prompts-dir loader +
     // settings store) so it sees hot-swapped paths and can clear a dangling
     // `default_template`. Clone the Arcs out before `handles` moves into the
@@ -154,8 +190,9 @@ async fn run(args: Args) -> Result<()> {
     meeting_adapters::run_recovery(&container.recordings_dir, container.meeting_repo.as_ref())
         .await;
 
-    let (worker_join, worker_shutdown) = container.spawn_worker();
-    let worker_abort = worker_join.abort_handle();
+    let workers = container.spawn_workers().await;
+    let transcribe_abort = workers.transcribe_join.abort_handle();
+    let protocol_abort = workers.protocol_join.abort_handle();
 
     // ── Loopback bind (strict) ────────────────────────────────────────────────
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
@@ -248,14 +285,20 @@ async fn run(args: Args) -> Result<()> {
         .await
         .context("http server error")?;
 
-    // ── Drain the worker, then exit ───────────────────────────────────────────
-    let _ = worker_shutdown.send(());
-    if tokio::time::timeout(Duration::from_millis(1200), worker_join)
-        .await
-        .is_err()
-    {
-        tracing::warn!("worker did not stop within 1.2s — aborting");
-        worker_abort.abort();
+    // ── Drain the workers, then exit ──────────────────────────────────────────
+    let _ = workers.transcribe_shutdown.send(());
+    let _ = workers.protocol_shutdown.send(());
+    let drain = tokio::time::timeout(
+        Duration::from_millis(1200),
+        async {
+            let _ = tokio::join!(workers.transcribe_join, workers.protocol_join);
+        },
+    )
+    .await;
+    if drain.is_err() {
+        tracing::warn!("workers did not stop within 1.2s — aborting");
+        transcribe_abort.abort();
+        protocol_abort.abort();
     }
     tracing::info!("graceful shutdown complete");
     std::process::exit(EXIT_OK);

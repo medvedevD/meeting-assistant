@@ -1,6 +1,6 @@
 use crate::router::AppState;
 use axum::{extract::State, http::StatusCode, Json};
-use meeting_core::usecases::generate_protocol;
+use meeting_core::{entities::StructuredProtocol, usecases::generate_protocol};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -14,6 +14,7 @@ pub struct GenerateRequest {
 #[derive(Serialize)]
 pub struct GenerateResponse {
     pub markdown: String,
+    pub structured: StructuredProtocol,
 }
 
 pub async fn generate(
@@ -40,6 +41,7 @@ pub async fn generate(
         StatusCode::OK,
         Json(GenerateResponse {
             markdown: protocol.markdown,
+            structured: protocol.structured,
         }),
     ))
 }
@@ -68,7 +70,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
-            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             default_template: crate::router::no_default_template(),
         })
     }
@@ -98,6 +100,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json = body_json(response).await;
         assert_eq!(json["markdown"], "# Протокол\n\nТекст.");
+        assert_eq!(json["structured"]["title"], "Протокол");
     }
 
     #[tokio::test]
@@ -111,7 +114,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
-            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             default_template: crate::router::no_default_template(),
         });
 
@@ -151,7 +154,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
-            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             default_template: crate::router::no_default_template(),
         });
 
@@ -176,6 +179,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json = body_json(response).await;
         assert_eq!(json["markdown"], "# 1-на-1 протокол");
+        assert_eq!(json["structured"]["title"], "1-на-1 протокол");
     }
 
     #[tokio::test]
@@ -196,7 +200,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
-            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             default_template: std::sync::Arc::new(|| Some("Ретро".to_string())),
         });
 
@@ -237,7 +241,7 @@ mod tests {
             audio_capture: FakeAudioCapture::new(),
             file_store: FakeMeetingFileStore::new(),
             recordings_dir: std::path::PathBuf::from("/tmp"),
-            progress: std::sync::Arc::new(dashmap::DashMap::new()),
+            progress: meeting_core::LiveProgress::new(),
             default_template: std::sync::Arc::new(|| Some("Дефолт".to_string())),
         });
 

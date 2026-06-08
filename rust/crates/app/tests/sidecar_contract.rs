@@ -281,6 +281,7 @@ fn every_api_route_is_bearer_gated_401_without_token() {
         ("POST", "/api/v1/jobs"),
         ("GET", "/api/v1/active-jobs"),
         ("GET", "/api/v1/jobs/abc"),
+        ("GET", "/api/v1/jobs/abc/events"),
         ("POST", "/api/v1/protocols"),
         ("POST", "/api/v1/recordings"),
         ("POST", "/api/v1/recordings/abc/stop"),
@@ -472,8 +473,10 @@ fn settings_get_put_roundtrip_and_secret_flag() {
     assert_eq!(snap["llm"]["active"], "anthropic", "default provider");
     // No key configured yet (ANTHROPIC_API_KEY is removed in the test env).
     assert_eq!(snap["llm"]["anthropic"]["has_key"], false);
-    // Keyring is force-disabled in tests, so the UI-facing fallback flag is set.
-    assert_eq!(snap["secrets_fallback"], true);
+    // Keyring is force-disabled in tests, so secrets sit in the plaintext
+    // fallback and the snapshot discloses the file backend + its path.
+    assert_eq!(snap["secret_storage"]["kind"], "plaintext");
+    assert!(snap["secret_storage"]["path"].is_string());
     // Secret values must never be present in the snapshot.
     assert!(snap["llm"]["anthropic"].get("api_key").is_none());
 

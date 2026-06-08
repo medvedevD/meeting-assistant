@@ -10,6 +10,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import MeetingAssistant
+import "../i18n/errors.js" as Errors
 
 Page {
     id: scr
@@ -29,6 +30,9 @@ Page {
     // The user asked to generate (or autoStart fired) this session.
     property bool started: false
     property string errorMsg: ""
+    // Sidecar error_class for the last failure, so the failed view can render an
+    // actionable message (e.g. "LLM не настроена" + settings link) via errors.js.
+    property string errorClass: ""
     // Kind of the job that last failed, to resume the right step on retry.
     property string lastFailedKind: ""
 
@@ -63,6 +67,7 @@ Page {
         if (jobLive)
             return
         errorMsg = ""
+        errorClass = ""
         started = true
         // On retry after a protocol-step failure the transcript already exists,
         // so skip straight to the protocol job.
@@ -86,6 +91,7 @@ Page {
                 })
             } else {
                 scr.lastFailedKind = kind
+                scr.errorClass = (job && job.error_class) ? job.error_class : ""
                 scr.errorMsg = (job && job.last_error)
                         ? job.last_error
                         : (kind === "transcribe"
@@ -94,8 +100,10 @@ Page {
             }
         }
         function onEnqueueFailed(meetingId, error) {
-            if (meetingId === scr.meetingId)
+            if (meetingId === scr.meetingId) {
+                scr.errorClass = ""
                 scr.errorMsg = error
+            }
         }
     }
 
@@ -383,13 +391,16 @@ Page {
 
         // ── error (any failed stage) ────────────────────────────────────────
         ColumnLayout {
+            id: errBlock
             visible: scr.uiState() === "failed"
+            // Actionable, class-aware copy (e.g. "LLM не настроена" + settings).
+            readonly property var err: Errors.describe(scr.errorClass, scr.errorMsg)
             Layout.alignment: Qt.AlignCenter
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.preferredWidth: Math.min(560, parent.width - 64)
             Layout.maximumWidth: 560
-            spacing: 16
+            spacing: 12
             Item { Layout.fillHeight: true }
             Text {
                 Layout.fillWidth: true
@@ -397,13 +408,34 @@ Page {
                 wrapMode: Text.WordWrap
                 font.family: Theme.fontUi
                 font.pixelSize: Theme.fsBodyLg
-                color: Theme.rec
-                text: qsTr("Ошибка: %1").arg(scr.errorMsg)
+                font.weight: Theme.wSemiBold
+                color: errBlock.err.neutral === true ? Theme.ink : Theme.rec
+                text: errBlock.err.title
             }
-            MeetyButton {
+            Text {
+                Layout.fillWidth: true
+                visible: errBlock.err.hint && errBlock.err.hint.length > 0
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+                font.family: Theme.fontUi
+                font.pixelSize: Theme.fsBody
+                color: Theme.ink3
+                text: errBlock.err.hint
+            }
+            RowLayout {
                 Layout.alignment: Qt.AlignHCenter
-                text: qsTr("Повторить")
-                onClicked: scr.generate()
+                Layout.topMargin: 4
+                spacing: 8
+                MeetyButton {
+                    visible: errBlock.err.settings === true
+                    variant: "accent"
+                    text: qsTr("Открыть настройки")
+                    onClicked: scr.shell.showSettings()
+                }
+                MeetyButton {
+                    text: qsTr("Повторить")
+                    onClicked: scr.generate()
+                }
             }
             Item { Layout.fillHeight: true }
         }

@@ -101,6 +101,27 @@ impl Cli {
         let recordings = self.recordings_dir.unwrap_or_else(default_recordings_dir);
         let container = Container::new_desktop(&model, &db, &prompts, recordings)?;
 
+        // Seed bundled prompt templates into the prompts dir if missing (first
+        // run, or a template newly shipped in this release), so `generate` and
+        // `serve` find them. Shares the desktop app's tombstone list so a
+        // deletion made in the GUI is honoured. Best-effort: never fails a
+        // command.
+        {
+            use meeting_adapters::{EmbeddedBundle, JsonSettingsStore};
+            let removed = JsonSettingsStore::open_default()
+                .load()
+                .removed_bundled_templates;
+            if let Err(e) = meeting_core::usecases::backfill_templates(
+                &EmbeddedBundle,
+                container.templates.as_ref(),
+                &removed,
+            )
+            .await
+            {
+                tracing::warn!("template backfill failed: {e}");
+            }
+        }
+
         match self.command {
             Command::Transcribe { path } => {
                 let transcript =
@@ -212,7 +233,7 @@ impl Cli {
             }
 
             Command::Serve { port } => {
-                let (_worker, _shutdown) = container.spawn_worker();
+                let _workers = container.spawn_workers().await;
 
                 let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
                 let listener = tokio::net::TcpListener::bind(addr).await?;

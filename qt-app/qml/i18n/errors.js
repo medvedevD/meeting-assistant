@@ -10,8 +10,8 @@ function describe(errorClass, rawMessage) {
     switch (errorClass) {
     case "api_auth":
         return {
-            title: "Ошибка авторизации API",
-            hint: "Проверьте API-ключ выбранного провайдера в настройках.",
+            title: "LLM не настроена",
+            hint: "API-ключ не задан или неверен. Укажите ключ выбранного провайдера в настройках.",
             settings: true
         }
     case "api_quota":
@@ -49,6 +49,13 @@ function describe(errorClass, rawMessage) {
             title: "Обработка прервана",
             hint: "Процесс обработки был остановлен. Попробуйте ещё раз.",
             settings: false
+        }
+    case "cancelled":
+        return {
+            title: "Отменено",
+            hint: "Задача прервана по вашему запросу. Запустите её снова, если нужно.",
+            settings: false,
+            neutral: true
         }
     case "unknown":
     default:

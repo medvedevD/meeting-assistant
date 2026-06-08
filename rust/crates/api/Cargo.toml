@@ -12,8 +12,12 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
+async-stream = "0.3"
+futures-core = "0.3"
+tower_governor = "0.4"
 
 [dev-dependencies]
 meeting-core = { path = "../core", features = ["fakes"] }
 tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"
+tokio-util = { workspace = true }

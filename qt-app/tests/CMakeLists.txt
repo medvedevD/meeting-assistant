@@ -181,3 +181,14 @@ set_tests_properties(qt_offscreen_smoke PROPERTIES
 add_test(NAME qt_no_sync_transcribe_in_qml
     COMMAND ${CMAKE_COMMAND} -DSEARCH_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../qml
                              -P ${CMAKE_CURRENT_SOURCE_DIR}/no_sync_transcribe.cmake)
+
+# Same rationale as the main GUI target (see ../CMakeLists.txt): these test
+# executables bundle a QML module, so the finalizer's static plugin-import scan
+# warns that style-impl plugin targets (Fusion/Basic/Material/Shapes/…) don't
+# exist in scope — noise for a shared Qt that loads plugins at runtime. Skip
+# the scan for shared Qt; keep it for a static build where they must be linked.
+if(QT6_IS_SHARED_LIBS_BUILD)
+    set_target_properties(
+        tst_pipeline_progress tst_protocol_document tst_meety_menu
+        PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN ON)
+endif()
