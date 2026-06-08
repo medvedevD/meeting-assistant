@@ -4,7 +4,7 @@ use meeting_core::{
         JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, ProgressSink, TemplateLoader,
         Transcriber,
     },
-    usecases::generate_protocol,
+    usecases::{format_date_dmy, generate_protocol, render_markdown, TranscriptMeta},
     CoreError, LiveEntry,
 };
 use std::sync::Arc;
@@ -316,9 +316,19 @@ impl Worker {
             return Err(CoreError::Cancelled);
         }
         self.set_stage(&job.id, PipelineStage::WritingTranscript);
+        // The file gets the rich, timestamped Markdown view; the DB keeps the
+        // flat `transcript.text` (clean prose the LLM consumes for the protocol).
+        let date = format_date_dmy(meeting.created_at);
+        let rendered = render_markdown(
+            &transcript,
+            &TranscriptMeta {
+                title: &meeting.name,
+                date: &date,
+            },
+        );
         match self
             .file_store
-            .write_transcript(&meeting.meeting_dir, &transcript.text)
+            .write_transcript(&meeting.meeting_dir, &rendered)
             .await
         {
             Ok(path) => {
@@ -563,6 +573,66 @@ mod tests {
             jr.list_active().await.unwrap().is_empty(),
             "no protocol job should be chained for a plain re-transcribe"
         );
+    }
+
+    // Regression: the worker must write the *rendered* timestamped Markdown to
+    // `transcript.md` (header + `[MM:SS]` lines), not the flat `transcript.text`
+    // blob it used to pass straight through. The DB, by contrast, keeps the
+    // clean prose the LLM consumes. Guards against a revert to
+    // `write_transcript(&transcript.text)`.
+    #[tokio::test]
+    async fn transcribe_writes_rendered_markdown_file_but_clean_prose_to_db() {
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let fs = FakeMeetingFileStore::new();
+        let m = Meeting::new("Стендап".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+
+        let job = Job::new_reprocess_transcribe(m.id.clone());
+        jr.enqueue(&job).await.unwrap();
+
+        let worker = Worker::new(
+            Arc::clone(&jr) as Arc<dyn JobRepo>,
+            Arc::clone(&mr) as Arc<dyn MeetingRepo>,
+            FakeTranscriber::new("привет мир"),
+            Arc::clone(&fs) as Arc<dyn MeetingFileStore>,
+            FakeLlmProvider::new("# Протокол"),
+            FakeTemplateLoader::empty(),
+            meeting_core::LiveProgress::new(),
+            TRANSCRIBE_KINDS,
+            1,
+            "transcribe",
+        );
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        worker.execute(claimed, CancellationToken::new()).await;
+
+        // The file got the rich, timestamped Markdown view.
+        let written = fs.written.lock().unwrap();
+        let (path, body) = written
+            .iter()
+            .find(|(p, _)| p.ends_with("transcript.md"))
+            .expect("transcript.md should be written");
+        assert!(path.ends_with("transcript.md"));
+        assert!(
+            body.contains("# Транскрипция: Стендап"),
+            "missing header: {body}"
+        );
+        assert!(body.contains("[00:00] привет мир"), "missing timestamp: {body}");
+        assert_ne!(
+            body.trim(),
+            "привет мир",
+            "file must be rendered Markdown, not the flat transcript text"
+        );
+
+        // The DB kept the clean prose the LLM consumes — no header, no timestamps.
+        let stored = mr
+            .find_by_id(&m.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .transcript_text
+            .expect("transcript text should be persisted");
+        assert_eq!(stored, "привет мир");
     }
 
     // ── Concurrency / shutdown tests ─────────────────────────────────────────

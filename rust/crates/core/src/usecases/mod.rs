@@ -1,6 +1,9 @@
 mod transcribe_audio;
 pub use transcribe_audio::transcribe_audio_file;
 
+mod transcript_render;
+pub use transcript_render::{format_date_dmy, render_markdown, TranscriptMeta};
+
 mod submit_transcription_job;
 pub use submit_transcription_job::submit_transcription_job;
 
