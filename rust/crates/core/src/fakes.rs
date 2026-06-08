@@ -551,3 +551,29 @@ impl AudioCapture for FakeAudioCapture {
         self.active.lock().unwrap().contains(session_id)
     }
 }
+
+// ── Port ⇄ fake compile-time contract ────────────────────────────────────────
+//
+// Each binding coerces a fake into its port's trait object. The module compiles
+// only while every fake still satisfies its port trait — a signature change to a
+// port (new method, changed argument) that leaves a fake stale becomes a build
+// error here, at `cargo test -p meeting-core`, instead of surfacing later in
+// whichever downstream test happens to exercise the changed method.
+//
+// Zero runtime cost: the bindings live entirely in the test build and never run.
+// Add one line per new port/fake pair so the contract stays exhaustive.
+#[cfg(test)]
+mod port_fake_contract {
+    use super::*;
+
+    #[test]
+    fn every_fake_satisfies_its_port() {
+        let _: Arc<dyn Transcriber> = FakeTranscriber::new("");
+        let _: Arc<dyn MeetingRepo> = FakeMeetingRepo::new();
+        let _: Arc<dyn MeetingFileStore> = FakeMeetingFileStore::new();
+        let _: Arc<dyn JobRepo> = FakeJobRepo::new();
+        let _: Arc<dyn LlmProvider> = FakeLlmProvider::new("");
+        let _: Arc<dyn TemplateLoader> = FakeTemplateLoader::empty();
+        let _: Arc<dyn AudioCapture> = FakeAudioCapture::new();
+    }
+}
