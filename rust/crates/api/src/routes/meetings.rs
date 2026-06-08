@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use meeting_core::{
+    entities::StructuredProtocol,
     usecases::{
         delete_meeting, import_audio, list_meetings, regenerate_protocol, reprocess_transcribe,
         scan_recordings_dir, DeleteMode, ScanCandidate, DEFAULT_MAX_DEPTH,
@@ -58,6 +59,9 @@ pub struct MeetingDetail {
     /// readback the client uses to render a protocol after a restart (the
     /// in-session client cache no longer stands in for it).
     pub protocol: Option<String>,
+    /// Structured view derived from `protocol`. It lets clients render stable
+    /// sections while keeping Markdown as the persisted compatibility format.
+    pub structured_protocol: Option<StructuredProtocol>,
 }
 
 pub async fn get(
@@ -71,9 +75,13 @@ pub async fn get(
         .map_err(map_core_err)?
         .ok_or((StatusCode::NOT_FOUND, "meeting not found".into()))?;
 
+    let protocol = meeting.protocol_text.filter(|t| !t.is_empty());
+    let structured_protocol = protocol.as_deref().map(StructuredProtocol::from_markdown);
+
     Ok(Json(MeetingDetail {
         has_transcript: meeting.transcript_text.is_some(),
-        protocol: meeting.protocol_text.filter(|t| !t.is_empty()),
+        protocol,
+        structured_protocol,
         id: meeting.id,
         name: meeting.name,
         audio_path: meeting.audio_path.display().to_string(),
@@ -421,7 +429,9 @@ mod tests {
         let m = Meeting::new("Ретро".to_string(), PathBuf::from("/c.wav"));
         repo.save(&m).await.unwrap();
         repo.save_transcript(&m.id, "текст").await.unwrap();
-        repo.save_protocol(&m.id, "# Протокол").await.unwrap();
+        repo.save_protocol(&m.id, "# Протокол\n\n## Решения\n- Продолжаем MVP.")
+            .await
+            .unwrap();
         let app = make_app(std::sync::Arc::clone(&repo));
 
         let response = app
@@ -437,7 +447,15 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
         let json = body_json(response).await;
-        assert_eq!(json["protocol"], "# Протокол");
+        assert_eq!(
+            json["protocol"],
+            "# Протокол\n\n## Решения\n- Продолжаем MVP."
+        );
+        assert_eq!(json["structured_protocol"]["title"], "Протокол");
+        assert_eq!(
+            json["structured_protocol"]["decisions"][0],
+            "Продолжаем MVP."
+        );
         assert_eq!(json["has_transcript"], true);
     }
 
@@ -462,6 +480,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let json = body_json(response).await;
         assert!(json["protocol"].is_null());
+        assert!(json["structured_protocol"].is_null());
     }
 
     #[tokio::test]
