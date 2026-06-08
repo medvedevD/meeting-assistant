@@ -287,15 +287,10 @@ pub fn default_recordings_dir() -> PathBuf {
 }
 
 pub fn default_prompts_dir() -> PathBuf {
-    // Shared with Python: repo-root/prompts/
-    // Walk up from the binary location or fall back to CWD/prompts
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| {
-            // <repo>/rust/target/debug/meeting-assistant → <repo>/prompts
-            p.ancestors().nth(4).map(|root| root.join("prompts"))
-        })
-        .unwrap_or_else(|| PathBuf::from("prompts"))
+    // Writable, per-user, survives upgrades (like the db and models dirs). The
+    // bundled templates are embedded in the binary and seeded here at startup by
+    // `backfill_templates`; `settings.paths.prompts` still overrides this.
+    xdg_data_dir().join("meeting-assistant/prompts")
 }
 
 fn xdg_data_dir() -> PathBuf {

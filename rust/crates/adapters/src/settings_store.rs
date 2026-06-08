@@ -15,6 +15,11 @@ pub struct PersistedSettings {
     pub anthropic_api_key: Option<String>,
     pub recording: RecordingPrefs,
     pub default_template: Option<String>,
+    /// Names of bundled templates the user deliberately deleted. Startup template
+    /// backfill skips these so a deletion is not undone on the next launch. See
+    /// [`meeting_core::usecases::backfill_templates`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed_bundled_templates: Vec<String>,
     #[serde(default)]
     pub transcriber: PersistedTranscriberPrefs,
     #[serde(default)]

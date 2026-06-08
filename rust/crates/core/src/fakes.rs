@@ -2,7 +2,7 @@ use crate::{
     entities::{Job, JobKind, JobStatus, Meeting, Segment, Transcript},
     ports::{
         AudioCapture, CaptureSource, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo,
-        TemplateLoader, Transcriber,
+        TemplateBundle, TemplateLoader, Transcriber,
     },
     CoreError,
 };
@@ -552,6 +552,31 @@ impl AudioCapture for FakeAudioCapture {
     }
 }
 
+// ── FakeTemplateBundle ───────────────────────────────────────────────────────
+
+pub struct FakeTemplateBundle {
+    entries: Vec<(String, String)>,
+}
+
+impl FakeTemplateBundle {
+    pub fn new(
+        entries: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
+    ) -> Self {
+        Self {
+            entries: entries
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+        }
+    }
+}
+
+impl TemplateBundle for FakeTemplateBundle {
+    fn entries(&self) -> Vec<(String, String)> {
+        self.entries.clone()
+    }
+}
+
 // ── Port ⇄ fake compile-time contract ────────────────────────────────────────
 //
 // Each binding coerces a fake into its port's trait object. The module compiles
@@ -574,6 +599,7 @@ mod port_fake_contract {
         let _: Arc<dyn JobRepo> = FakeJobRepo::new();
         let _: Arc<dyn LlmProvider> = FakeLlmProvider::new("");
         let _: Arc<dyn TemplateLoader> = FakeTemplateLoader::empty();
+        let _: Arc<dyn TemplateBundle> = Arc::new(FakeTemplateBundle::new([("a", "b")]));
         let _: Arc<dyn AudioCapture> = FakeAudioCapture::new();
     }
 }

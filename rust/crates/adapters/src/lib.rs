@@ -34,5 +34,8 @@ pub use llm::{
 pub mod templates;
 pub use templates::FileTemplateLoader;
 
+mod template_bundle;
+pub use template_bundle::EmbeddedBundle;
+
 pub mod audio;
 pub use audio::{run_recovery, CpalAudioCapture, RecoveryReport, WavRecovery};

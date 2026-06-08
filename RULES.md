@@ -122,7 +122,12 @@ Key domain flow: `StartRecording` → audio captured via `AudioCapture` port →
 
 ### Prompts
 
-LLM prompt templates live in `/prompts/` (Russian language). The `TemplateLoader` port reads these at runtime.
+LLM prompt templates are Russian-language `.md` files. Two distinct roles:
+
+- **Bundle (read-only, compile-time):** `/prompts/` is the source of truth, **embedded into the binary** via `include_str!` (`EmbeddedBundle`, mirroring the `MIGRATIONS` const). Shipping a new bundled template = drop a `.md` in `/prompts/` + add one line to `BUNDLED`.
+- **Writable store (runtime):** the `TemplateLoader` port reads/writes a per-user dir, default `default_prompts_dir()` = `$XDG_DATA_HOME/meeting-assistant/prompts/` (override via `settings.paths.prompts`). User edits live here and survive upgrades.
+
+On startup (sidecar `run()` and every CLI command) `backfill_templates` seeds the writable dir from the embedded bundle: writes only **missing** names, never overwrites, and skips `settings.removed_bundled_templates` (tombstones for bundled templates the user deleted — maintained by `AppTemplateService` on delete/save/rename). This makes a newly shipped template appear on upgrade without disturbing user customisations. Note: `/prompts/` is **no longer** the runtime dir — edits there only change the embed source and require a rebuild.
 
 ### Settings persistence and hot-swap
 

@@ -43,6 +43,9 @@ pub use regenerate_protocol::regenerate_protocol;
 mod delete_meeting;
 pub use delete_meeting::{delete_meeting, DeleteMode};
 
+mod backfill_templates;
+pub use backfill_templates::backfill_templates;
+
 mod templates;
 pub use templates::{
     delete_template, get_template, list_templates, rename_template, save_template,

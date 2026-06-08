@@ -121,6 +121,28 @@ async fn run(args: Args) -> Result<()> {
         .settings_handles
         .take()
         .expect("sidecar container must carry settings handles");
+
+    // Seed any bundled prompt template missing from the (effective) prompts dir:
+    // first run, or a template newly shipped in this release. Honours deliberate
+    // deletions and never overwrites an existing file, so user edits survive.
+    // Best-effort: a failure here must not stop the sidecar from serving.
+    {
+        let removed = handles.settings_store.load().removed_bundled_templates;
+        match meeting_core::usecases::backfill_templates(
+            &meeting_adapters::EmbeddedBundle,
+            handles.templates.as_ref(),
+            &removed,
+        )
+        .await
+        {
+            Ok(seeded) if !seeded.is_empty() => {
+                tracing::info!(?seeded, "seeded bundled prompt templates")
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("template backfill failed: {e}"),
+        }
+    }
+
     // The template service shares the same live handles (prompts-dir loader +
     // settings store) so it sees hot-swapped paths and can clear a dangling
     // `default_template`. Clone the Arcs out before `handles` moves into the
