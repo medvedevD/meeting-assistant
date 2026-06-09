@@ -28,15 +28,24 @@ Page {
     // Per-recording override, seeded from the server defaults.
     property string source: "mixed"
     property bool echoCancel: false
+    // Pinned device names; "" means "follow the OS default".
+    property string micDevice: ""
+    property string systemDevice: ""
+    // Device labels the server reported as actually opened (shown while recording).
+    property string resolvedMic: ""
+    property string resolvedSystem: ""
 
     function seedDefaults() {
         if (!SettingsStore.loaded) return
         var rec = SettingsStore.recording()
         source = rec.source || "mixed"
         echoCancel = rec.echo_cancel === true
+        micDevice = rec.mic_device || ""
+        systemDevice = rec.system_device || ""
     }
     Component.onCompleted: {
         if (SettingsStore.loaded) seedDefaults(); else SettingsStore.refresh()
+        AudioDevicesStore.ensureLoaded()
     }
     Connections {
         target: SettingsStore
@@ -74,13 +83,63 @@ Page {
         source = index === 0 ? "mic" : (index === 1 ? "system" : "mixed")
     }
 
+    // ── device pickers ────────────────────────────────────────────────────────
+    // Each dropdown is a "По умолчанию" entry at index 0, then one entry per
+    // enumerated device; index 0 maps to "" (follow OS default).
+    function deviceModel(list) {
+        var out = [qsTr("По умолчанию")]
+        for (var i = 0; i < list.length; ++i) {
+            var d = list[i]
+            out.push(d.is_default ? qsTr("%1 (по умолчанию)").arg(d.label) : d.label)
+        }
+        return out
+    }
+    function deviceIndex(list, id) {
+        if (!id || !id.length) return 0
+        for (var i = 0; i < list.length; ++i)
+            if (list[i].id === id) return i + 1
+        return 0
+    }
+    function deviceIdAt(list, index) {
+        return index <= 0 ? "" : (list[index - 1] ? list[index - 1].id : "")
+    }
+
+    // Whether each leg's picker should be shown for the chosen source.
+    function micPickerVisible() {
+        return source === "mic" || source === "mixed"
+    }
+    function systemPickerVisible() {
+        return (source === "system" || source === "mixed")
+                && AudioDevicesStore.systemSelectable
+    }
+
+    // The "X · Y" device summary shown on the recording screen.
+    function recordingDeviceLine() {
+        var parts = []
+        if (scr.resolvedMic.length)
+            parts.push(qsTr("🎙 %1").arg(scr.resolvedMic))
+        if (source === "system" || source === "mixed") {
+            // macOS has no concrete system device; show a generic label.
+            parts.push(qsTr("🔊 %1").arg(
+                scr.resolvedSystem.length ? scr.resolvedSystem : qsTr("Системный звук")))
+        }
+        return parts.join("   ")
+    }
+
     function start(name) {
         if (st !== "idle")
             return
         recName = name.trim().length ? name.trim() : qsTr("Встреча")
-        startReq.post("/api/v1/recordings", {
+        var body = {
             "name": recName, "source": scr.source, "echo_cancel": scr.echoCancel
-        })
+        }
+        // Only pin a device when one is explicitly chosen; "" = OS default.
+        if ((scr.source === "mic" || scr.source === "mixed") && scr.micDevice.length)
+            body.mic_device = scr.micDevice
+        if ((scr.source === "system" || scr.source === "mixed")
+                && AudioDevicesStore.systemSelectable && scr.systemDevice.length)
+            body.system_device = scr.systemDevice
+        startReq.post("/api/v1/recordings", body)
     }
 
     function stop() {
@@ -146,6 +205,8 @@ Page {
         onOk: function (j) {
             scr.recId = j.id
             scr.recName = j.name
+            scr.resolvedMic = (j.resolved && j.resolved.mic) || ""
+            scr.resolvedSystem = (j.resolved && j.resolved.system) || ""
             scr.elapsed = 0
             scr.visualTick = 0
             scr.st = "recording"
@@ -408,6 +469,66 @@ Page {
                         currentIndex: scr.sourceIndex()
                         onActivated: function (index) { scr.setSourceIndex(index) }
                     }
+
+                    // Device pickers — only for the legs the chosen source uses.
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 14
+                        Layout.bottomMargin: 6
+                        visible: scr.micPickerVisible()
+                        text: qsTr("Микрофон")
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsSmall
+                        font.weight: Theme.wSemiBold
+                        color: Theme.ink3
+                    }
+                    MeetyComboBox {
+                        Layout.fillWidth: true
+                        visible: scr.micPickerVisible()
+                        model: scr.deviceModel(AudioDevicesStore.inputs)
+                        currentIndex: scr.deviceIndex(AudioDevicesStore.inputs, scr.micDevice)
+                        // Re-enumerate each time the list opens so unplugged
+                        // devices drop out and new ones appear.
+                        onPressedChanged: if (pressed) AudioDevicesStore.refresh()
+                        onActivated: function (index) {
+                            scr.micDevice = scr.deviceIdAt(AudioDevicesStore.inputs, index)
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 14
+                        Layout.bottomMargin: 6
+                        visible: scr.systemPickerVisible()
+                        text: qsTr("Системный звук")
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsSmall
+                        font.weight: Theme.wSemiBold
+                        color: Theme.ink3
+                    }
+                    MeetyComboBox {
+                        Layout.fillWidth: true
+                        visible: scr.systemPickerVisible()
+                        model: scr.deviceModel(AudioDevicesStore.outputs)
+                        currentIndex: scr.deviceIndex(AudioDevicesStore.outputs, scr.systemDevice)
+                        onPressedChanged: if (pressed) AudioDevicesStore.refresh()
+                        onActivated: function (index) {
+                            scr.systemDevice = scr.deviceIdAt(AudioDevicesStore.outputs, index)
+                        }
+                    }
+                    // macOS: system audio is the aggregate mix, not a chosen output.
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 6
+                        visible: (scr.source === "system" || scr.source === "mixed")
+                                 && !AudioDevicesStore.systemSelectable
+                        text: qsTr("Системный звук (по умолчанию) — на macOS выбор конкретного устройства недоступен.")
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsSmall
+                        color: Theme.ink3
+                        wrapMode: Text.WordWrap
+                    }
+
                     Text {
                         Layout.fillWidth: true
                         Layout.topMargin: 8
@@ -579,7 +700,14 @@ Page {
                     }
                 }
                 Text {
-                    text: qsTr("%1 · %2").arg(scr.sourceLabel()).arg(scr.echoCancel ? qsTr("AEC вкл") : qsTr("AEC выкл"))
+                    Layout.fillWidth: true
+                    text: {
+                        var head = qsTr("%1 · %2").arg(scr.sourceLabel())
+                            .arg(scr.echoCancel ? qsTr("AEC вкл") : qsTr("AEC выкл"))
+                        var devs = scr.recordingDeviceLine()
+                        return devs.length ? head + "  —  " + devs : head
+                    }
+                    elide: Text.ElideRight
                     font.family: Theme.fontMono
                     font.pixelSize: Theme.fsSmall
                     color: Theme.ink3

@@ -5,7 +5,7 @@ use axum::{
     Json,
 };
 use meeting_core::{
-    ports::CaptureSource,
+    ports::{CaptureSource, CaptureSpec, ResolvedDevices},
     usecases::{start_recording, stop_recording},
 };
 use serde::{Deserialize, Serialize};
@@ -18,6 +18,12 @@ pub struct StartRequest {
     pub source: CaptureSource,
     #[serde(default)]
     pub echo_cancel: bool,
+    /// Pinned mic device name; omit/null = OS default.
+    #[serde(default)]
+    pub mic_device: Option<String>,
+    /// Pinned system-audio device name; omit/null = OS default. Ignored on macOS.
+    #[serde(default)]
+    pub system_device: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -26,19 +32,26 @@ pub struct MeetingResponse {
     pub name: String,
     pub audio_path: String,
     pub created_at: i64,
+    /// The device labels actually opened — what the UI shows as the live source.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<ResolvedDevices>,
 }
 
 pub async fn start(
     State(state): State<Arc<AppState>>,
     Json(req): Json<StartRequest>,
 ) -> Result<(StatusCode, Json<MeetingResponse>), (StatusCode, String)> {
-    let meeting = start_recording(
+    let (meeting, resolved) = start_recording(
         Arc::clone(&state.audio_capture),
         Arc::clone(&state.meeting_repo),
         &state.recordings_dir,
         req.name,
-        req.source,
-        req.echo_cancel,
+        CaptureSpec {
+            source: req.source,
+            echo_cancel: req.echo_cancel,
+            mic_device: req.mic_device,
+            system_device: req.system_device,
+        },
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -50,6 +63,7 @@ pub async fn start(
             name: meeting.name,
             audio_path: meeting.audio_path.display().to_string(),
             created_at: meeting.created_at,
+            resolved: Some(resolved),
         }),
     ))
 }
@@ -80,6 +94,7 @@ pub async fn stop(
             name: meeting.name,
             audio_path: meeting.audio_path.display().to_string(),
             created_at: meeting.created_at,
+            resolved: None,
         }),
     ))
 }

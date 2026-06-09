@@ -224,6 +224,10 @@ async fn run(args: Args) -> Result<()> {
         settings_service,
         template_service,
         transcription_model_service,
+        std::sync::Arc::new(meeting_api::AudioApi {
+            enumerator: container.audio_devices,
+            monitor: container.audio_monitor,
+        }),
         token.clone(),
         env!("CARGO_PKG_VERSION"),
     );

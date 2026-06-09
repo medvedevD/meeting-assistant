@@ -106,6 +106,11 @@ set_source_files_properties(qml/theme/Theme.qml PROPERTIES
 set_source_files_properties(qml/ActiveJobsStore.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE)
 
+# AudioDevicesStore is the shared capture-device catalogue singleton: one
+# `GET /api/v1/audio/devices` cache for the recording screen and settings panel.
+set_source_files_properties(qml/AudioDevicesStore.qml PROPERTIES
+    QT_QML_SINGLETON_TYPE TRUE)
+
 option(MA_ENABLE_QML_CACHEGEN
     "Compile QML into cachegen C++ files for the GUI target" ON)
 set(_qml_cachegen_args)
@@ -123,6 +128,7 @@ qt_add_qml_module(meeting-assistant-qt
         qml/MeetingStore.qml
         qml/SettingsStore.qml
         qml/ActiveJobsStore.qml
+        qml/AudioDevicesStore.qml
         qml/Request.qml
         qml/screens/MeetingListScreen.qml
         qml/screens/WelcomeScreen.qml
@@ -144,6 +150,7 @@ qt_add_qml_module(meeting-assistant-qt
         qml/components/MeetySpinBox.qml
         qml/components/MeetySwitch.qml
         qml/components/MeetySegmented.qml
+        qml/components/MeetyLevelMeter.qml
         qml/components/MeetyTag.qml
         qml/components/MeetyCard.qml
         qml/components/MeetySectionLabel.qml

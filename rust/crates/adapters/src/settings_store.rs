@@ -345,6 +345,12 @@ pub struct PersistedPaths {
 pub struct RecordingPrefs {
     pub source: String,
     pub echo_cancel: bool,
+    /// Default mic device name; absent/null = OS default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mic_device: Option<String>,
+    /// Default system-audio device name; absent/null = OS default. Ignored on macOS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_device: Option<String>,
 }
 
 impl Default for RecordingPrefs {
@@ -352,6 +358,8 @@ impl Default for RecordingPrefs {
         Self {
             source: "mic".into(),
             echo_cancel: false,
+            mic_device: None,
+            system_device: None,
         }
     }
 }

@@ -1,13 +1,15 @@
 use anyhow::{Context, Result};
 use meeting_adapters::{
-    build_llm, resolve_transcription_model_path, AnthropicProvider, CpalAudioCapture, Db,
-    FileTemplateLoader, FsMeetingFileStore, JsonSettingsStore, KeyringSecretStore,
-    LazyWhisperTranscriber, LiveJobs, SqliteJobRepo, SqliteMeetingRepo, SwappableLlm,
-    TranscriberPrefs, WhisperTranscriber, Worker, PROTOCOL_KINDS, TRANSCRIBE_KINDS,
+    build_llm, resolve_transcription_model_path, AnthropicProvider, CpalAudioCapture,
+    CpalAudioDevices, CpalLevelMonitor, Db, FileTemplateLoader, FsMeetingFileStore,
+    JsonSettingsStore, KeyringSecretStore, LazyWhisperTranscriber, LiveJobs, SqliteJobRepo,
+    SqliteMeetingRepo, SwappableLlm, TranscriberPrefs, WhisperTranscriber, Worker, PROTOCOL_KINDS,
+    TRANSCRIBE_KINDS,
 };
 use meeting_core::entities::meeting::now_unix;
 use meeting_core::ports::{
-    AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber,
+    AudioCapture, AudioDeviceEnumerator, AudioLevelMonitor, JobRepo, LlmProvider, MeetingFileStore,
+    MeetingRepo, TemplateLoader, Transcriber,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -43,6 +45,8 @@ pub struct Container {
     pub llm: Arc<dyn LlmProvider>,
     pub templates: Arc<dyn TemplateLoader>,
     pub audio_capture: Arc<dyn AudioCapture>,
+    pub audio_devices: Arc<dyn AudioDeviceEnumerator>,
+    pub audio_monitor: Arc<dyn AudioLevelMonitor>,
     pub file_store: Arc<dyn MeetingFileStore>,
     pub recordings_dir: PathBuf,
     /// Live, in-memory job table shared between the worker (writer), the
@@ -69,6 +73,8 @@ impl Container {
         let llm = Arc::new(AnthropicProvider::new(api_key));
         let templates = Arc::new(FileTemplateLoader::new(prompts_dir));
         let audio_capture = Arc::new(CpalAudioCapture::new());
+        let audio_devices = Arc::new(CpalAudioDevices::new());
+        let audio_monitor = Arc::new(CpalLevelMonitor::new());
         let file_store: Arc<dyn MeetingFileStore> = Arc::new(FsMeetingFileStore);
 
         Ok(Self {
@@ -78,6 +84,8 @@ impl Container {
             llm,
             templates,
             audio_capture,
+            audio_devices,
+            audio_monitor,
             file_store,
             recordings_dir,
             progress: meeting_core::LiveProgress::new(),
@@ -166,6 +174,8 @@ impl Container {
         let templates: Arc<dyn TemplateLoader> = templates_handle.clone();
 
         let audio_capture = Arc::new(CpalAudioCapture::new());
+        let audio_devices = Arc::new(CpalAudioDevices::new());
+        let audio_monitor = Arc::new(CpalLevelMonitor::new());
         let file_store: Arc<dyn MeetingFileStore> = Arc::new(FsMeetingFileStore);
 
         Ok(Self {
@@ -175,6 +185,8 @@ impl Container {
             llm,
             templates,
             audio_capture,
+            audio_devices,
+            audio_monitor,
             file_store,
             recordings_dir,
             progress: meeting_core::LiveProgress::new(),

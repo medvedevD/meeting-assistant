@@ -38,4 +38,6 @@ mod template_bundle;
 pub use template_bundle::EmbeddedBundle;
 
 pub mod audio;
-pub use audio::{run_recovery, CpalAudioCapture, RecoveryReport, WavRecovery};
+pub use audio::{
+    run_recovery, CpalAudioCapture, CpalAudioDevices, CpalLevelMonitor, RecoveryReport, WavRecovery,
+};

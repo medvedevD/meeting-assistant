@@ -1,5 +1,5 @@
 mod cpal_capture;
-pub use cpal_capture::CpalAudioCapture;
+pub use cpal_capture::{CpalAudioCapture, CpalAudioDevices, CpalLevelMonitor};
 
 /// Crash-safe recording recovery — startup pass that finalizes orphaned WAVs
 /// and reconciles missing DB rows (section-06).

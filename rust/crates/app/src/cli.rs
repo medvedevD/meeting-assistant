@@ -185,13 +185,16 @@ impl Cli {
                     "mixed" => CaptureSource::Mixed,
                     _ => CaptureSource::Mic,
                 };
-                let meeting = start_recording(
+                let (meeting, _resolved) = start_recording(
                     Arc::clone(&container.audio_capture),
                     Arc::clone(&container.meeting_repo),
                     &container.recordings_dir,
                     name,
-                    capture_source,
-                    echo_cancel,
+                    meeting_core::ports::CaptureSpec {
+                        source: capture_source,
+                        echo_cancel,
+                        ..Default::default()
+                    },
                 )
                 .await?;
                 println!("{}", meeting.id);
