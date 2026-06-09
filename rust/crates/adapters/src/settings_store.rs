@@ -455,17 +455,17 @@ impl JsonSettingsStore {
 fn config_dir() -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config")
-        })
+        .or_else(dirs::config_dir)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
+        .unwrap_or_else(|| PathBuf::from(".config"))
 }
 
 fn xdg_data_dir() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")
-        })
+        .or_else(dirs::data_dir)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".local/share")))
+        .unwrap_or_else(|| PathBuf::from(".local/share"))
 }
 
 fn default_models_dir() -> PathBuf {

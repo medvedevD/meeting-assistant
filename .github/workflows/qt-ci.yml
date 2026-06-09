@@ -186,6 +186,12 @@ jobs:
             test -f dist/artifact/meeting-assistant-qt.exe
             test -f dist/artifact/meeting-server.exe
             test -f dist/artifact/Qt6Core.dll
+            first_line="$(
+              env -u HOME timeout 10s \
+                dist/artifact/meeting-server.exe --parent-pid 0 \
+                | head -n 1
+            )"
+            grep -q '"ready":true' <<< "$first_line"
           fi
 
       - name: Upload app artifact

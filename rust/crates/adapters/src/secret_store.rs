@@ -545,7 +545,10 @@ fn write_vault_file(path: &PathBuf, vf: &VaultFile) -> std::io::Result<()> {
 }
 
 fn locked_io() -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::PermissionDenied, "secret store is locked")
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "secret store is locked",
+    )
 }
 
 // ── 0600 file fallback ──────────────────────────────────────────────────────────
@@ -615,9 +618,9 @@ fn set_dir_owner_only(_path: &std::path::Path) -> std::io::Result<()> {
 fn config_dir() -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config")
-        })
+        .or_else(dirs::config_dir)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
+        .unwrap_or_else(|| PathBuf::from(".config"))
 }
 
 fn io_other<E: std::fmt::Display>(e: E) -> std::io::Error {
