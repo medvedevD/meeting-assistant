@@ -23,11 +23,19 @@ jobs:
     name: build+test (${{ matrix.os }})
     needs: protocol-version
     runs-on: ${{ matrix.os }}
+    # Build the Linux AppImage inside an Ubuntu 20.04 container (glibc 2.31 —
+    # the oldest base the Qt 6.7 prebuilt binaries support). AppImage bundles
+    # system libs but never glibc itself, so the floor is whatever the build
+    # host ships: building on ubuntu-latest (glibc 2.39) made the artifact
+    # require GLIBC_2.38 and fail on Astra Linux / Debian 11/12. macOS and
+    # Windows entries set no container (empty string == run directly on host).
+    container: ${{ matrix.container }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
+            container: ubuntu:20.04
             sidecar: rust/target/release/meeting-server
           - os: macos-latest
             sidecar: rust/target/release/meeting-server
@@ -35,6 +43,21 @@ jobs:
             sidecar: rust/target/release/meeting-server.exe
 
     steps:
+      # The ubuntu:20.04 container is bare and runs as root: install the base
+      # toolchain (git is needed for checkout, build-essential for the compiler)
+      # before anything else, and pull a modern cmake since focal ships 3.16
+      # but qt-app requires >= 3.21.
+      - name: Bootstrap build container (Linux)
+        if: matrix.container != ''
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git build-essential file \
+            desktop-file-utils python3 python3-pip
+          ln -sf /usr/bin/python3 /usr/local/bin/python
+          pip3 install --upgrade "cmake>=3.21" ninja
+
       - uses: actions/checkout@v4
 
       - name: Setup Rust
@@ -49,15 +72,19 @@ jobs:
       # offscreen platform plugin still dlopens a handful of system libs.
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
+        # Runs as root inside the ubuntu:20.04 container, so no sudo. With
+        # APPIMAGE_EXTRACT_AND_RUN=1 (set below) linuxdeploy needs no FUSE, but
+        # libfuse2 is the focal package name should anything fall back to it.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
             libasound2-dev pkg-config libssl-dev \
             libgl1-mesa-dev libegl1 libxkbcommon-dev libxkbcommon-x11-0 \
             libfontconfig1 libfreetype6 libdbus-1-dev \
             libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
             libxcb-render-util0 libxcb-xinerama0 libxcb-cursor0 \
-            desktop-file-utils libfuse2t64
+            libfuse2
 
       - name: Install Qt 6.7
         uses: jurplel/install-qt-action@v4
