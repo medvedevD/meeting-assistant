@@ -53,7 +53,7 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates curl git build-essential file \
+            ca-certificates curl git build-essential file sudo \
             desktop-file-utils python3 python3-pip
           ln -sf /usr/bin/python3 /usr/local/bin/python
           pip3 install --upgrade "cmake>=3.21" ninja
@@ -67,6 +67,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+          # Key on the runner image version so the cache is invalidated when
+          # the hosted image updates. Without this, a refreshed windows-latest
+          # image (e.g. Visual Studio 17 2022 -> 18 2026) restores a stale
+          # whisper-rs-sys cmake build dir and fails with a generator mismatch.
+          key: ${{ env.ImageVersion }}
 
       # cpal needs ALSA headers; reqwest's default-tls needs OpenSSL; the Qt
       # offscreen platform plugin still dlopens a handful of system libs.
