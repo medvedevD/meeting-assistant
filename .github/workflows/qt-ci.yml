@@ -102,6 +102,8 @@ jobs:
             libfontconfig1 libfreetype6 libdbus-1-dev \
             libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
             libxcb-render-util0 libxcb-xinerama0 libxcb-cursor0 \
+            libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 \
+            libxcb-glx0 libxcb-render0 libxcb-xkb1 libxcb-util1 \
             libfuse2
 
       # macOS/Windows run directly on the hosted image, where install-qt-action
