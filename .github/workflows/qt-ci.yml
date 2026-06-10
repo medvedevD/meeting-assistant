@@ -54,7 +54,7 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             ca-certificates curl git build-essential file sudo \
-            desktop-file-utils python3 python3-pip
+            desktop-file-utils python3 python3-pip python3-dev
           ln -sf /usr/bin/python3 /usr/local/bin/python
           python3 -m pip install --upgrade "cmake>=3.21" ninja
 
