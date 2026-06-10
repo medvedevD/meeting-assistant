@@ -96,6 +96,7 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive
           apt-get update
           apt-get install -y --no-install-recommends \
+            clang libclang-dev \
             libasound2-dev pkg-config libssl-dev \
             libgl1-mesa-dev libegl1 libxkbcommon-dev libxkbcommon-x11-0 \
             libfontconfig1 libfreetype6 libdbus-1-dev \
