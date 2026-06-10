@@ -133,7 +133,7 @@ jobs:
             install-qt linux desktop 6.7.3 linux_gcc_64 -O "$qtdir"
           # The on-disk folder name has varied across aqt/Qt versions
           # (gcc_64 vs linux_gcc_64); resolve it from qmake rather than guess.
-          qmake="$(find "$qtdir/6.7.3" -maxdepth 2 -path '*/bin/qmake' | head -n1)"
+          qmake="$(find "$qtdir/6.7.3" -path '*/bin/qmake' | head -n1)"
           root="$(dirname "$(dirname "$qmake")")"
           test -x "$root/bin/qmake"
           echo "QT_ROOT_DIR=$root" >> "$GITHUB_ENV"
