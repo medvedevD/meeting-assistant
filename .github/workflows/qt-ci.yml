@@ -139,6 +139,10 @@ jobs:
           test -x "$root/bin/qmake"
           echo "QT_ROOT_DIR=$root" >> "$GITHUB_ENV"
           echo "$root/bin" >> "$GITHUB_PATH"
+          # install-qt-action exports this on host runners; the AppImage step's
+          # linuxdeploy-plugin-qt needs it to resolve Qt libs (e.g.
+          # libQt6QuickControls2.so.6) that aren't on the default loader path.
+          echo "LD_LIBRARY_PATH=$root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
       # ── Build the Rust sidecar (the artefact the Qt smoke spawns) ──────────
       - name: Build meeting-server (release)
