@@ -63,6 +63,18 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Capture the hosted-runner image version into a step output. The runner
+      # sets ImageVersion/ImageOS as OS-level env vars, but the `env` expression
+      # context only exposes workflow-defined vars, so `${{ env.ImageVersion }}`
+      # silently resolves to an empty string and never busts the cache. Reading
+      # it through the shell here is the only reliable way to feed it into the
+      # cache key below. Falls back to "0" inside the Linux container, where the
+      # var may be unset (its toolchain is pinned to the ubuntu:20.04 image).
+      - name: Compute Rust cache key suffix
+        id: rust_cache_key
+        shell: bash
+        run: echo "img=${ImageOS:-$RUNNER_OS}-${ImageVersion:-0}" >> "$GITHUB_OUTPUT"
+
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
@@ -71,7 +83,7 @@ jobs:
           # the hosted image updates. Without this, a refreshed windows-latest
           # image (e.g. Visual Studio 17 2022 -> 18 2026) restores a stale
           # whisper-rs-sys cmake build dir and fails with a generator mismatch.
-          key: ${{ env.ImageVersion }}
+          key: ${{ steps.rust_cache_key.outputs.img }}
 
       # cpal needs ALSA headers; reqwest's default-tls needs OpenSSL; the Qt
       # offscreen platform plugin still dlopens a handful of system libs.
@@ -96,6 +108,12 @@ jobs:
         with:
           version: '6.7.3'
           cache: true
+          # Inside the ubuntu:20.04 container, let aqtinstall run on the
+          # container's own apt-provided python3 (glibc 2.31). The action's
+          # default setup-python pulls a toolcache CPython built against
+          # GLIBC_2.34+, which won't even start in the old container and aborts
+          # the Qt install. On macOS/Windows (no container) keep the default.
+          setup-python: ${{ matrix.container == '' }}
 
       # ── Build the Rust sidecar (the artefact the Qt smoke spawns) ──────────
       - name: Build meeting-server (release)
