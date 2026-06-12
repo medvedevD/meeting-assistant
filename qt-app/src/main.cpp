@@ -1,5 +1,6 @@
 #include "ApiClient.h"
 #include "JobPoller.h"
+#include "Logging.h"
 #include "PathUtils.h"
 #include "SidecarManager.h"
 
@@ -16,6 +17,10 @@ int main(int argc, char *argv[]) {
     QGuiApplication::setApplicationName(QStringLiteral("Meeting Assistant"));
     QGuiApplication::setOrganizationName(QStringLiteral("meeting-assistant"));
     QGuiApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+
+    // Tee logs (incl. relayed sidecar stderr) to a file — a Finder/Explorer/
+    // .desktop launch has no terminal, so this is the only diagnosable record.
+    logging::installFileLogger();
 
     auto loadFont = [](const QString &path) -> QString {
         const int id = QFontDatabase::addApplicationFont(path);

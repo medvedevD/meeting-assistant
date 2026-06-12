@@ -59,6 +59,7 @@ endif()
 # ── GUI executable ───────────────────────────────────────────────────────────
 qt_add_executable(meeting-assistant-qt
     src/main.cpp
+    src/Logging.h          src/Logging.cpp
     src/SidecarManager.h   src/SidecarManager.cpp
     src/ApiClient.h        src/ApiClient.cpp
     src/JobPoller.h        src/JobPoller.cpp

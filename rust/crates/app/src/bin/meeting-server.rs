@@ -33,7 +33,7 @@ mod template_service;
 #[path = "../transcription_model_service.rs"]
 mod transcription_model_service;
 
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
@@ -87,8 +87,12 @@ fn parse_args() -> Args {
 fn main() -> Result<()> {
     // stdout discipline: the logger goes to STDERR ONLY, configured before any
     // other code can run. stdout is reserved for the single handshake line.
+    // ANSI only when stderr is a real terminal (dev `run-qt.sh`). When the GUI
+    // spawns us our stderr is a pipe it tees into a plain log file — colour
+    // escapes there are unreadable noise.
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
+        .with_ansi(std::io::stderr().is_terminal())
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
