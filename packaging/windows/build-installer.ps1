@@ -51,8 +51,12 @@ Write-Host "-> windeployqt: $WinDeployQt"
 
 # 1. Rust sidecar (same revision as the GUI; version-pinned together).
 Write-Host "-> cargo build meeting-server ($Profile)..."
+# Plain $relFlag, NOT @relFlag: PowerShell unwraps the single-element array
+# @("--release") into the scalar "--release", and splatting (@) a scalar string
+# iterates its characters, passing a lone "-" first (cargo: unexpected argument
+# '-'). A native command expands a plain array/scalar as args correctly.
 $relFlag = if ($Debug) { @() } else { @("--release") }
-cargo build @relFlag --manifest-path "$RustDir\Cargo.toml" --bin meeting-server
+cargo build $relFlag --manifest-path "$RustDir\Cargo.toml" --bin meeting-server
 if ($LASTEXITCODE) { throw "cargo build failed" }
 $Sidecar = Join-Path $RustDir "target\$Profile\meeting-server.exe"
 if (-not (Test-Path $Sidecar)) { throw "sidecar not built: $Sidecar" }
@@ -61,7 +65,7 @@ if (-not (Test-Path $Sidecar)) { throw "sidecar not built: $Sidecar" }
 Write-Host "-> cmake configure + build + install..."
 if (Test-Path $Stage) { Remove-Item -Recurse -Force $Stage }
 $gen = if (Get-Command ninja -ErrorAction SilentlyContinue) { @("-G","Ninja") } else { @() }
-cmake -S $QtAppDir -B $BuildDir @gen `
+cmake -S $QtAppDir -B $BuildDir $gen `
     -DCMAKE_BUILD_TYPE=Release `
     -DCMAKE_PREFIX_PATH="$QtPrefix" `
     -DMEETING_SERVER_BIN="$Sidecar" `

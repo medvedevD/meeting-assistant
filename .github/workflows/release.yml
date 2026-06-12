@@ -88,7 +88,14 @@ jobs:
             libxcb-render-util0 libxcb-xinerama0 libxcb-cursor0 \
             libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 \
             libxcb-glx0 libxcb-render0 libxcb-xkb1 libxcb-util1 \
+            libpulse0 libxrandr2 \
             libfuse2
+
+      # ^ libpulse0 (libpulse.so.0) and libxrandr2 (libXrandr.so.2) are NEEDED by
+      #   the QtMultimedia + ffmpeg media plugins that build-appimage.sh forces
+      #   into the AppDir (EXTRA_QT_PLUGINS=multimedia); linuxdeploy aborts if a
+      #   plugin's dependency is not present on the build host to copy in.
+      #   qt-ci.yml doesn't bundle multimedia, so it never needed these.
 
       - name: Install Qt 6.7 (host runners)
         if: matrix.container == ''
