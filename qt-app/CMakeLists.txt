@@ -9,7 +9,11 @@ project(meeting-assistant-qt
 # in 6.7. We deliberately use plain C++ Qt + a SEPARATE Rust sidecar binary —
 # there is NO cxx-qt / qt-build-utils here (the boundary is loopback HTTP, not
 # FFI).
-find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2 Network)
+# Multimedia powers the in-card recording player (MediaPlayer/AudioOutput). On
+# Qt 6.7 it loads the ffmpeg media backend at runtime — the platform deploy
+# tools bundle it, but its plugins must be covered by macOS signing/notarization
+# and the AppImage/Windows layouts (see packaging/).
+find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2 Network Multimedia)
 
 qt_standard_project_setup(REQUIRES 6.7)
 
@@ -58,6 +62,7 @@ qt_add_executable(meeting-assistant-qt
     src/SidecarManager.h   src/SidecarManager.cpp
     src/ApiClient.h        src/ApiClient.cpp
     src/JobPoller.h        src/JobPoller.cpp
+    src/PathUtils.h
     "${_gen_header}")
 
 # macOS: ship as MeetingAssistant.app. The Info.plist carries the
@@ -162,6 +167,7 @@ qt_add_qml_module(meeting-assistant-qt
         qml/components/MeetyToolTip.qml
         qml/components/MeetyIcon.qml
         qml/components/MeetyIconButton.qml
+        qml/components/AudioPlayer.qml
         qml/components/MeetyWordmark.qml
         qml/components/SettingsRow.qml
         qml/components/ProtocolDocument.qml
@@ -203,7 +209,8 @@ endif()
 target_link_libraries(meeting-assistant-qt PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
-    Qt6::Network)
+    Qt6::Network
+    Qt6::Multimedia)
 
 if(WIN32)
     # Job Object APIs for kernel-enforced sidecar reaping on parent death.

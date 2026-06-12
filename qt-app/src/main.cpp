@@ -1,5 +1,6 @@
 #include "ApiClient.h"
 #include "JobPoller.h"
+#include "PathUtils.h"
 #include "SidecarManager.h"
 
 #include <QGuiApplication>
@@ -48,6 +49,7 @@ int main(int argc, char *argv[]) {
 
     SidecarManager sidecar;
     ApiClient api;
+    PathUtils pathUtils;
 
     // Wire the client the moment the sidecar is Ready (handshake + version
     // gate + /health all passed).
@@ -69,6 +71,8 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("sidecar"),
                                              &sidecar);
     engine.rootContext()->setContextProperty(QStringLiteral("api"), &api);
+    engine.rootContext()->setContextProperty(QStringLiteral("pathUtils"),
+                                             &pathUtils);
     engine.rootContext()->setContextProperty(QStringLiteral("controlsStyle"),
                                               QQuickStyle::name());
     // qt-redesign Phase-1 dev affordance: MEETY_THEME_GALLERY=1 swaps the root

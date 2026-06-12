@@ -94,6 +94,14 @@ export QML_SOURCES_PATHS="$QT_APP_DIR/qml"
 export PATH="$QT_PREFIX/bin:$PATH"
 export OUTPUT="MeetingAssistant-$ARCH.AppImage"
 
+# The in-card audio player (QtMultimedia) loads its backend from the
+# `multimedia` plugin category, which linuxdeploy-plugin-qt does NOT bundle from
+# a QML-import scan alone — the backend plugin lives under plugins/multimedia/,
+# not in the QML tree. Force it in; its NEEDED ffmpeg libs (libav*) are then
+# pulled by linuxdeploy's dependency resolver. Without this the player silently
+# fails to play on a clean machine.
+export EXTRA_QT_PLUGINS="multimedia"
+
 echo "→ linuxdeploy (+ qt plugin)…"
 mkdir -p "$DIST"
 # No --custom-apprun: linuxdeploy + the qt plugin generate the AppRun and the
@@ -104,6 +112,19 @@ mkdir -p "$DIST"
     --desktop-file "$APPDIR/usr/share/applications/meeting-assistant.desktop" \
     --icon-file "$ICON_DST/meeting-assistant.png" \
     --output appimage )
+
+# Fail-fast: assert the multimedia backend + ffmpeg actually landed in the
+# AppDir. A missing plugin here ships an app whose player is dead on every
+# other machine — exactly the kind of plugin gap that bit the xcb deploy.
+if ! find "$APPDIR" -name 'libffmpegmediaplugin.so' | grep -q .; then
+    echo "Error: QtMultimedia ffmpeg plugin not bundled (EXTRA_QT_PLUGINS=multimedia did not take)." >&2
+    exit 1
+fi
+if ! find "$APPDIR" -name 'libavcodec.so*' | grep -q .; then
+    echo "Error: ffmpeg runtime libs (libavcodec) not bundled — player will fail to decode." >&2
+    exit 1
+fi
+echo "→ QtMultimedia backend + ffmpeg libs bundled ✓"
 
 echo "✓ AppImage: $DIST/$OUTPUT"
 echo "  Both binaries (meeting-assistant-qt + meeting-server) live in"

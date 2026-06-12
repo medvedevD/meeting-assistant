@@ -50,19 +50,41 @@ binaries atomically.
 
 Qt 6 is used under **LGPLv3**. Compliance, identically in every artifact:
 
-1. **Dynamic linking only.** `qt-app` links Qt shared libs/frameworks; nothing
-   Qt is static. The deploy tools ship the Qt runtime as replaceable
-   shared objects (macOS `Contents/Frameworks`, AppImage bundled Qt, Windows
-   `Qt6*.dll`), so the user can substitute a compatible Qt.
+1. **Dynamic linking only.** `qt-app` links Qt shared libs/frameworks (Qt Quick,
+   Quick Controls, Network, **Multimedia**); nothing Qt is static. The deploy
+   tools ship the Qt runtime as replaceable shared objects (macOS
+   `Contents/Frameworks`, AppImage bundled Qt, Windows `Qt6*.dll`), so the user
+   can substitute a compatible Qt.
 2. **Written offer + license text + version**, bundled inside each artifact
    (CMake install of [`LICENSES/`](LICENSES/)):
    - macOS `MeetingAssistant.app/Contents/Resources/licenses/`
    - Linux `usr/share/doc/meeting-assistant/licenses/`
    - Windows `<InstallDir>\licenses\`
    Contents: `Qt-LGPLv3-WRITTEN-OFFER.txt` (3-yr source offer + relink note),
-   `Qt-LICENSE.txt`, `Qt-LICENSE.GPL3-EXCEPT.txt`, `Qt-VERSION.txt`.
+   `Qt-LICENSE.txt`, `Qt-LICENSE.GPL3-EXCEPT.txt`, `Qt-VERSION.txt`,
+   `FFmpeg-LGPLv2.1-NOTICE.txt`.
 
 Static linking would force releasing the app's source — we do not static-link.
+
+### Qt Multimedia / FFmpeg backend
+
+The in-card audio player uses **Qt Multimedia**, whose Qt 6.7 backend bundles
+**FFmpeg** shared libraries (LGPLv2.1+, dynamically linked) plus the
+`multimedia` backend plugin. Each recipe now force-bundles and **asserts** the
+backend so a missing plugin fails the build instead of shipping a dead player:
+
+- macOS — `macdeployqt` bundles it from the linked `Qt6::Multimedia` + QML
+  import; `build-app.sh` asserts `libffmpegmediaplugin.dylib` is present before
+  signing. `codesign-deep.sh`'s recursive pass already signs the plugin and the
+  ffmpeg `*.dylib`.
+- Linux — `EXTRA_QT_PLUGINS=multimedia` forces the plugin into the AppDir (a
+  QML-import scan alone misses it); `build-appimage.sh` asserts the plugin and
+  `libavcodec` landed.
+- Windows — `windeployqt --qmldir` bundles it; `build-installer.ps1` asserts
+  `ffmpegmediaplugin.dll` before Inno Setup packs `Stage\*`.
+
+FFmpeg compliance mirrors Qt's (dynamic link + written offer + source URL) in
+`FFmpeg-LGPLv2.1-NOTICE.txt`.
 
 ## Per-OS gate status & documented exits
 

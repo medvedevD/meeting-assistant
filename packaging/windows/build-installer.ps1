@@ -82,6 +82,15 @@ Write-Host "-> windeployqt..."
     --no-translations "$Gui"
 if ($LASTEXITCODE) { throw "windeployqt failed" }
 
+# Fail-fast: the in-card audio player needs the QtMultimedia ffmpeg backend.
+# windeployqt bundles it from the QtMultimedia QML import, but assert it landed
+# (a missing plugin ships a dead player). Inno Setup packs Stage\* recursively,
+# so once it's here it reaches the installer.
+$mmPlugin = Get-ChildItem -Path $Stage -Recurse -Filter "ffmpegmediaplugin.dll" `
+    -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $mmPlugin) { throw "QtMultimedia ffmpeg plugin not bundled by windeployqt" }
+Write-Host "-> QtMultimedia backend bundled: $($mmPlugin.FullName)"
+
 # 4. Inno Setup -> installer.
 $Iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
 if (-not $Iscc) {
