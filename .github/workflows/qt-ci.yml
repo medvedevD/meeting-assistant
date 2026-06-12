@@ -113,6 +113,9 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.7.3'
+          # qtmultimedia is NOT in the default desktop set; the in-card audio
+          # player's find_package(Qt6 … Multimedia) fails without it.
+          modules: qtmultimedia
           cache: true
 
       # Inside the ubuntu:20.04 container install-qt-action can't be used: its
@@ -132,8 +135,10 @@ jobs:
         run: |
           qtdir="$RUNNER_TEMP/Qt"
           # Qt 6.7 renamed the Linux desktop arch gcc_64 -> linux_gcc_64.
+          # -m qtmultimedia: the audio player needs Qt6::Multimedia, which the
+          # base desktop archive omits.
           uvx --python 3.12 --from aqtinstall aqt \
-            install-qt linux desktop 6.7.3 linux_gcc_64 -O "$qtdir"
+            install-qt linux desktop 6.7.3 linux_gcc_64 -m qtmultimedia -O "$qtdir"
           # The on-disk folder name has varied across aqt/Qt versions
           # (gcc_64 vs linux_gcc_64); resolve it from qmake rather than guess.
           qmake="$(find "$qtdir/6.7.3" -path '*/bin/qmake' | head -n1)"
