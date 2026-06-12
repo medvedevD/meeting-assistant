@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -68,10 +69,21 @@ pub struct AppTranscriptionModelService {
 impl AppTranscriptionModelService {
     pub fn new(settings_store: Arc<JsonSettingsStore>) -> Self {
         cleanup_partial_downloads(&settings_store.load().normalize().effective_models_dir());
+        // A model file can be multi-GB, so no overall request timeout — but a
+        // stalled connection must not hang the install forever. `connect_timeout`
+        // bounds the handshake; `read_timeout` is an idle-gap bound that resets on
+        // every received chunk, so a healthy slow download is never cut off while a
+        // dead socket is abandoned. (The LLM clients set their own timeouts; this
+        // client previously had none — an unbounded hang on a wedged mirror.)
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(30))
+            .read_timeout(Duration::from_secs(60))
+            .build()
+            .expect("failed to build model-download HTTP client");
         Self {
             settings_store,
             jobs: Arc::new(DashMap::new()),
-            client: reqwest::Client::new(),
+            client,
         }
     }
 
