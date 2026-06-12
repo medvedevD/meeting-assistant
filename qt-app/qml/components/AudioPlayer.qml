@@ -56,16 +56,31 @@ Item {
             id: seek
             Layout.fillWidth: true
             from: 0
-            to: Math.max(1, player.duration)
-            enabled: player.seekable
-            // Follow playback, except while the user is dragging the handle
-            // (then the self-reference keeps the dragged value).
-            value: pressed ? value : player.position
+            to: player.duration > 0 ? player.duration : 1
+            enabled: root.hasSource
+
+            // Drive playback live while the user scrubs.
             onMoved: player.position = value
+
+            // Follow playback, but only when the user is NOT dragging — pushing
+            // position into `value` during a drag would fight the handle. A
+            // plain assignment (not a binding on `value`) avoids the
+            // self-referential binding that otherwise breaks on first drag.
+            Connections {
+                target: player
+                function onPositionChanged() {
+                    if (!seek.pressed)
+                        seek.value = player.position
+                }
+            }
 
             background: Rectangle {
                 x: seek.leftPadding
                 y: seek.topPadding + seek.availableHeight / 2 - height / 2
+                // implicit* give the Slider a sane height + hit area; without
+                // them a custom handle/background can collapse to ~0px tall.
+                implicitWidth: 200
+                implicitHeight: 4
                 width: seek.availableWidth
                 height: 4
                 radius: 2
@@ -80,6 +95,8 @@ Item {
             handle: Rectangle {
                 x: seek.leftPadding + seek.visualPosition * (seek.availableWidth - width)
                 y: seek.topPadding + seek.availableHeight / 2 - height / 2
+                implicitWidth: 14
+                implicitHeight: 14
                 width: 14
                 height: 14
                 radius: 7
