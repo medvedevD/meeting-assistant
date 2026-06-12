@@ -73,10 +73,12 @@ cp "$REPO/packaging/assets/meeting-assistant.png" "$ICON_DST/meeting-assistant.p
 
 # ── 3. Fetch linuxdeploy + the Qt plugin (cached) ────────────────────────────
 mkdir -p "$TOOLS"
-fetch() { # fetch <name> <url>
+fetch() { # fetch <name> <url> — echoes ONLY the path on stdout (captured by $())
     local out="$TOOLS/$1"
     if [[ ! -x "$out" ]]; then
-        echo "→ downloading $1…"
+        # Progress must go to stderr; on a cache miss a stdout echo here would be
+        # captured into LD/LDQT alongside the path and then run as a command.
+        echo "→ downloading $1…" >&2
         curl -fL --retry 3 -o "$out" "$2"
         chmod +x "$out"
     fi

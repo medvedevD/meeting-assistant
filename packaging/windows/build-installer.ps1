@@ -9,7 +9,10 @@
 # Usage:  pwsh packaging/windows/build-installer.ps1 [-Debug]
 #
 # Qt discovery: $env:CMAKE_PREFIX_PATH -> $env:QT_DIR -> ~\Qt\<ver>\msvc* .
-[CmdletBinding()]
+#
+# No [CmdletBinding()]: it auto-provides a `-Debug` common parameter, which
+# collides with our own `-Debug` switch ("parameter 'Debug' defined multiple
+# times") and makes the script fail to parse under `pwsh ./build-installer.ps1`.
 param([switch]$Debug)
 $ErrorActionPreference = "Stop"
 
