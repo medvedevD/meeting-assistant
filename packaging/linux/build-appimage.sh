@@ -104,6 +104,16 @@ export OUTPUT="MeetingAssistant-$ARCH.AppImage"
 # fails to play on a clean machine.
 export EXTRA_QT_PLUGINS="multimedia"
 
+# We ship ONLY the FFmpeg backend (Qt 6.7 default; same as macOS/Windows). The
+# `multimedia` category also contains the GStreamer backend plugin, which drags
+# the entire GStreamer stack (libgstgl, libgstpbutils, … → libGL/gbm/wayland).
+# cmake configure needs the plugin file present (find_package imports it as a
+# target), so it can't be removed earlier — delete it now, after the build and
+# before linuxdeploy (which finds plugins via qmake, not cmake, so it then sees
+# only ffmpeg). NOTE: this removes it from the Qt prefix; a second *local* run
+# needs a fresh Qt. CI uses a throwaway Qt, so this is a non-issue there.
+rm -f "$QT_PREFIX/plugins/multimedia/libgstreamermediaplugin.so"
+
 echo "→ linuxdeploy (+ qt plugin)…"
 mkdir -p "$DIST"
 # No --custom-apprun: linuxdeploy + the qt plugin generate the AppRun and the
