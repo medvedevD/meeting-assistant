@@ -186,6 +186,17 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install innosetup --no-progress -y
 
+      # build-appimage.sh forces EXTRA_QT_PLUGINS=multimedia, which pulls BOTH
+      # QtMultimedia backends. We ship FFmpeg (same as macOS/Windows); the
+      # GStreamer plugin would drag the whole GStreamer stack (libgstpbutils…),
+      # absent from the container, and linuxdeploy aborts on the missing dep.
+      # Drop it so only the (already satisfied) ffmpeg plugin is bundled. The
+      # script's own assertion still checks libffmpegmediaplugin.so is present.
+      - name: Drop GStreamer multimedia backend (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: rm -f "$QT_ROOT_DIR/plugins/multimedia/libgstreamermediaplugin.so"
+
       # ── Build the installer with the existing per-OS packaging recipe ─────────
       - name: Package macOS (.dmg, ad-hoc signed)
         if: runner.os == 'macOS'
