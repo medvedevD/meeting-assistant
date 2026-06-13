@@ -131,14 +131,15 @@ jobs:
             libxcb-render-util0 libxcb-xinerama0 libxcb-cursor0 \
             libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 \
             libxcb-glx0 libxcb-render0 libxcb-xkb1 libxcb-util1 \
-            libpulse0 libxrandr2 \
+            libpulse0 libxrandr2 xz-utils \
             libfuse2
 
       # ^ libpulse0 (libpulse.so.0) + libxrandr2 (libXrandr.so.2) are NEEDED by
-      #   the FFmpeg QtMultimedia backend that build-appimage.sh bundles.
-      #   (The script strips the GStreamer backend plugin before linuxdeploy, so
-      #   its deep dependency chain is never needed here.) qt-ci.yml doesn't
-      #   bundle multimedia, so it never needed these.
+      #   the QtMultimedia plugins build-appimage.sh bundles; xz-utils lets tar
+      #   unpack the BtbN FFmpeg .tar.xz the script downloads for the player
+      #   backend. (The script strips the GStreamer plugin before linuxdeploy, so
+      #   its deep dependency chain is never needed.) qt-ci.yml doesn't bundle
+      #   multimedia, so it never needed any of these.
 
       - name: Install Qt 6.7 (host runners)
         if: matrix.container == ''

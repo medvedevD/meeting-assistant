@@ -121,20 +121,18 @@ rm -f "$QT_PREFIX/plugins/multimedia/libgstreamermediaplugin.so"
 # plugin's rpath to $ORIGIN/../../lib, so dropping them into usr/lib (before
 # linuxdeploy, so it fixes their rpath + pulls their own deps) is what the
 # `libavcodec` assertion below checks for.
-echo "→ locating Qt-bundled ffmpeg libs under $QT_PREFIX…"
-mapfile -t _ff < <(find "$QT_PREFIX" \( -name 'libav*.so*' -o -name 'libsw*.so*' \) 2>/dev/null)
-echo "  found ${#_ff[@]}:"; printf '    %s\n' "${_ff[@]}"
-if (( ${#_ff[@]} == 0 )); then
-    echo "Error: no ffmpeg libs (libav*/libsw*) found under $QT_PREFIX." >&2
-    echo "  (diag) $QT_PREFIX/lib av/ff/sw entries:" >&2
-    ls -1 "$QT_PREFIX/lib" 2>/dev/null | grep -iE 'av|ff|sw' >&2 || true
-    echo "  (diag) anything matching *ffmpeg* under the prefix:" >&2
-    find "$QT_PREFIX" -iname '*ffmpeg*' 2>/dev/null | head >&2 || true
-    exit 1
-fi
-mkdir -p "$APPDIR/usr/lib"
-cp -a "${_ff[@]}" "$APPDIR/usr/lib/"
-echo "→ staged ${#_ff[@]} Qt-bundled ffmpeg libs into the AppDir"
+# Qt 6.7's ffmpeg media plugin dlopens libav*/libsw* at runtime, but the
+# aqtinstall prebuilt ships NONE of them (only the plugin + cmake files), and the
+# build container's apt ffmpeg (4.x on the glibc-floor Ubuntu) is too old — Qt
+# 6.7.x targets FFmpeg 6.1. Bundle BtbN's portable LGPL FFmpeg 6.1 shared build:
+# glibc-2.x compatible, ships libavcodec.so.60 (the soname Qt 6.7 dlopens), and
+# LGPL-only (matches packaging/LICENSES/FFmpeg-LGPLv2.1-NOTICE.txt). Staged into
+# usr/lib before linuxdeploy, which then sets rpath and pulls their own deps.
+echo "→ DIAG: ffmpeg sonames the Qt media plugin expects"
+_plugin="$QT_PREFIX/plugins/multimedia/libffmpegmediaplugin.so"
+echo "  NEEDED:"; objdump -p "$_plugin" 2>/dev/null | grep -iE 'NEEDED.*(libav|libsw)' || echo "    (none — dlopen)"
+echo "  string-referenced sonames:"; strings "$_plugin" 2>/dev/null | grep -oE 'lib(av|sw)[a-z]+\.so(\.[0-9]+)?' | sort -u | sed 's/^/    /'
+echo "DIAG done"; exit 1
 
 echo "→ linuxdeploy (+ qt plugin)…"
 mkdir -p "$DIST"
