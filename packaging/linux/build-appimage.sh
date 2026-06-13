@@ -114,6 +114,25 @@ export EXTRA_QT_PLUGINS="multimedia"
 # needs a fresh Qt. CI uses a throwaway Qt, so this is a non-issue there.
 rm -f "$QT_PREFIX/plugins/multimedia/libgstreamermediaplugin.so"
 
+# Stage the Qt-bundled FFmpeg libs into the AppDir. Qt 6.7's ffmpeg plugin
+# dlopens libav*/libsw* (they're NOT in its ELF NEEDED list), so linuxdeploy's
+# dependency scan never copies them — the plugin lands but the player can't
+# decode. The Qt prebuilt ships them in <qt>/lib and linuxdeploy already sets the
+# plugin's rpath to $ORIGIN/../../lib, so dropping them into usr/lib (before
+# linuxdeploy, so it fixes their rpath + pulls their own deps) is what the
+# `libavcodec` assertion below checks for.
+mkdir -p "$APPDIR/usr/lib"
+shopt -s nullglob
+_ff=( "$QT_PREFIX"/lib/libav*.so* "$QT_PREFIX"/lib/libsw*.so* )
+if (( ${#_ff[@]} )); then
+    cp -a "${_ff[@]}" "$APPDIR/usr/lib/"
+    echo "→ staged ${#_ff[@]} Qt-bundled ffmpeg libs into the AppDir"
+else
+    echo "Error: no ffmpeg libs (libav*) found in $QT_PREFIX/lib to stage." >&2
+    exit 1
+fi
+shopt -u nullglob
+
 echo "→ linuxdeploy (+ qt plugin)…"
 mkdir -p "$DIST"
 # No --custom-apprun: linuxdeploy + the qt plugin generate the AppRun and the
