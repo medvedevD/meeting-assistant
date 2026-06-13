@@ -187,6 +187,17 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install innosetup --no-progress -y
 
+      # Cache build-appimage.sh's tool dir so the from-source FFmpeg is built
+      # once (~8 min), not every release. The script skips the build when
+      # dist/linux/.tools/ffmpeg-*-install/lib/libavcodec.so already exists; the
+      # key busts when the script (its ffmpeg version/flags) changes.
+      - name: Cache Linux build tools (FFmpeg + linuxdeploy)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: dist/linux/.tools
+          key: linux-tools-${{ runner.arch }}-${{ hashFiles('packaging/linux/build-appimage.sh') }}
+
       # ── Build the installer with the existing per-OS packaging recipe ─────────
       - name: Package macOS (.dmg, ad-hoc signed)
         if: runner.os == 'macOS'

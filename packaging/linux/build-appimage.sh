@@ -128,11 +128,35 @@ rm -f "$QT_PREFIX/plugins/multimedia/libgstreamermediaplugin.so"
 # glibc-2.x compatible, ships libavcodec.so.60 (the soname Qt 6.7 dlopens), and
 # LGPL-only (matches packaging/LICENSES/FFmpeg-LGPLv2.1-NOTICE.txt). Staged into
 # usr/lib before linuxdeploy, which then sets rpath and pulls their own deps.
-echo "→ DIAG: ffmpeg sonames the Qt media plugin expects"
-_plugin="$QT_PREFIX/plugins/multimedia/libffmpegmediaplugin.so"
-echo "  NEEDED:"; objdump -p "$_plugin" 2>/dev/null | grep -iE 'NEEDED.*(libav|libsw)' || echo "    (none — dlopen)"
-echo "  string-referenced sonames:"; strings "$_plugin" 2>/dev/null | grep -oE 'lib(av|sw)[a-z]+\.so(\.[0-9]+)?' | sort -u | sed 's/^/    /'
-echo "DIAG done"; exit 1
+# Qt 6.7's ffmpeg media plugin dlopens libav*/libsw* at runtime (they're NOT in
+# its ELF NEEDED list), but the aqtinstall prebuilt ships none of them and the
+# build container's apt ffmpeg (4.x on the glibc-floor Ubuntu) is too old. Qt
+# 6.7.x is built against FFmpeg 6.1 (libavcodec.so.60), which BtbN no longer
+# publishes — so build it from source: LGPL (no --enable-gpl), shared, no x86asm
+# (avoids a nasm dep), default codec set (native WAV/MP3/AAC decoders cover the
+# recordings). Cached across runs by the workflow (dist/linux/.tools).
+FF_VER="6.1.1"
+ff_prefix="$TOOLS/ffmpeg-$FF_VER-install"
+if [[ ! -f "$ff_prefix/lib/libavcodec.so" ]]; then
+    echo "→ building LGPL FFmpeg $FF_VER from source (first run; then cached)…"
+    ff_tar="$TOOLS/ffmpeg-$FF_VER.tar.xz"
+    [[ -f "$ff_tar" ]] || curl -fL --retry 3 -o "$ff_tar" \
+        "https://ffmpeg.org/releases/ffmpeg-$FF_VER.tar.xz"
+    ff_src="$TOOLS/ffmpeg-$FF_VER-src"
+    rm -rf "$ff_src"; mkdir -p "$ff_src"
+    tar -xf "$ff_tar" -C "$ff_src" --strip-components=1
+    (
+        cd "$ff_src"
+        ./configure --prefix="$ff_prefix" \
+            --enable-shared --disable-static \
+            --disable-programs --disable-doc --disable-debug --disable-x86asm
+        make -j"$(nproc)"
+        make install
+    )
+fi
+mkdir -p "$APPDIR/usr/lib"
+cp -aP "$ff_prefix"/lib/libav*.so* "$ff_prefix"/lib/libsw*.so* "$APPDIR/usr/lib/"
+echo "→ staged FFmpeg $FF_VER: $(find "$APPDIR/usr/lib" -name 'libav*.so.*' -o -name 'libsw*.so.*' | grep -c .) versioned libs"
 
 echo "→ linuxdeploy (+ qt plugin)…"
 mkdir -p "$DIST"
