@@ -196,7 +196,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dist/linux/.tools
-          key: linux-tools-${{ runner.arch }}-${{ hashFiles('packaging/linux/build-appimage.sh') }}
+          # Keyed on the FFmpeg version (bump the suffix to force a rebuild), not
+          # the script hash — so unrelated build-appimage.sh edits don't trigger
+          # an ~8-min FFmpeg rebuild.
+          key: linux-tools-${{ runner.arch }}-ffmpeg6.1.1-v1
 
       # ── Build the installer with the existing per-OS packaging recipe ─────────
       - name: Package macOS (.dmg, ad-hoc signed)

@@ -114,20 +114,6 @@ export EXTRA_QT_PLUGINS="multimedia"
 # needs a fresh Qt. CI uses a throwaway Qt, so this is a non-issue there.
 rm -f "$QT_PREFIX/plugins/multimedia/libgstreamermediaplugin.so"
 
-# Stage the Qt-bundled FFmpeg libs into the AppDir. Qt 6.7's ffmpeg plugin
-# dlopens libav*/libsw* (they're NOT in its ELF NEEDED list), so linuxdeploy's
-# dependency scan never copies them — the plugin lands but the player can't
-# decode. The Qt prebuilt ships them in <qt>/lib and linuxdeploy already sets the
-# plugin's rpath to $ORIGIN/../../lib, so dropping them into usr/lib (before
-# linuxdeploy, so it fixes their rpath + pulls their own deps) is what the
-# `libavcodec` assertion below checks for.
-# Qt 6.7's ffmpeg media plugin dlopens libav*/libsw* at runtime, but the
-# aqtinstall prebuilt ships NONE of them (only the plugin + cmake files), and the
-# build container's apt ffmpeg (4.x on the glibc-floor Ubuntu) is too old — Qt
-# 6.7.x targets FFmpeg 6.1. Bundle BtbN's portable LGPL FFmpeg 6.1 shared build:
-# glibc-2.x compatible, ships libavcodec.so.60 (the soname Qt 6.7 dlopens), and
-# LGPL-only (matches packaging/LICENSES/FFmpeg-LGPLv2.1-NOTICE.txt). Staged into
-# usr/lib before linuxdeploy, which then sets rpath and pulls their own deps.
 # Qt 6.7's ffmpeg media plugin dlopens libav*/libsw* at runtime (they're NOT in
 # its ELF NEEDED list), but the aqtinstall prebuilt ships none of them and the
 # build container's apt ffmpeg (4.x on the glibc-floor Ubuntu) is too old. Qt
@@ -157,6 +143,12 @@ fi
 mkdir -p "$APPDIR/usr/lib"
 cp -aP "$ff_prefix"/lib/libav*.so* "$ff_prefix"/lib/libsw*.so* "$APPDIR/usr/lib/"
 echo "→ staged FFmpeg $FF_VER: $(find "$APPDIR/usr/lib" -name 'libav*.so.*' -o -name 'libsw*.so.*' | grep -c .) versioned libs"
+
+# linuxdeploy resolves NEEDED libs via the loader path; the staged ffmpeg libs
+# reference each other by soname (libavcodec → libavutil.so.58 …), so put the
+# AppDir lib dir on LD_LIBRARY_PATH or it can't find them ("Could not find
+# dependency: libavutil.so.58") even though they sit right there.
+export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 echo "→ linuxdeploy (+ qt plugin)…"
 mkdir -p "$DIST"
