@@ -119,7 +119,10 @@ Page {
             iconName: "trash"
             danger: true
             enabled: scr.audioPath.length > 0
-            onTriggered: deleteAudioReq.del("/api/v1/meetings/" + scr.meetingId + "?mode=audio")
+            onTriggered: {
+                audioPlayer.release() // free the file handle (Windows can't delete an open file)
+                deleteAudioReq.del("/api/v1/meetings/" + scr.meetingId + "?mode=audio")
+            }
         }
         MeetyMenuItem {
             text: qsTr("Удалить встречу")
@@ -158,7 +161,10 @@ Page {
         id: confirmDelete
         preferredWidth: 420
         title: qsTr("Удалить встречу?")
-        onAccepted: deleteReq.del("/api/v1/meetings/" + scr.meetingId + "?mode=full")
+        onAccepted: {
+            audioPlayer.release() // free the file handle (Windows can't delete an open file)
+            deleteReq.del("/api/v1/meetings/" + scr.meetingId + "?mode=full")
+        }
 
         Text {
             Layout.fillWidth: true
@@ -256,6 +262,7 @@ Page {
 
         // ── recording playback ───────────────────────────────────────────────
         AudioPlayer {
+            id: audioPlayer
             Layout.fillWidth: true
             Layout.maximumWidth: scr.readingWidth
             Layout.alignment: Qt.AlignHCenter
