@@ -121,17 +121,20 @@ rm -f "$QT_PREFIX/plugins/multimedia/libgstreamermediaplugin.so"
 # plugin's rpath to $ORIGIN/../../lib, so dropping them into usr/lib (before
 # linuxdeploy, so it fixes their rpath + pulls their own deps) is what the
 # `libavcodec` assertion below checks for.
-mkdir -p "$APPDIR/usr/lib"
-shopt -s nullglob
-_ff=( "$QT_PREFIX"/lib/libav*.so* "$QT_PREFIX"/lib/libsw*.so* )
-if (( ${#_ff[@]} )); then
-    cp -a "${_ff[@]}" "$APPDIR/usr/lib/"
-    echo "→ staged ${#_ff[@]} Qt-bundled ffmpeg libs into the AppDir"
-else
-    echo "Error: no ffmpeg libs (libav*) found in $QT_PREFIX/lib to stage." >&2
+echo "→ locating Qt-bundled ffmpeg libs under $QT_PREFIX…"
+mapfile -t _ff < <(find "$QT_PREFIX" \( -name 'libav*.so*' -o -name 'libsw*.so*' \) 2>/dev/null)
+echo "  found ${#_ff[@]}:"; printf '    %s\n' "${_ff[@]}"
+if (( ${#_ff[@]} == 0 )); then
+    echo "Error: no ffmpeg libs (libav*/libsw*) found under $QT_PREFIX." >&2
+    echo "  (diag) $QT_PREFIX/lib av/ff/sw entries:" >&2
+    ls -1 "$QT_PREFIX/lib" 2>/dev/null | grep -iE 'av|ff|sw' >&2 || true
+    echo "  (diag) anything matching *ffmpeg* under the prefix:" >&2
+    find "$QT_PREFIX" -iname '*ffmpeg*' 2>/dev/null | head >&2 || true
     exit 1
 fi
-shopt -u nullglob
+mkdir -p "$APPDIR/usr/lib"
+cp -a "${_ff[@]}" "$APPDIR/usr/lib/"
+echo "→ staged ${#_ff[@]} Qt-bundled ffmpeg libs into the AppDir"
 
 echo "→ linuxdeploy (+ qt plugin)…"
 mkdir -p "$DIST"
