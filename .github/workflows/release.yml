@@ -9,8 +9,11 @@ name: Release
 #
 # workflow_dispatch = dry run: it builds + uploads the installers as workflow
 # artifacts but does NOT create a release, so the packaging path can be validated
-# on a throwaway pre-tag without burning a version number. A real `v*` tag push
-# additionally runs the `release` job.
+# on a throwaway pre-tag without burning a version number. The `targets` input
+# picks WHICH OSes to build — unselected ones never spawn a job (zero Actions
+# minutes), so a re-validation can skip the already-green, 10x-billed macOS.
+# A real `v*` tag push ignores the input and always builds all three (a release
+# needs every installer) and additionally runs the `release` job.
 #
 # Alpha is unsigned/ad-hoc (no secrets): macOS ad-hoc `codesign -s -`, Windows
 # unsigned (SmartScreen one-click bypass), Linux unsigned AppImage.
@@ -19,29 +22,69 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      targets:
+        description: "OSes to build (dry-run only; a tag always builds all 3)"
+        type: choice
+        default: linux,windows
+        options:
+          - linux,windows
+          - linux
+          - windows
+          - macos
+          - linux,windows,macos
 
 permissions:
   contents: write   # the release job needs this to create the GitHub Release
 
 jobs:
+  # Resolve the build matrix: a tag push builds all three; a manual dispatch
+  # honours the `targets` input. Job-level `if` can't read the `matrix` context,
+  # so filtering has to happen by shaping the matrix here rather than skipping
+  # entries downstream — and an unselected OS then never starts a runner.
+  setup:
+    name: select targets
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            sel="${{ inputs.targets }}"
+          else
+            sel="linux,windows,macos"   # tag push → full release, every installer
+          fi
+
+          entry() { # entry <key> → one matrix include object
+            case "$1" in
+              linux)   echo '{"os":"ubuntu-latest","container":"ubuntu:20.04","installer_glob":"dist/linux/*.AppImage"}' ;;
+              macos)   echo '{"os":"macos-latest","container":"","installer_glob":"dist/macos/*.dmg"}' ;;
+              windows) echo '{"os":"windows-latest","container":"","installer_glob":"dist/windows/*.exe"}' ;;
+              *) echo "::error::unknown target '$1'" >&2; exit 1 ;;
+            esac
+          }
+
+          inc=""
+          IFS=',' read -ra keys <<< "$sel"
+          for k in "${keys[@]}"; do
+            k="$(echo "$k" | xargs)"   # trim whitespace
+            # entry's `exit 1` only kills the $() subshell, so propagate it here.
+            obj="$(entry "$k")" || exit 1
+            inc="${inc:+$inc,}${obj}"
+          done
+          echo "matrix={\"include\":[$inc]}" >> "$GITHUB_OUTPUT"
+
   package:
     name: package (${{ matrix.os }})
+    needs: setup
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            container: ubuntu:20.04
-            sidecar: rust/target/release/meeting-server
-            installer_glob: dist/linux/*.AppImage
-          - os: macos-latest
-            sidecar: rust/target/release/meeting-server
-            installer_glob: dist/macos/*.dmg
-          - os: windows-latest
-            sidecar: rust/target/release/meeting-server.exe
-            installer_glob: dist/windows/*.exe
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
 
     steps:
       # ── Bootstrap the bare ubuntu:20.04 container (matches qt-ci.yml) ─────────
