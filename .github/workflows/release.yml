@@ -189,8 +189,8 @@ jobs:
 
       # Cache build-appimage.sh's tool dir so the from-source FFmpeg is built
       # once (~8 min), not every release. The script skips the build when
-      # dist/linux/.tools/ffmpeg-*-install/lib/libavcodec.so already exists; the
-      # key busts when the script (its ffmpeg version/flags) changes.
+      # dist/linux/.tools/ffmpeg-*-install/bin/ffmpeg already exists; the key
+      # busts when the script (its ffmpeg version/flags) changes.
       - name: Cache Linux build tools (FFmpeg + linuxdeploy)
         if: runner.os == 'Linux'
         uses: actions/cache@v4
@@ -198,8 +198,17 @@ jobs:
           path: dist/linux/.tools
           # Keyed on the FFmpeg version (bump the suffix to force a rebuild), not
           # the script hash — so unrelated build-appimage.sh edits don't trigger
-          # an ~8-min FFmpeg rebuild.
-          key: linux-tools-${{ runner.arch }}-ffmpeg6.1.1-v1
+          # an ~8-min FFmpeg rebuild. v2: now also builds the `ffmpeg` CLI.
+          key: linux-tools-${{ runner.arch }}-ffmpeg6.1.1-v2
+
+      # Same idea for the macOS from-source ffmpeg CLI (build-app.sh): cache the
+      # static LGPL build so it isn't rebuilt every (10x-billed) macOS run.
+      - name: Cache macOS build tools (FFmpeg)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: dist/macos/.tools
+          key: macos-tools-${{ runner.arch }}-ffmpeg6.1.1-v2
 
       # ── Build the installer with the existing per-OS packaging recipe ─────────
       - name: Package macOS (.dmg, ad-hoc signed)

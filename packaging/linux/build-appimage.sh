@@ -123,7 +123,12 @@ rm -f "$QT_PREFIX/plugins/multimedia/libgstreamermediaplugin.so"
 # recordings). Cached across runs by the workflow (dist/linux/.tools).
 FF_VER="6.1.1"
 ff_prefix="$TOOLS/ffmpeg-$FF_VER-install"
-if [[ ! -f "$ff_prefix/lib/libavcodec.so" ]]; then
+# We also build the `ffmpeg` CLI (not just the libs): mixed recording (mic +
+# system) shells out to it, and the sidecar locates it next to its own binary,
+# so it must ship in usr/bin. `--disable-ffplay --disable-ffprobe` keeps only the
+# `ffmpeg` program (ffplay would drag in SDL); it links the shared libav* we
+# stage below. Cache guard keys on the program now, not just the libs.
+if [[ ! -x "$ff_prefix/bin/ffmpeg" ]]; then
     echo "→ building LGPL FFmpeg $FF_VER from source (first run; then cached)…"
     ff_tar="$TOOLS/ffmpeg-$FF_VER.tar.xz"
     [[ -f "$ff_tar" ]] || curl -fL --retry 3 -o "$ff_tar" \
@@ -135,7 +140,8 @@ if [[ ! -f "$ff_prefix/lib/libavcodec.so" ]]; then
         cd "$ff_src"
         ./configure --prefix="$ff_prefix" \
             --enable-shared --disable-static \
-            --disable-programs --disable-doc --disable-debug --disable-x86asm
+            --disable-ffplay --disable-ffprobe \
+            --disable-doc --disable-debug --disable-x86asm
         make -j"$(nproc)"
         make install
     )
@@ -143,6 +149,13 @@ fi
 mkdir -p "$APPDIR/usr/lib"
 cp -aP "$ff_prefix"/lib/libav*.so* "$ff_prefix"/lib/libsw*.so* "$APPDIR/usr/lib/"
 echo "→ staged FFmpeg $FF_VER: $(find "$APPDIR/usr/lib" -name 'libav*.so.*' -o -name 'libsw*.so.*' | grep -c .) versioned libs"
+
+# Ship the ffmpeg CLI beside the sidecar (usr/bin) for mixed recording. It
+# dynamically links the libav*.so staged above; at runtime the AppRun-hook's
+# LD_LIBRARY_PATH (= AppDir/usr/lib) is inherited by the sidecar and the ffmpeg
+# child it spawns, so the libs resolve without rpath patching.
+cp -aP "$ff_prefix/bin/ffmpeg" "$APPDIR/usr/bin/ffmpeg"
+echo "→ staged ffmpeg CLI: $APPDIR/usr/bin/ffmpeg"
 
 # linuxdeploy resolves NEEDED libs via the loader path; the staged ffmpeg libs
 # reference each other by soname (libavcodec → libavutil.so.58 …), so put the
@@ -172,7 +185,11 @@ if ! find "$APPDIR" -name 'libavcodec.so*' | grep -q .; then
     echo "Error: ffmpeg runtime libs (libavcodec) not bundled — player will fail to decode." >&2
     exit 1
 fi
-echo "→ QtMultimedia backend + ffmpeg libs bundled ✓"
+if [[ ! -x "$APPDIR/usr/bin/ffmpeg" ]]; then
+    echo "Error: ffmpeg CLI not bundled in usr/bin — mixed recording will fail." >&2
+    exit 1
+fi
+echo "→ QtMultimedia backend + ffmpeg libs + ffmpeg CLI bundled ✓"
 
 echo "✓ AppImage: $DIST/$OUTPUT"
 echo "  Both binaries (meeting-assistant-qt + meeting-server) live in"

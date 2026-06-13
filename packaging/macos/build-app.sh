@@ -23,6 +23,7 @@ QT_APP_DIR="$REPO/qt-app"
 BUILD_DIR="$QT_APP_DIR/build-macos-pkg"
 DIST="$REPO/dist/macos"
 STAGE="$DIST/stage"
+TOOLS="$DIST/.tools"
 
 PROFILE="release"
 MAKE_DMG=1
@@ -104,6 +105,40 @@ if ! find "$APP/Contents" -name 'libffmpegmediaplugin.dylib' | grep -q .; then
     exit 1
 fi
 echo "→ QtMultimedia backend bundled ✓"
+
+# ── 4d. Bundle the ffmpeg CLI beside the helper (Contents/MacOS) ──────────────
+# Mixed recording (mic via cpal + system via ScreenCaptureKit) shells out to the
+# `ffmpeg` CLI, which the sidecar locates next to its own binary. macdeployqt
+# bundles only the QtMultimedia *plugin* libs, not the executable, and a clean
+# Mac has no ffmpeg on PATH — so mixed mode would fail without this. We build a
+# STATIC LGPL ffmpeg from source (mirrors the Linux AppImage's LGPL-from-source
+# choice): static libav means a self-contained binary (no dylib/rpath juggling
+# inside the bundle), and it lands in Contents/MacOS BEFORE codesign-deep.sh so
+# the ad-hoc deep-sign covers it. arm64 needs no x86asm/nasm. Cached in .tools.
+FF_VER="6.1.1"
+ff_prefix="$TOOLS/ffmpeg-$FF_VER-install"
+if [[ ! -x "$ff_prefix/bin/ffmpeg" ]]; then
+    echo "→ building LGPL FFmpeg $FF_VER from source (first run; then cached)…"
+    mkdir -p "$TOOLS"
+    ff_tar="$TOOLS/ffmpeg-$FF_VER.tar.xz"
+    [[ -f "$ff_tar" ]] || curl -fL --retry 3 -o "$ff_tar" \
+        "https://ffmpeg.org/releases/ffmpeg-$FF_VER.tar.xz"
+    ff_src="$TOOLS/ffmpeg-$FF_VER-src"
+    rm -rf "$ff_src"; mkdir -p "$ff_src"
+    tar -xf "$ff_tar" -C "$ff_src" --strip-components=1
+    (
+        cd "$ff_src"
+        ./configure --prefix="$ff_prefix" \
+            --enable-static --disable-shared \
+            --disable-ffplay --disable-ffprobe \
+            --disable-doc --disable-debug --disable-x86asm
+        make -j"$(sysctl -n hw.ncpu)"
+        make install
+    )
+fi
+cp "$ff_prefix/bin/ffmpeg" "$APP/Contents/MacOS/ffmpeg"
+chmod +x "$APP/Contents/MacOS/ffmpeg"
+echo "→ ffmpeg CLI bundled: $APP/Contents/MacOS/ffmpeg"
 
 # ── 5. Ad-hoc deep-sign + verify (the spike's crux) ──────────────────────────
 "$SCRIPT_DIR/codesign-deep.sh" "$APP"
