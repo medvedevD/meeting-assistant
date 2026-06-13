@@ -24,9 +24,14 @@ file; the previous run is kept as `…log.prev`. Grab this on any failure:
 
 ## Install + open past the gate
 
-- **macOS** — open the `.dmg`, drag to Applications. First launch: right-click →
-  **Open** (ad-hoc/un-notarized; a double-click is blocked by Gatekeeper). See
-  `packaging/macos/HOMEBREW-SUNSET.md`.
+- **macOS** — preferred alpha path: download `meeting-assistant.rb` from the
+  GitHub Release, then run `brew install --cask ./meeting-assistant.rb`. The
+  local cask installs the release DMG and removes quarantine in `postflight`, so
+  the app launches without a manual `xattr` step. Direct DMG fallback: open the
+  `.dmg`, drag to Applications, then run
+  `xattr -dr com.apple.quarantine /Applications/MeetingAssistant.app`. This is
+  not a public distribution fix; the durable exit is Developer ID signing +
+  notarization/stapling. See `packaging/macos/HOMEBREW-SUNSET.md`.
 - **Windows** — run `MeetingAssistant-Setup-*.exe`. SmartScreen: **More info →
   Run anyway** (unsigned). See `packaging/windows/SMARTSCREEN.md`.
 - **Linux** — `chmod +x MeetingAssistant-*.AppImage` and run it. If it fails to
