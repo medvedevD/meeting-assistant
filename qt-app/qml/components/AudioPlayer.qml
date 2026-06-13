@@ -65,6 +65,15 @@ Item {
     // Stop audio if the card/screen goes away while playing.
     Component.onDestruction: player.stop()
 
+    // Release the open file handle on the recording. Windows refuses to delete a
+    // file another process holds open (ERROR_SHARING_VIOLATION), so callers must
+    // release the player before asking the sidecar to delete/remove the audio.
+    // Clearing player.source tears down the media and closes the handle.
+    function release() {
+        player.stop()
+        player.source = ""
+    }
+
     RowLayout {
         id: controls
         anchors.fill: parent

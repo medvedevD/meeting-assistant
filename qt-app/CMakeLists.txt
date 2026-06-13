@@ -94,6 +94,16 @@ endif()
 
 add_dependencies(meeting-assistant-qt gen_client_protocol)
 
+# Windows: build as a GUI-subsystem app (WinMain) so launching from Explorer
+# does not pop a console window next to the GUI. qt_add_executable does not set
+# this by default, leaving a console-subsystem binary. Qt's Qt6::EntryPoint
+# (linked via qt_standard_project_setup) provides the WinMain shim, so a plain
+# int main() stays. The sidecar's own console is suppressed separately with
+# CREATE_NO_WINDOW in SidecarManager. (No effect on macOS/Linux.)
+if(WIN32)
+    set_target_properties(meeting-assistant-qt PROPERTIES WIN32_EXECUTABLE TRUE)
+endif()
+
 target_include_directories(meeting-assistant-qt PRIVATE "${_gen_dir}")
 
 # SettingsStore is a QML singleton (decision #12): one shared server-settings

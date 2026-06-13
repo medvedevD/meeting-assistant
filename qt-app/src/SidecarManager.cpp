@@ -143,6 +143,20 @@ void SidecarManager::spawnProcess() {
     // May append --parent-pipe-fd and install the child-process modifier
     // (POSIX). Must run before setArguments so the fd arg is not dropped.
     setupParentDeathLinkage(m_proc, args);
+
+#ifdef Q_OS_WIN
+    // meeting-server is a console-subsystem binary. When the windowed GUI (which
+    // has no console of its own) spawns it, Windows allocates a separate console
+    // window for the child — a stray black terminal next to the app. Suppress it
+    // with CREATE_NO_WINDOW; stdout/stderr are still captured over the QProcess
+    // pipes (the file logger relays the sidecar's lines), and the binary stays
+    // console-capable when launched directly from a terminal for debugging.
+    m_proc.setCreateProcessArgumentsModifier(
+        [](QProcess::CreateProcessArguments *cpa) {
+            cpa->flags |= CREATE_NO_WINDOW;
+        });
+#endif
+
     m_proc.setProgram(path);
     m_proc.setArguments(args);
     m_proc.start();

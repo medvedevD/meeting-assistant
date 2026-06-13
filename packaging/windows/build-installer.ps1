@@ -98,6 +98,36 @@ $mmPlugin = Get-ChildItem -Path $Stage -Recurse -Filter "ffmpegmediaplugin.dll" 
 if (-not $mmPlugin) { throw "QtMultimedia ffmpeg plugin not bundled by windeployqt" }
 Write-Host "-> QtMultimedia backend bundled: $($mmPlugin.FullName)"
 
+# 3.5 Bundle the ffmpeg CLI beside the sidecar. Mixed recording (mic + system)
+#     shells out to `ffmpeg`, which the sidecar locates next to its own exe; on
+#     a clean machine it is not on PATH, so without this the installed app's
+#     mixed mode fails. windeployqt above only bundles the QtMultimedia *plugin*
+#     (for the in-card player), not the ffmpeg executable. A static LGPL build is
+#     self-contained (no sibling DLLs to clash with the Qt-bundled av*.dll); the
+#     LGPL notice already ships under licenses\. Cached in dist\windows\.tools so
+#     repeat builds don't re-download the ~190 MB archive.
+$ToolsDir  = Join-Path $Dist ".tools"
+$FfmpegExe = Join-Path $ToolsDir "ffmpeg.exe"
+if (-not (Test-Path $FfmpegExe)) {
+    Write-Host "-> downloading ffmpeg (LGPL static) ..."
+    New-Item -ItemType Directory -Force -Path $ToolsDir | Out-Null
+    $ffZip = Join-Path $ToolsDir "ffmpeg-lgpl.zip"
+    $oldPP = $ProgressPreference; $ProgressPreference = "SilentlyContinue"
+    Invoke-WebRequest -UseBasicParsing -OutFile $ffZip `
+        -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip"
+    $ProgressPreference = $oldPP
+    $ffTmp = Join-Path $ToolsDir "extract"
+    if (Test-Path $ffTmp) { Remove-Item -Recurse -Force $ffTmp }
+    Expand-Archive -Path $ffZip -DestinationPath $ffTmp -Force
+    $src = Get-ChildItem $ffTmp -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+    if (-not $src) { throw "ffmpeg.exe not found in downloaded archive" }
+    Copy-Item -Force $src.FullName $FfmpegExe
+    Remove-Item -Recurse -Force $ffTmp
+    Remove-Item -Force $ffZip
+}
+Copy-Item -Force $FfmpegExe (Join-Path $Stage "ffmpeg.exe")
+Write-Host "-> ffmpeg CLI bundled: $(Join-Path $Stage 'ffmpeg.exe')"
+
 # 4. Inno Setup -> installer.
 $Iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
 if (-not $Iscc) {

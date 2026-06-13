@@ -52,10 +52,15 @@ file; the previous run is kept as `…log.prev`. Grab this on any failure:
 
 | Step group | macOS arm64 | Windows x64 | Linux x86_64 |
 |---|---|---|---|
-| Install + launch | ☐ | ☐ | ☐ |
-| Sidecar Ready | ☐ | ☐ | ☐ |
-| Record → stop | ☐ | ☐ | ☐ |
-| Transcription | ☐ | ☐ | ☐ |
-| Protocol (own key) | ☐ | ☐ | ☐ |
-| Audio player | ☐ | ☐ | ☐ |
-| Settings persist | ☐ | ☐ | ☐ |
+| Install + launch | ☐ | ☑ | ☐ |
+| Sidecar Ready | ☐ | ☑ | ☐ |
+| Record → stop | ☐ | ☑ | ☐ |
+| Transcription | ☐ | ☑ | ☐ |
+| Protocol (own key) | ☐ | ☑ | ☐ |
+| Audio player | ☐ | ☑ | ☐ |
+| Settings persist | ☐ | ☑ | ☐ |
+
+Windows x64 verified 2026-06-13 (mic/system/mixed capture, transcription,
+protocol with own key, playback, settings persist across restart). Fixes landed this round: audio capture format
++ loopback, real mixed mix + bundled ffmpeg, no-console GUI launch, delete a
+recording held open by the player.

@@ -24,6 +24,32 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── Windows (Git Bash / MSYS / Cygwin): delegate to the PowerShell sibling ────
+# MSVC needs its cmd-based (vcvars) environment, which a bash shell can't carry,
+# and the Windows build uses .exe binary names + Qt-on-PATH at launch. run-qt.ps1
+# handles all of that, so on Windows just translate the flags and hand off. The
+# FIRST_RUN env var is inherited by the child automatically.
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        ps_args=()
+        for arg in "$@"; do
+            case "$arg" in
+                --debug)      ps_args+=("-Debug") ;;
+                --skip-rust)  ps_args+=("-SkipRust") ;;
+                --skip-build) ps_args+=("-SkipBuild") ;;
+                --no-run)     ps_args+=("-NoRun") ;;
+                --cuda)       ps_args+=("-Cuda") ;;
+                --vulkan)     ps_args+=("-Vulkan") ;;
+                *) echo "Unknown argument: $arg" >&2; exit 1 ;;
+            esac
+        done
+        exec powershell.exe -NoProfile -ExecutionPolicy Bypass \
+            -File "$(cygpath -w "$SCRIPT_DIR/run-qt.ps1")" \
+            ${ps_args[@]+"${ps_args[@]}"}
+        ;;
+esac
+
 RUST_DIR="$SCRIPT_DIR/rust"
 QT_APP_DIR="$SCRIPT_DIR/qt-app"
 BUILD_DIR="$QT_APP_DIR/build"

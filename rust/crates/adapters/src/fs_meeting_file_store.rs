@@ -2,6 +2,44 @@ use async_trait::async_trait;
 use meeting_core::{ports::MeetingFileStore, CoreError};
 use std::path::{Path, PathBuf};
 
+/// True for the Windows errors raised when a file is still held open by another
+/// process: ERROR_SHARING_VIOLATION (32) and ERROR_LOCK_VIOLATION (33). On other
+/// platforms an open file can be unlinked, so this is always false.
+#[cfg(windows)]
+fn is_sharing_violation(e: &std::io::Error) -> bool {
+    matches!(e.raw_os_error(), Some(32) | Some(33))
+}
+#[cfg(not(windows))]
+fn is_sharing_violation(_e: &std::io::Error) -> bool {
+    false
+}
+
+/// Run a filesystem removal, retrying briefly on a Windows sharing/lock
+/// violation. Deleting a recording can race the GUI's media player releasing its
+/// file handle (QtMultimedia tears playback down on a worker thread), which
+/// surfaces as ERROR_SHARING_VIOLATION; the handle is gone a moment later, so a
+/// short bounded retry turns a spurious failure into success. `NotFound` is
+/// treated as success (already gone); any other error fails fast.
+async fn remove_with_retry<F, Fut>(mut op: F) -> std::io::Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = std::io::Result<()>>,
+{
+    const ATTEMPTS: usize = 10;
+    const DELAY_MS: u64 = 100;
+    for attempt in 0..ATTEMPTS {
+        match op().await {
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) if is_sharing_violation(&e) && attempt + 1 < ATTEMPTS => {
+                tokio::time::sleep(std::time::Duration::from_millis(DELAY_MS)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
 pub struct FsMeetingFileStore;
 
 #[async_trait]
@@ -94,18 +132,75 @@ impl MeetingFileStore for FsMeetingFileStore {
     }
 
     async fn remove_file(&self, path: &Path) -> Result<(), CoreError> {
-        match tokio::fs::remove_file(path).await {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(CoreError::Storage(e.to_string())),
-        }
+        remove_with_retry(|| tokio::fs::remove_file(path))
+            .await
+            .map_err(|e| CoreError::Storage(e.to_string()))
     }
 
     async fn remove_dir_all(&self, dir: &Path) -> Result<(), CoreError> {
-        match tokio::fs::remove_dir_all(dir).await {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(CoreError::Storage(e.to_string())),
-        }
+        remove_with_retry(|| tokio::fs::remove_dir_all(dir))
+            .await
+            .map_err(|e| CoreError::Storage(e.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::io;
+
+    // Regression (Windows): a recording deletion that races the media player's
+    // handle release fails the first attempt(s) with ERROR_SHARING_VIOLATION (os
+    // error 32), then succeeds once the handle is gone. remove_with_retry must
+    // retry those and return Ok. The retry only engages on Windows, where
+    // is_sharing_violation recognises code 32/33.
+    #[cfg(windows)]
+    #[tokio::test(start_paused = true)]
+    async fn retries_sharing_violation_then_succeeds() {
+        let calls = Cell::new(0u32);
+        let res = remove_with_retry(|| {
+            let n = calls.get();
+            calls.set(n + 1);
+            async move {
+                if n < 2 {
+                    Err(io::Error::from_raw_os_error(32)) // ERROR_SHARING_VIOLATION
+                } else {
+                    Ok(())
+                }
+            }
+        })
+        .await;
+        assert!(res.is_ok(), "should succeed once the handle is released");
+        assert_eq!(calls.get(), 3, "two violations then a success");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test(start_paused = true)]
+    async fn gives_up_on_persistent_sharing_violation() {
+        let res = remove_with_retry(|| async { Err(io::Error::from_raw_os_error(32)) }).await;
+        assert!(res.is_err(), "a permanently held file still fails");
+    }
+
+    // A non-retryable error (e.g. permission denied) fails immediately without
+    // burning the retry budget — only file-in-use violations are retried.
+    #[tokio::test(start_paused = true)]
+    async fn does_not_retry_other_errors() {
+        let calls = Cell::new(0u32);
+        let res = remove_with_retry(|| {
+            calls.set(calls.get() + 1);
+            async { Err(io::Error::new(io::ErrorKind::PermissionDenied, "nope")) }
+        })
+        .await;
+        assert!(res.is_err());
+        assert_eq!(calls.get(), 1, "must not retry a non-sharing-violation error");
+    }
+
+    // NotFound means the target is already gone — treated as success.
+    #[tokio::test(start_paused = true)]
+    async fn not_found_is_success() {
+        let res =
+            remove_with_retry(|| async { Err(io::Error::from(io::ErrorKind::NotFound)) }).await;
+        assert!(res.is_ok());
     }
 }
