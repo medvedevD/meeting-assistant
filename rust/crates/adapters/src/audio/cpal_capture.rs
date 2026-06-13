@@ -9,6 +9,8 @@ use async_trait::async_trait;
 // (`parec`/`pactl`), so the cpal traits are unused there.
 #[cfg(not(target_os = "linux"))]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+#[cfg(not(target_os = "linux"))]
+use cpal::{FromSample, Sample, SampleFormat, SizedSample};
 use meeting_core::{
     ports::{
         AudioCapture, AudioDevice, AudioDeviceEnumerator, AudioDeviceList, AudioLevel,
@@ -518,6 +520,124 @@ fn record_mic(
     record_single(open_mic_by_name(&host, mic_name.as_deref())?, output_path, stop_rx)
 }
 
+// ── cpal sample-format handling (Windows/macOS) ───────────────────────────────
+//
+// A cpal input device's native format is not always f32 — WASAPI microphones
+// commonly capture as i16. `build_input_stream::<f32>` on such a device fails
+// with StreamConfigNotSupported, so capture/metering must open the stream with
+// the device's real format and convert each sample to f32.
+
+/// Convert one sample of any cpal format to `f32` (the float WAV sample type).
+#[cfg(not(target_os = "linux"))]
+fn to_f32<T>(s: T) -> f32
+where
+    f32: FromSample<T>,
+{
+    f32::from_sample(s)
+}
+
+/// A shared float-WAV writer handle the cpal data callback appends to.
+#[cfg(not(target_os = "linux"))]
+type WavWriterHandle = Arc<Mutex<hound::WavWriter<BufWriter<std::fs::File>>>>;
+
+/// Build a WAV-writing input stream for samples of type `T`, converting each to
+/// f32. Generic over the device's native format so non-f32 devices work too.
+#[cfg(not(target_os = "linux"))]
+fn wav_input_stream<T>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    writer: WavWriterHandle,
+) -> Result<cpal::Stream, cpal::BuildStreamError>
+where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    device.build_input_stream(
+        config,
+        move |data: &[T], _: &cpal::InputCallbackInfo| {
+            let mut w = writer.lock().unwrap();
+            for &s in data {
+                let _ = w.write_sample(to_f32(s));
+            }
+        },
+        |err| tracing::error!("cpal input stream error: {err}"),
+        None,
+    )
+}
+
+/// Open a WAV-writing input stream, dispatching on the device's runtime format.
+#[cfg(not(target_os = "linux"))]
+fn build_wav_input_stream(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    format: SampleFormat,
+    writer: WavWriterHandle,
+) -> Result<cpal::Stream, String> {
+    match format {
+        SampleFormat::I8 => wav_input_stream::<i8>(device, config, writer),
+        SampleFormat::I16 => wav_input_stream::<i16>(device, config, writer),
+        SampleFormat::I32 => wav_input_stream::<i32>(device, config, writer),
+        SampleFormat::I64 => wav_input_stream::<i64>(device, config, writer),
+        SampleFormat::U8 => wav_input_stream::<u8>(device, config, writer),
+        SampleFormat::U16 => wav_input_stream::<u16>(device, config, writer),
+        SampleFormat::U32 => wav_input_stream::<u32>(device, config, writer),
+        SampleFormat::U64 => wav_input_stream::<u64>(device, config, writer),
+        SampleFormat::F32 => wav_input_stream::<f32>(device, config, writer),
+        SampleFormat::F64 => wav_input_stream::<f64>(device, config, writer),
+        other => return Err(format!("unsupported input sample format: {other:?}")),
+    }
+    .map_err(|e| e.to_string())
+}
+
+/// Build a level-metering input stream for samples of type `T` (no file).
+#[cfg(not(target_os = "linux"))]
+fn meter_input_stream<T>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    level: Arc<AtomicU32>,
+) -> Result<cpal::Stream, cpal::BuildStreamError>
+where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    device.build_input_stream(
+        config,
+        move |data: &[T], _: &cpal::InputCallbackInfo| {
+            let peak = data
+                .iter()
+                .fold(0.0_f32, |m, &s| m.max(to_f32(s).abs()))
+                .min(1.0);
+            level.store(peak.to_bits(), Ordering::Relaxed);
+        },
+        |err| tracing::error!("cpal monitor stream error: {err}"),
+        None,
+    )
+}
+
+/// Open a level-metering input stream, dispatching on the device's format.
+#[cfg(not(target_os = "linux"))]
+fn build_meter_input_stream(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    format: SampleFormat,
+    level: Arc<AtomicU32>,
+) -> Result<cpal::Stream, String> {
+    match format {
+        SampleFormat::I8 => meter_input_stream::<i8>(device, config, level),
+        SampleFormat::I16 => meter_input_stream::<i16>(device, config, level),
+        SampleFormat::I32 => meter_input_stream::<i32>(device, config, level),
+        SampleFormat::I64 => meter_input_stream::<i64>(device, config, level),
+        SampleFormat::U8 => meter_input_stream::<u8>(device, config, level),
+        SampleFormat::U16 => meter_input_stream::<u16>(device, config, level),
+        SampleFormat::U32 => meter_input_stream::<u32>(device, config, level),
+        SampleFormat::U64 => meter_input_stream::<u64>(device, config, level),
+        SampleFormat::F32 => meter_input_stream::<f32>(device, config, level),
+        SampleFormat::F64 => meter_input_stream::<f64>(device, config, level),
+        other => return Err(format!("unsupported input sample format: {other:?}")),
+    }
+    .map_err(|e| e.to_string())
+}
+
 #[cfg(not(target_os = "linux"))]
 fn record_single(
     device: cpal::Device,
@@ -528,7 +648,16 @@ fn record_single(
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let config = device.default_input_config().map_err(|e| e.to_string())?;
+    // A microphone is opened as an input device, but the Windows System/Mixed
+    // legs open an *output* device for WASAPI loopback — which has no input
+    // config (`default_input_config` then returns StreamTypeNotSupported, i.e.
+    // "stream type is not supported by the device"). Fall back to the output
+    // (loopback) format so system-audio capture works.
+    let config = device
+        .default_input_config()
+        .or_else(|_| device.default_output_config())
+        .map_err(|e| e.to_string())?;
+    let sample_format = config.sample_format();
 
     let spec = hound::WavSpec {
         channels: config.channels(),
@@ -536,26 +665,19 @@ fn record_single(
         bits_per_sample: 32,
         sample_format: hound::SampleFormat::Float,
     };
+    let stream_config: cpal::StreamConfig = config.into();
 
     let file = std::fs::File::create(&output_path).map_err(|e| e.to_string())?;
     let writer = Arc::new(Mutex::new(
         hound::WavWriter::new(BufWriter::new(file), spec).map_err(|e| e.to_string())?,
     ));
 
+    // The device's native capture format is not always f32 (WASAPI mics are
+    // commonly i16). Building an f32 stream on a non-f32 device fails with
+    // StreamConfigNotSupported, so dispatch on the real format and convert each
+    // sample to f32 for the float WAV.
     let writer_cb = Arc::clone(&writer);
-    let stream = device
-        .build_input_stream(
-            &config.into(),
-            move |data: &[f32], _| {
-                let mut w = writer_cb.lock().unwrap();
-                for &s in data {
-                    let _ = w.write_sample(s);
-                }
-            },
-            |err| tracing::error!("cpal input stream error: {err}"),
-            None,
-        )
-        .map_err(|e| e.to_string())?;
+    let stream = build_wav_input_stream(&device, &stream_config, sample_format, writer_cb)?;
 
     stream.play().map_err(|e| e.to_string())?;
     let _ = stop_rx.recv();
@@ -773,25 +895,24 @@ pub(crate) fn build_mix_filter(echo_cancel: bool) -> String {
     }
 }
 
-/// macOS mic+system mix filter.
-///
-/// On macOS the system stream (ScreenCaptureKit) and the mic stream (cpal) run
-/// on **independent audio clocks** that drift apart over a long meeting — the
-/// risk section-05 calls out and the drift spike quantifies. Unlike the Linux
-/// path (mic + parec, same PulseAudio clock domain), a plain `amix` here would
-/// accumulate skew. So each input is first passed through
-/// `aresample=async=1`, which continuously stretches/squeezes the stream to
-/// its presentation timestamps — i.e. the *timestamp-align/resample* option
-/// from section-05, applied before mixing rather than punting to a
-/// bounded-drift caveat. `min_hard_comp=0.100` bounds any single correction so
-/// speech is not pitch-warped audibly.
+/// mic+system mix filter for backends whose two legs run on **independent audio
+/// clocks**: macOS (ScreenCaptureKit + cpal) and Windows (WASAPI loopback + cpal
+/// mic). Unlike the Linux path (both legs via `parec`, one PulseAudio clock), a
+/// plain `amix` would accumulate skew, and the two legs can also differ in
+/// sample rate and channel count (e.g. a mono mic + stereo loopback). So each
+/// input is passed through `aresample=async=1` — which continuously
+/// stretches/squeezes the stream to its presentation timestamps
+/// (`min_hard_comp=0.100` bounds a single correction so speech is not
+/// pitch-warped) — then `aformat` to a common rate/layout/format so `amix` and
+/// `anlms` receive matching inputs.
 ///
 /// In the AEC branch the system track is consumed twice (echo reference +
 /// final mix), so it is `asplit`; a filter-graph pad cannot be reused
 /// (unlike a raw input specifier such as `[1:a]`).
-#[cfg(target_os = "macos")]
-pub(crate) fn build_mix_filter_macos(echo_cancel: bool) -> String {
-    let resync = "aresample=async=1:min_hard_comp=0.100:first_pts=0";
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) fn build_mix_filter_resync(echo_cancel: bool) -> String {
+    let resync = "aresample=async=1:min_hard_comp=0.100:first_pts=0,\
+                  aformat=sample_rates=48000:channel_layouts=stereo:sample_fmts=fltp";
     if echo_cancel {
         format!(
             "[0:a]{resync}[mic_r];\
@@ -810,10 +931,37 @@ pub(crate) fn build_mix_filter_macos(echo_cancel: bool) -> String {
     }
 }
 
+/// Resolve which `ffmpeg` to run, given a directory to look in first.
+///
+/// Packaged apps ship an `ffmpeg` next to the `meeting-server` binary so mixed
+/// recording is self-contained; a dev build (or a system install) has none
+/// there and falls back to `ffmpeg` on PATH. Pure (takes the dir) so it is
+/// testable without a real install layout.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+fn resolve_ffmpeg_in(dir: &Path) -> std::ffi::OsString {
+    let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+    let bundled = dir.join(name);
+    if bundled.is_file() {
+        bundled.into_os_string()
+    } else {
+        std::ffi::OsString::from("ffmpeg")
+    }
+}
+
+/// The `ffmpeg` program to spawn: bundled-next-to-the-sidecar if present, else
+/// PATH. See [`resolve_ffmpeg_in`].
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+fn ffmpeg_program() -> std::ffi::OsString {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(resolve_ffmpeg_in))
+        .unwrap_or_else(|| std::ffi::OsString::from("ffmpeg"))
+}
+
 /// Mix two WAV files into one using ffmpeg with the given `-filter_complex`.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn ffmpeg_mix(a: &PathBuf, b: &PathBuf, out: &PathBuf, filter: &str) -> Result<(), String> {
-    let status = std::process::Command::new("ffmpeg")
+    let status = std::process::Command::new(ffmpeg_program())
         .args([
             "-y",
             "-i",
@@ -838,7 +986,7 @@ fn ffmpeg_mix(a: &PathBuf, b: &PathBuf, out: &PathBuf, filter: &str) -> Result<(
 
 /// macOS mixed capture: mic via cpal + system via ScreenCaptureKit, each to a
 /// separate temp WAV, then mixed by ffmpeg with clock-drift compensation
-/// (`build_mix_filter_macos`). The two backends run on independent audio
+/// (`build_mix_filter_resync`). The two backends run on independent audio
 /// clocks; the resample-to-PTS in the mix filter aligns them.
 #[cfg(target_os = "macos")]
 fn record_mixed(
@@ -885,7 +1033,7 @@ fn record_mixed(
         &mic_tmp,
         &sys_tmp,
         &output_path,
-        &build_mix_filter_macos(echo_cancel),
+        &build_mix_filter_resync(echo_cancel),
     )?;
 
     let _ = std::fs::remove_file(&mic_tmp);
@@ -905,17 +1053,80 @@ fn record_mixed(
     Err("mixed audio capture is not yet supported on this platform".to_string())
 }
 
+/// Windows mixed capture: mic via cpal (input device) + system via WASAPI
+/// loopback (output device), each to a separate temp WAV, then mixed by ffmpeg.
+///
+/// WASAPI loopback records only what is *rendered* to the output endpoint — it
+/// does NOT include the microphone — so a single loopback stream cannot be the
+/// mix (the earlier one-device approach silently dropped the mic). The two legs
+/// run on independent device clocks and can differ in rate/channels, so they go
+/// through [`build_mix_filter_resync`] (resample-to-PTS + rate/layout
+/// normalisation) like the macOS path. Requires the `ffmpeg` CLI on PATH.
 #[cfg(target_os = "windows")]
 fn record_mixed(
     output_path: PathBuf,
     stop_rx: std::sync::mpsc::Receiver<()>,
-    _echo_cancel: bool,
-    _mic_name: Option<String>,
+    echo_cancel: bool,
+    mic_name: Option<String>,
     sys_name: Option<String>,
 ) -> Result<(), String> {
-    // On Windows, WASAPI loopback captures both mic and system via the output device.
-    let device = open_output_by_name(sys_name.as_deref())?;
-    record_single(device, output_path, stop_rx)
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+
+    let mic_tmp = output_path.with_extension("mic_tmp.wav");
+    let sys_tmp = output_path.with_extension("sys_tmp.wav");
+
+    let (mic_stop_tx, mic_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
+    let (sys_stop_tx, sys_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
+
+    let mic_path = mic_tmp.clone();
+    let sys_path = sys_tmp.clone();
+
+    let mic_thread = thread::spawn(move || {
+        let host = cpal::default_host();
+        let mic = open_mic_by_name(&host, mic_name.as_deref())?;
+        record_single(mic, mic_path, mic_stop_rx)
+    });
+    let sys_thread = thread::spawn(move || {
+        let dev = open_output_by_name(sys_name.as_deref())?;
+        record_single(dev, sys_path, sys_stop_rx)
+    });
+
+    let _ = stop_rx.recv();
+    let _ = mic_stop_tx.send(());
+    let _ = sys_stop_tx.send(());
+
+    let mic_res = mic_thread
+        .join()
+        .map_err(|_| "mic thread panicked".to_string())?;
+    let sys_res = sys_thread
+        .join()
+        .map_err(|_| "sys thread panicked".to_string())?;
+
+    // Clean up temp files even if a leg failed or the mix can't run.
+    let cleanup = || {
+        let _ = std::fs::remove_file(&mic_tmp);
+        let _ = std::fs::remove_file(&sys_tmp);
+    };
+
+    if let Err(e) = mic_res {
+        cleanup();
+        return Err(e);
+    }
+    if let Err(e) = sys_res {
+        cleanup();
+        return Err(e);
+    }
+
+    let mix = ffmpeg_mix(
+        &mic_tmp,
+        &sys_tmp,
+        &output_path,
+        &build_mix_filter_resync(echo_cancel),
+    );
+    cleanup();
+    mix
 }
 
 // ── Device enumeration ────────────────────────────────────────────────────────
@@ -1144,6 +1355,9 @@ impl AudioLevelMonitor for CpalLevelMonitor {
 }
 
 /// Update `level` with the peak amplitude of `samples` (max |s|, clamped 0–1).
+/// Linux meters parec's f32 byte stream; cpal (Windows/macOS) computes the peak
+/// inline in [`meter_input_stream`] after converting the device's native format.
+#[cfg(target_os = "linux")]
 fn publish_peak(level: &AtomicU32, samples: &[f32]) {
     let peak = samples
         .iter()
@@ -1269,16 +1483,17 @@ fn monitor_cpal(
     level: Arc<AtomicU32>,
     stop_rx: std::sync::mpsc::Receiver<()>,
 ) -> Result<(), String> {
-    let config = device.default_input_config().map_err(|e| e.to_string())?;
-    let level_cb = Arc::clone(&level);
-    let stream = device
-        .build_input_stream(
-            &config.into(),
-            move |data: &[f32], _| publish_peak(&level_cb, data),
-            |err| tracing::error!("cpal monitor stream error: {err}"),
-            None,
-        )
+    // Output devices (Windows system-audio loopback) have no input config; fall
+    // back to their output format, same as the recording path.
+    let config = device
+        .default_input_config()
+        .or_else(|_| device.default_output_config())
         .map_err(|e| e.to_string())?;
+    let sample_format = config.sample_format();
+    let stream_config: cpal::StreamConfig = config.into();
+    let level_cb = Arc::clone(&level);
+    // Match the device's real format (often i16 on WASAPI), converting to f32.
+    let stream = build_meter_input_stream(&device, &stream_config, sample_format, level_cb)?;
     stream.play().map_err(|e| e.to_string())?;
     let _ = stop_rx.recv();
     drop(stream);
@@ -1457,6 +1672,25 @@ Source #2
         assert_eq!(find_monitor_device(&names), Some(0));
     }
 
+    // ── cpal sample-format conversion (Windows/macOS capture) ─────────────────
+    //
+    // Regression for "The requested stream type is not supported by the device":
+    // WASAPI mics commonly capture as i16, but capture built an f32 stream
+    // unconditionally (StreamConfigNotSupported). The fix opens the stream in the
+    // device's real format and converts each sample to f32 — verify that
+    // conversion maps integer full-scale to ~±1.0 so the recorded WAV is sane.
+    // (The end-to-end "i16 device records audio" contract is hardware-bound and
+    // covered by the per-OS smoke checklist.)
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn to_f32_maps_sample_formats_to_unit_range() {
+        assert!((to_f32(i16::MAX) - 1.0).abs() < 1e-3, "i16::MAX -> ~1.0");
+        assert!((to_f32(i16::MIN) + 1.0).abs() < 1e-3, "i16::MIN -> ~-1.0");
+        assert!(to_f32(0_i16).abs() < 1e-6, "0i16 -> 0.0");
+        assert!((to_f32(i32::MAX) - 1.0).abs() < 1e-3, "i32::MAX -> ~1.0");
+        assert!((to_f32(1.0_f32) - 1.0).abs() < 1e-9, "f32 is identity");
+    }
+
     // ── Hardware integration tests ────────────────────────────────────────────
 
     #[tokio::test]
@@ -1549,19 +1783,28 @@ Source #2
         );
     }
 
-    // ── build_mix_filter_macos — pure function (clock-drift compensation) ────
+    // ── build_mix_filter_resync — pure function (independent-clock mix) ──────
+    // macOS (SCK+cpal) and Windows (WASAPI loopback + cpal mic) both mix two
+    // independent-clock legs through this filter, so it is exercised on both.
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     #[test]
-    fn macos_mix_filter_resamples_both_inputs_to_pts() {
+    fn resync_mix_filter_resamples_both_inputs_to_pts() {
         for aec in [false, true] {
-            let f = build_mix_filter_macos(aec);
+            let f = build_mix_filter_resync(aec);
             // Both the mic ([0:a]) and system ([1:a]) inputs must be
             // resampled-to-PTS to absorb the independent-clock drift.
             assert_eq!(
                 f.matches("aresample=async=1").count(),
                 2,
                 "both inputs must be drift-compensated: {f}"
+            );
+            // And normalised to a common rate/layout so amix/anlms get matching
+            // inputs (a mono mic + stereo loopback would otherwise fail to mix).
+            assert_eq!(
+                f.matches("channel_layouts=stereo").count(),
+                2,
+                "both inputs must be normalised to stereo: {f}"
             );
             assert!(f.contains("highpass=f=80"), "missing mic cleanup: {f}");
             assert!(f.contains("dynaudnorm"), "missing mic normaliser: {f}");
@@ -1572,10 +1815,10 @@ Source #2
         }
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     #[test]
-    fn macos_mix_filter_aec_splits_system_pad_for_reuse() {
-        let f = build_mix_filter_macos(true);
+    fn resync_mix_filter_aec_splits_system_pad_for_reuse() {
+        let f = build_mix_filter_resync(true);
         assert!(
             f.contains("anlms=order=512"),
             "AEC must subtract system: {f}"
@@ -1588,12 +1831,29 @@ Source #2
         );
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     #[test]
-    fn macos_mix_filter_no_aec_has_no_anlms_or_split() {
-        let f = build_mix_filter_macos(false);
+    fn resync_mix_filter_no_aec_has_no_anlms_or_split() {
+        let f = build_mix_filter_resync(false);
         assert!(!f.contains("anlms"), "non-AEC must not echo-cancel: {f}");
         assert!(!f.contains("asplit"), "non-AEC needs no pad split: {f}");
+    }
+
+    // ── ffmpeg discovery — bundled-next-to-sidecar wins over PATH ─────────────
+    // Packaged apps ship ffmpeg beside the sidecar so mixed recording is
+    // self-contained; an empty dir falls back to PATH.
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    #[test]
+    fn resolve_ffmpeg_prefers_bundled_then_path() {
+        use std::ffi::OsStr;
+        let dir = tempfile::tempdir().unwrap();
+        // No bundled binary → fall back to PATH ("ffmpeg").
+        assert_eq!(resolve_ffmpeg_in(dir.path()), OsStr::new("ffmpeg"));
+        // A bundled ffmpeg(.exe) next to the sidecar is preferred.
+        let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+        let bundled = dir.path().join(name);
+        std::fs::write(&bundled, b"").unwrap();
+        assert_eq!(resolve_ffmpeg_in(dir.path()), bundled.into_os_string());
     }
 
     // ── 60-min mic↔system clock-drift spike (section-05) ────────────────────
