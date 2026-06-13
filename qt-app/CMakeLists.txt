@@ -9,7 +9,11 @@ project(meeting-assistant-qt
 # in 6.7. We deliberately use plain C++ Qt + a SEPARATE Rust sidecar binary —
 # there is NO cxx-qt / qt-build-utils here (the boundary is loopback HTTP, not
 # FFI).
-find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2 Network)
+# Multimedia powers the in-card recording player (MediaPlayer/AudioOutput). On
+# Qt 6.7 it loads the ffmpeg media backend at runtime — the platform deploy
+# tools bundle it, but its plugins must be covered by macOS signing/notarization
+# and the AppImage/Windows layouts (see packaging/).
+find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2 Network Multimedia)
 
 qt_standard_project_setup(REQUIRES 6.7)
 
@@ -55,9 +59,11 @@ endif()
 # ── GUI executable ───────────────────────────────────────────────────────────
 qt_add_executable(meeting-assistant-qt
     src/main.cpp
+    src/Logging.h          src/Logging.cpp
     src/SidecarManager.h   src/SidecarManager.cpp
     src/ApiClient.h        src/ApiClient.cpp
     src/JobPoller.h        src/JobPoller.cpp
+    src/PathUtils.h
     "${_gen_header}")
 
 # macOS: ship as MeetingAssistant.app. The Info.plist carries the
@@ -106,15 +112,29 @@ set_source_files_properties(qml/theme/Theme.qml PROPERTIES
 set_source_files_properties(qml/ActiveJobsStore.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE)
 
+# AudioDevicesStore is the shared capture-device catalogue singleton: one
+# `GET /api/v1/audio/devices` cache for the recording screen and settings panel.
+set_source_files_properties(qml/AudioDevicesStore.qml PROPERTIES
+    QT_QML_SINGLETON_TYPE TRUE)
+
+option(MA_ENABLE_QML_CACHEGEN
+    "Compile QML into cachegen C++ files for the GUI target" ON)
+set(_qml_cachegen_args)
+if(NOT MA_ENABLE_QML_CACHEGEN)
+    list(APPEND _qml_cachegen_args NO_CACHEGEN)
+endif()
+
 qt_add_qml_module(meeting-assistant-qt
     URI MeetingAssistant
     VERSION 1.0
+    ${_qml_cachegen_args}
     QML_FILES
         qml/Main.qml
         qml/AppShell.qml
         qml/MeetingStore.qml
         qml/SettingsStore.qml
         qml/ActiveJobsStore.qml
+        qml/AudioDevicesStore.qml
         qml/Request.qml
         qml/screens/MeetingListScreen.qml
         qml/screens/WelcomeScreen.qml
@@ -136,6 +156,7 @@ qt_add_qml_module(meeting-assistant-qt
         qml/components/MeetySpinBox.qml
         qml/components/MeetySwitch.qml
         qml/components/MeetySegmented.qml
+        qml/components/MeetyLevelMeter.qml
         qml/components/MeetyTag.qml
         qml/components/MeetyCard.qml
         qml/components/MeetySectionLabel.qml
@@ -147,6 +168,7 @@ qt_add_qml_module(meeting-assistant-qt
         qml/components/MeetyToolTip.qml
         qml/components/MeetyIcon.qml
         qml/components/MeetyIconButton.qml
+        qml/components/AudioPlayer.qml
         qml/components/MeetyWordmark.qml
         qml/components/SettingsRow.qml
         qml/components/ProtocolDocument.qml
@@ -188,7 +210,8 @@ endif()
 target_link_libraries(meeting-assistant-qt PRIVATE
     Qt6::Quick
     Qt6::QuickControls2
-    Qt6::Network)
+    Qt6::Network
+    Qt6::Multimedia)
 
 if(WIN32)
     # Job Object APIs for kernel-enforced sidecar reaping on parent death.

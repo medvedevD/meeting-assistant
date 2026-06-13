@@ -17,7 +17,13 @@ mod template_bundle;
 pub use template_bundle::TemplateBundle;
 
 mod audio_capture;
-pub use audio_capture::{AudioCapture, CaptureSource};
+pub use audio_capture::{AudioCapture, CaptureSource, CaptureSpec, ResolvedDevices};
+
+mod audio_devices;
+pub use audio_devices::{AudioDevice, AudioDeviceEnumerator, AudioDeviceList};
+
+mod audio_monitor;
+pub use audio_monitor::{AudioLevel, AudioLevelMonitor};
 
 mod meeting_file_store;
 pub use meeting_file_store::MeetingFileStore;

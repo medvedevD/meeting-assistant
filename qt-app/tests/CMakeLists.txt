@@ -52,6 +52,7 @@ set_source_files_properties(
 qt_add_qml_module(tst_pipeline_progress
     URI MeetingAssistant
     VERSION 1.0
+    NO_CACHEGEN
     OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/pipeline_qml/MeetingAssistant"
     QML_FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/PipelineProgress.qml"
@@ -91,6 +92,7 @@ set_source_files_properties(
 qt_add_qml_module(tst_protocol_document
     URI MeetingAssistant
     VERSION 1.0
+    NO_CACHEGEN
     OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/protocol_qml/MeetingAssistant"
     QML_FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/ProtocolDocument.qml"
@@ -127,6 +129,7 @@ set_source_files_properties(
 qt_add_qml_module(tst_meety_menu
     URI MeetingAssistant
     VERSION 1.0
+    NO_CACHEGEN
     OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/menu_qml/MeetingAssistant"
     QML_FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyMenu.qml"

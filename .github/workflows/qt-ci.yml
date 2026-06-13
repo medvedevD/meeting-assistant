@@ -7,8 +7,6 @@ name: Qt CI
 
 on:
   push:
-    branches:
-      - feat/qt-migration
   pull_request:
   workflow_dispatch:
 
@@ -25,11 +23,19 @@ jobs:
     name: build+test (${{ matrix.os }})
     needs: protocol-version
     runs-on: ${{ matrix.os }}
+    # Build the Linux AppImage inside an Ubuntu 20.04 container (glibc 2.31 —
+    # the oldest base the Qt 6.7 prebuilt binaries support). AppImage bundles
+    # system libs but never glibc itself, so the floor is whatever the build
+    # host ships: building on ubuntu-latest (glibc 2.39) made the artifact
+    # require GLIBC_2.38 and fail on Astra Linux / Debian 11/12. macOS and
+    # Windows entries set no container (empty string == run directly on host).
+    container: ${{ matrix.container }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
+            container: ubuntu:20.04
             sidecar: rust/target/release/meeting-server
           - os: macos-latest
             sidecar: rust/target/release/meeting-server
@@ -37,34 +43,113 @@ jobs:
             sidecar: rust/target/release/meeting-server.exe
 
     steps:
+      # The ubuntu:20.04 container is bare and runs as root: install the base
+      # toolchain (git is needed for checkout, build-essential for the compiler)
+      # before anything else, and pull a modern cmake since focal ships 3.16
+      # but qt-app requires >= 3.21.
+      - name: Bootstrap build container (Linux)
+        if: matrix.container != ''
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git build-essential file sudo \
+            desktop-file-utils python3 python3-pip
+          ln -sf /usr/bin/python3 /usr/local/bin/python
+          python3 -m pip install --upgrade "cmake>=3.21" ninja
+
       - uses: actions/checkout@v4
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Capture the hosted-runner image version into a step output. The runner
+      # sets ImageVersion/ImageOS as OS-level env vars, but the `env` expression
+      # context only exposes workflow-defined vars, so `${{ env.ImageVersion }}`
+      # silently resolves to an empty string and never busts the cache. Reading
+      # it through the shell here is the only reliable way to feed it into the
+      # cache key below. Falls back to "0" inside the Linux container, where the
+      # var may be unset (its toolchain is pinned to the ubuntu:20.04 image).
+      - name: Compute Rust cache key suffix
+        id: rust_cache_key
+        shell: bash
+        run: echo "img=${ImageOS:-$RUNNER_OS}-${ImageVersion:-0}" >> "$GITHUB_OUTPUT"
+
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+          # Key on the runner image version so the cache is invalidated when
+          # the hosted image updates. Without this, a refreshed windows-latest
+          # image (e.g. Visual Studio 17 2022 -> 18 2026) restores a stale
+          # whisper-rs-sys cmake build dir and fails with a generator mismatch.
+          key: ${{ steps.rust_cache_key.outputs.img }}
 
       # cpal needs ALSA headers; reqwest's default-tls needs OpenSSL; the Qt
       # offscreen platform plugin still dlopens a handful of system libs.
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
+        # Runs as root inside the ubuntu:20.04 container, so no sudo. With
+        # APPIMAGE_EXTRACT_AND_RUN=1 (set below) linuxdeploy needs no FUSE, but
+        # libfuse2 is the focal package name should anything fall back to it.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            clang libclang-dev \
             libasound2-dev pkg-config libssl-dev \
             libgl1-mesa-dev libegl1 libxkbcommon-dev libxkbcommon-x11-0 \
-            libfontconfig1 libfreetype6 libdbus-1-3 \
+            libfontconfig1 libfreetype6 libdbus-1-dev \
             libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
-            libxcb-render-util0 libxcb-xinerama0 libxcb-cursor0
+            libxcb-render-util0 libxcb-xinerama0 libxcb-cursor0 \
+            libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 \
+            libxcb-glx0 libxcb-render0 libxcb-xkb1 libxcb-util1 \
+            libfuse2
 
-      - name: Install Qt 6.7
+      # macOS/Windows run directly on the hosted image, where install-qt-action
+      # can use its bundled toolcache Python.
+      - name: Install Qt 6.7 (host runners)
+        if: matrix.container == ''
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.7.3'
+          # qtmultimedia is NOT in the default desktop set; the in-card audio
+          # player's find_package(Qt6 … Multimedia) fails without it.
+          modules: qtmultimedia
           cache: true
+
+      # Inside the ubuntu:20.04 container install-qt-action can't be used: its
+      # toolcache CPython needs GLIBC_2.34+ and won't start. The container's own
+      # Python 3.8 is too old for a modern aqtinstall (and old aqtinstall builds
+      # that run on 3.8 predate Qt 6.7.3 and fail to resolve qt_base). Use uv to
+      # fetch a self-contained CPython (python-build-standalone, glibc 2.17+, so
+      # it runs fine on focal) and drive a current aqtinstall through it. Export
+      # QT_ROOT_DIR/PATH so the rest of the job matches the host-runner action.
+      - name: Install uv (Linux container)
+        if: matrix.container != ''
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Qt 6.7 (Linux container)
+        if: matrix.container != ''
+        shell: bash
+        run: |
+          qtdir="$RUNNER_TEMP/Qt"
+          # Qt 6.7 renamed the Linux desktop arch gcc_64 -> linux_gcc_64.
+          # -m qtmultimedia: the audio player needs Qt6::Multimedia, which the
+          # base desktop archive omits.
+          uvx --python 3.12 --from aqtinstall aqt \
+            install-qt linux desktop 6.7.3 linux_gcc_64 -m qtmultimedia -O "$qtdir"
+          # The on-disk folder name has varied across aqt/Qt versions
+          # (gcc_64 vs linux_gcc_64); resolve it from qmake rather than guess.
+          qmake="$(find "$qtdir/6.7.3" -path '*/bin/qmake' | head -n1)"
+          root="$(dirname "$(dirname "$qmake")")"
+          test -x "$root/bin/qmake"
+          echo "QT_ROOT_DIR=$root" >> "$GITHUB_ENV"
+          echo "$root/bin" >> "$GITHUB_PATH"
+          # install-qt-action exports this on host runners; the AppImage step's
+          # linuxdeploy-plugin-qt needs it to resolve Qt libs (e.g.
+          # libQt6QuickControls2.so.6) that aren't on the default loader path.
+          echo "LD_LIBRARY_PATH=$root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
       # ── Build the Rust sidecar (the artefact the Qt smoke spawns) ──────────
       - name: Build meeting-server (release)
@@ -88,11 +173,20 @@ jobs:
       - name: Configure qt-app (tests on)
         shell: bash
         run: |
-          cmake -S qt-app -B qt-app/build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DMA_BUILD_TESTS=ON \
-            -DMA_SMOKE_SIDECAR="$PWD/${{ matrix.sidecar }}" \
+          cmake_args=(
+            -S qt-app
+            -B qt-app/build
+            -DCMAKE_BUILD_TYPE=Release
+            -DMA_BUILD_TESTS=ON
+            -DMA_ENABLE_QML_CACHEGEN=OFF
+            -DMEETING_SERVER_BIN="$PWD/${{ matrix.sidecar }}"
+            -DMA_SMOKE_SIDECAR="$PWD/${{ matrix.sidecar }}"
             -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          )
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            cmake_args+=(-DMA_MACOS_APP_BUNDLE=ON)
+          fi
+          cmake "${cmake_args[@]}"
 
       - name: Build qt-app (GUI + tst_smoke)
         shell: bash
@@ -102,3 +196,94 @@ jobs:
       - name: Offscreen Qt smoke
         shell: bash
         run: ctest --test-dir qt-app/build -C Release --output-on-failure
+
+      # ── Downloadable app artifact (GUI + sidecar + Qt runtime + notices) ──
+      - name: Build downloadable app artifact
+        shell: bash
+        run: |
+          rm -rf dist/artifact
+
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            appdir="$PWD/dist/AppDir"
+            tools="$PWD/dist/.tools"
+            icon="$appdir/usr/share/icons/hicolor/512x512/apps/meeting-assistant.png"
+
+            rm -rf "$appdir"
+            cmake --install qt-app/build --config Release --prefix "$appdir/usr"
+            mkdir -p "$(dirname "$icon")" "$tools" dist/artifact
+            cp packaging/assets/meeting-assistant.png "$icon"
+
+            arch="$(uname -m)"
+            linuxdeploy="$tools/linuxdeploy-$arch.AppImage"
+            linuxdeploy_qt="$tools/linuxdeploy-plugin-qt-$arch.AppImage"
+            if [[ ! -x "$linuxdeploy" ]]; then
+              curl -fL --retry 3 -o "$linuxdeploy" \
+                "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$arch.AppImage"
+              chmod +x "$linuxdeploy"
+            fi
+            if [[ ! -x "$linuxdeploy_qt" ]]; then
+              curl -fL --retry 3 -o "$linuxdeploy_qt" \
+                "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-$arch.AppImage"
+              chmod +x "$linuxdeploy_qt"
+            fi
+
+            export APPIMAGE_EXTRACT_AND_RUN=1
+            export QML_SOURCES_PATHS="$PWD/qt-app/qml"
+            export PATH="$QT_ROOT_DIR/bin:$PATH"
+            export OUTPUT="MeetingAssistant-$arch.AppImage"
+
+            (
+              cd dist
+              "$linuxdeploy" --appdir "$appdir" --plugin qt \
+                --desktop-file "$appdir/usr/share/applications/meeting-assistant.desktop" \
+                --icon-file "$icon" \
+                --output appimage
+            )
+            mv "dist/$OUTPUT" dist/artifact/
+          else
+            cmake --install qt-app/build --config Release --prefix dist/artifact
+
+            if [[ "$RUNNER_OS" == "macOS" ]]; then
+              "$QT_ROOT_DIR/bin/macdeployqt" \
+                dist/artifact/MeetingAssistant.app \
+                -qmldir=qt-app/qml \
+                -verbose=1
+              rm -rf dist/artifact/MeetingAssistant.app/Contents/PlugIns/sqldrivers
+            elif [[ "$RUNNER_OS" == "Windows" ]]; then
+              "$QT_ROOT_DIR/bin/windeployqt.exe" \
+                --release \
+                --qmldir qt-app/qml \
+                --compiler-runtime \
+                --no-translations \
+                dist/artifact/meeting-assistant-qt.exe
+            fi
+          fi
+
+      - name: Verify downloadable app artifact
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            test -f dist/artifact/MeetingAssistant-$(uname -m).AppImage
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            test -x dist/artifact/MeetingAssistant.app/Contents/MacOS/MeetingAssistant
+            test -x dist/artifact/MeetingAssistant.app/Contents/MacOS/meeting-server
+            test -d dist/artifact/MeetingAssistant.app/Contents/Frameworks
+          elif [[ "$RUNNER_OS" == "Windows" ]]; then
+            test -f dist/artifact/meeting-assistant-qt.exe
+            test -f dist/artifact/meeting-server.exe
+            test -f dist/artifact/Qt6Core.dll
+            first_line="$(
+              env -u HOME timeout 10s \
+                dist/artifact/meeting-server.exe --parent-pid 0 \
+                | head -n 1
+            )"
+            grep -q '"ready":true' <<< "$first_line"
+          fi
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: meeting-assistant-${{ runner.os }}-${{ runner.arch }}
+          path: dist/artifact
+          if-no-files-found: error
+          retention-days: 14

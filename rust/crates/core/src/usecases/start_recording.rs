@@ -1,6 +1,6 @@
 use crate::{
     entities::{now_unix, Meeting},
-    ports::{AudioCapture, CaptureSource, MeetingRepo},
+    ports::{AudioCapture, CaptureSpec, MeetingRepo, ResolvedDevices},
     CoreError,
 };
 use std::path::{Path, PathBuf};
@@ -8,17 +8,18 @@ use std::sync::Arc;
 
 /// Start a new recording session.
 ///
-/// Creates a `Meeting` record immediately, starts the audio capture session with the
-/// requested `source`, and persists the meeting to the repo.
-/// Returns the saved `Meeting` so the caller has the session id.
+/// Creates a `Meeting` record immediately, starts the audio capture session for
+/// `spec` (source + echo-cancel + optional pinned devices), and persists the
+/// meeting to the repo. Returns the saved `Meeting` together with the
+/// [`ResolvedDevices`] actually opened, so the caller can show the user exactly
+/// which mic / system source is live.
 pub async fn start_recording(
     capture: Arc<dyn AudioCapture>,
     meeting_repo: Arc<dyn MeetingRepo>,
     meetings_dir: &Path,
     name: Option<String>,
-    source: CaptureSource,
-    echo_cancel: bool,
-) -> Result<Meeting, CoreError> {
+    spec: CaptureSpec,
+) -> Result<(Meeting, ResolvedDevices), CoreError> {
     let ts = now_unix();
     let meeting_name = name.unwrap_or_else(|| chrono_name(ts));
     let meeting = Meeting::new(meeting_name, PathBuf::new());
@@ -41,11 +42,11 @@ pub async fn start_recording(
         ..meeting
     };
 
-    capture
-        .start_session(&meeting.id, &audio_path, source, echo_cancel)
+    let resolved = capture
+        .start_session(&meeting.id, &audio_path, spec)
         .await?;
     meeting_repo.save(&meeting).await?;
-    Ok(meeting)
+    Ok((meeting, resolved))
 }
 
 fn slug_from_meeting(ts: i64, uuid_prefix: &str) -> String {
@@ -83,6 +84,7 @@ fn epoch_to_ymd(days: i64) -> (i64, i64, i64) {
 mod tests {
     use super::*;
     use crate::fakes::{FakeAudioCapture, FakeMeetingRepo};
+    use crate::ports::CaptureSource;
     use std::path::PathBuf;
 
     fn meetings_dir() -> PathBuf {
@@ -100,11 +102,14 @@ mod tests {
             Arc::clone(&repo) as Arc<dyn MeetingRepo>,
             &meetings_dir(),
             name.map(str::to_string),
-            source,
-            false,
+            CaptureSpec {
+                source,
+                ..Default::default()
+            },
         )
         .await
         .unwrap()
+        .0
     }
 
     #[tokio::test]
@@ -258,8 +263,11 @@ mod tests {
             Arc::clone(&repo) as Arc<dyn MeetingRepo>,
             &meetings_dir(),
             None,
-            CaptureSource::Mixed,
-            true,
+            CaptureSpec {
+                source: CaptureSource::Mixed,
+                echo_cancel: true,
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -277,13 +285,66 @@ mod tests {
             Arc::clone(&repo) as Arc<dyn MeetingRepo>,
             &meetings_dir(),
             None,
-            CaptureSource::Mixed,
-            false,
+            CaptureSpec {
+                source: CaptureSource::Mixed,
+                echo_cancel: false,
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
 
         assert_eq!(capture.last_echo_cancel(), Some(false));
+    }
+
+    // ── device selection ──────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn pinned_devices_are_passed_to_capture_adapter() {
+        let capture = FakeAudioCapture::new();
+        let repo = FakeMeetingRepo::new();
+
+        start_recording(
+            Arc::clone(&capture) as Arc<dyn AudioCapture>,
+            Arc::clone(&repo) as Arc<dyn MeetingRepo>,
+            &meetings_dir(),
+            None,
+            CaptureSpec {
+                source: CaptureSource::Mixed,
+                echo_cancel: false,
+                mic_device: Some("USB Mic".into()),
+                system_device: Some("Speakers.monitor".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let spec = capture.last_spec().unwrap();
+        assert_eq!(spec.mic_device.as_deref(), Some("USB Mic"));
+        assert_eq!(spec.system_device.as_deref(), Some("Speakers.monitor"));
+    }
+
+    #[tokio::test]
+    async fn resolved_devices_are_returned_to_caller() {
+        let capture = FakeAudioCapture::new();
+        let repo = FakeMeetingRepo::new();
+
+        let (_meeting, resolved) = start_recording(
+            Arc::clone(&capture) as Arc<dyn AudioCapture>,
+            Arc::clone(&repo) as Arc<dyn MeetingRepo>,
+            &meetings_dir(),
+            None,
+            CaptureSpec {
+                source: CaptureSource::Mic,
+                mic_device: Some("USB Mic".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(resolved.mic.as_deref(), Some("USB Mic"));
+        assert_eq!(resolved.system, None);
     }
 
     // ── slug format ───────────────────────────────────────────────────────────

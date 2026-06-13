@@ -5,11 +5,18 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use async_trait::async_trait;
+// cpal drives capture on Windows/macOS; Linux goes entirely through PulseAudio
+// (`parec`/`pactl`), so the cpal traits are unused there.
+#[cfg(not(target_os = "linux"))]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use meeting_core::{
-    ports::{AudioCapture, CaptureSource},
+    ports::{
+        AudioCapture, AudioDevice, AudioDeviceEnumerator, AudioDeviceList, AudioLevel,
+        AudioLevelMonitor, CaptureSource, CaptureSpec, ResolvedDevices,
+    },
     CoreError,
 };
+use std::sync::atomic::{AtomicU32, Ordering};
 
 struct Session {
     stop_tx: std::sync::mpsc::SyncSender<()>,
@@ -40,11 +47,11 @@ impl AudioCapture for CpalAudioCapture {
         &self,
         session_id: &str,
         output_path: &Path,
-        source: CaptureSource,
-        echo_cancel: bool,
-    ) -> Result<(), CoreError> {
+        spec: CaptureSpec,
+    ) -> Result<ResolvedDevices, CoreError> {
         let path = output_path.to_path_buf();
         let id = session_id.to_string();
+        let source = spec.source;
 
         // macOS: surface a denied Screen-Recording grant at *start* time
         // (clear, actionable, with a Settings deep link) instead of only when
@@ -55,11 +62,21 @@ impl AudioCapture for CpalAudioCapture {
             super::sck_capture::preflight().map_err(CoreError::Recording)?;
         }
 
+        // Resolve devices *now* so a missing device or pinned-but-unplugged
+        // selection surfaces here (and the resolved labels go back to the UI),
+        // not deep inside the capture thread.
+        let resolved = resolve_devices(&spec).map_err(CoreError::Recording)?;
+
+        let mic_name = resolved.mic_id.clone();
+        let sys_name = resolved.sys_id.clone();
+
         let (stop_tx, stop_rx) = std::sync::mpsc::sync_channel(1);
 
         let thread = thread::Builder::new()
             .name(format!("cpal-recording-{id}"))
-            .spawn(move || record(path, stop_rx, source, echo_cancel))
+            .spawn(move || {
+                record(path, stop_rx, source, spec.echo_cancel, mic_name, sys_name)
+            })
             .map_err(|e| CoreError::Recording(e.to_string()))?;
 
         self.sessions
@@ -67,7 +84,7 @@ impl AudioCapture for CpalAudioCapture {
             .unwrap()
             .insert(session_id.to_string(), Session { stop_tx, thread });
 
-        Ok(())
+        Ok(resolved.devices)
     }
 
     async fn stop_session(&self, session_id: &str) -> Result<(), CoreError> {
@@ -103,9 +120,289 @@ pub(crate) fn find_monitor_device(names: &[impl AsRef<str>]) -> Option<usize> {
     names.iter().position(|n| n.as_ref().contains(".monitor"))
 }
 
+/// A resolved capture leg: the platform id used to open the device and the
+/// human label shown to the user.
+struct ResolvedLeg {
+    id: String,
+    label: String,
+}
+
+#[cfg(not(target_os = "linux"))]
 fn default_mic(host: &cpal::Host) -> Result<cpal::Device, String> {
     host.default_input_device()
         .ok_or_else(|| "no default input device available".to_string())
+}
+
+/// Open the input device whose `Device::name()` equals `name`, falling back to
+/// the OS default if `name` is `None` or no longer present. Used in the capture
+/// thread; resolution (and the user-visible label) already happened at start.
+#[cfg(not(target_os = "linux"))]
+fn open_mic_by_name(host: &cpal::Host, name: Option<&str>) -> Result<cpal::Device, String> {
+    if let Some(want) = name {
+        if let Ok(devices) = host.input_devices() {
+            for d in devices {
+                if d.name().ok().as_deref() == Some(want) {
+                    return Ok(d);
+                }
+            }
+        }
+    }
+    default_mic(host)
+}
+
+// ── Device resolution (synchronous, at session start) ─────────────────────────
+
+/// What [`resolve_devices`] produced: the labels for the UI plus the ids the
+/// capture thread opens.
+struct Resolved {
+    devices: ResolvedDevices,
+    mic_id: Option<String>,
+    sys_id: Option<String>,
+}
+
+/// Resolve a [`CaptureSpec`] into the concrete devices that will be opened. A
+/// pinned device that has vanished resolves back to the OS default, so the UI
+/// always reflects what is truly live (ADR-1). Per-leg `None` means that leg is
+/// not part of the source.
+fn resolve_devices(spec: &CaptureSpec) -> Result<Resolved, String> {
+    let mic = match spec.source {
+        CaptureSource::Mic | CaptureSource::Mixed => {
+            Some(resolve_mic_leg(spec.mic_device.as_deref())?)
+        }
+        CaptureSource::System => None,
+    };
+    let system = match spec.source {
+        CaptureSource::System | CaptureSource::Mixed => {
+            Some(resolve_system_leg(spec.system_device.as_deref())?)
+        }
+        CaptureSource::Mic => None,
+    };
+    Ok(Resolved {
+        devices: ResolvedDevices {
+            mic: mic.as_ref().map(|l| l.label.clone()),
+            system: system.as_ref().map(|l| l.label.clone()),
+        },
+        mic_id: mic.map(|l| l.id),
+        sys_id: system.map(|l| l.id),
+    })
+}
+
+// ── Mic-leg resolution ────────────────────────────────────────────────────────
+//
+// Linux goes through PulseAudio/PipeWire (clean named sources + descriptions),
+// the same backend the system leg uses. cpal's default Linux host is ALSA, which
+// enumerates dozens of pseudo-PCMs (`null`, `pulse`, `hw:`, `plughw:`, `front:`,
+// `dsnoop:` …) — junk no user should have to scroll through. Windows/macOS keep
+// cpal, whose device names are already user-friendly.
+
+#[cfg(target_os = "linux")]
+fn resolve_mic_leg(requested: Option<&str>) -> Result<ResolvedLeg, String> {
+    let sources = pulse_input_sources();
+    if let Some(want) = requested {
+        if let Some(s) = sources.iter().find(|s| s.name == want) {
+            return Ok(ResolvedLeg {
+                id: s.name.clone(),
+                label: s.label(),
+            });
+        }
+    }
+    if let Some(def) = default_pulse_source() {
+        let label = sources
+            .iter()
+            .find(|s| s.name == def)
+            .map(|s| s.label())
+            .unwrap_or_else(|| def.clone());
+        return Ok(ResolvedLeg { id: def, label });
+    }
+    sources
+        .into_iter()
+        .next()
+        .map(|s| ResolvedLeg {
+            label: s.label(),
+            id: s.name,
+        })
+        .ok_or_else(|| "no input source available".to_string())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn resolve_mic_leg(requested: Option<&str>) -> Result<ResolvedLeg, String> {
+    let host = cpal::default_host();
+    if let Some(want) = requested {
+        if let Ok(devices) = host.input_devices() {
+            for d in devices {
+                if d.name().ok().as_deref() == Some(want) {
+                    return Ok(ResolvedLeg {
+                        id: want.to_string(),
+                        label: want.to_string(),
+                    });
+                }
+            }
+        }
+    }
+    let name = default_mic(&host)?.name().map_err(|e| e.to_string())?;
+    Ok(ResolvedLeg {
+        id: name.clone(),
+        label: name,
+    })
+}
+
+// ── System-leg resolution ─────────────────────────────────────────────────────
+
+/// macOS has no per-output handle (ScreenCaptureKit captures the aggregate mix).
+#[cfg(target_os = "macos")]
+fn resolve_system_leg(_requested: Option<&str>) -> Result<ResolvedLeg, String> {
+    Ok(ResolvedLeg {
+        id: String::new(),
+        label: "System audio".to_string(),
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn resolve_system_leg(requested: Option<&str>) -> Result<ResolvedLeg, String> {
+    let monitors = pulse_monitor_sources();
+    if let Some(want) = requested {
+        if let Some(s) = monitors.iter().find(|s| s.name == want) {
+            return Ok(ResolvedLeg {
+                id: s.name.clone(),
+                label: s.label(),
+            });
+        }
+    }
+    let def = find_pulseaudio_monitor()?;
+    let label = monitors
+        .iter()
+        .find(|s| s.name == def)
+        .map(|s| s.label())
+        .unwrap_or_else(|| def.clone());
+    Ok(ResolvedLeg { id: def, label })
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_system_leg(requested: Option<&str>) -> Result<ResolvedLeg, String> {
+    if let Some(want) = requested {
+        let wasapi = cpal::host_from_id(cpal::HostId::Wasapi)
+            .map_err(|e| format!("WASAPI host unavailable: {e}"))?;
+        if let Ok(devices) = wasapi.output_devices() {
+            for d in devices {
+                if d.name().ok().as_deref() == Some(want) {
+                    return Ok(ResolvedLeg {
+                        id: want.to_string(),
+                        label: want.to_string(),
+                    });
+                }
+            }
+        }
+    }
+    let name = find_wasapi_output_device()?
+        .name()
+        .map_err(|e| e.to_string())?;
+    Ok(ResolvedLeg {
+        id: name.clone(),
+        label: name,
+    })
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+fn resolve_system_leg(_requested: Option<&str>) -> Result<ResolvedLeg, String> {
+    Err("system audio capture is not yet supported on this platform".to_string())
+}
+
+// ── PulseAudio/PipeWire source enumeration (Linux) ────────────────────────────
+
+/// One PulseAudio/PipeWire source parsed from `pactl list sources`.
+#[cfg(target_os = "linux")]
+struct PulseSource {
+    name: String,
+    description: Option<String>,
+    monitor: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl PulseSource {
+    /// Human label: the `Description` if present, else the raw node name.
+    fn label(&self) -> String {
+        self.description.clone().unwrap_or_else(|| self.name.clone())
+    }
+}
+
+/// Parse `pactl list sources` (verbose) into sources with their descriptions and
+/// monitor flag. Pure — unit-tested without audio hardware.
+#[cfg(target_os = "linux")]
+fn parse_pulse_sources(text: &str) -> Vec<PulseSource> {
+    let mut out = Vec::new();
+    let mut name: Option<String> = None;
+    let mut description: Option<String> = None;
+    let mut monitor = false;
+
+    let mut flush = |name: &mut Option<String>,
+                     description: &mut Option<String>,
+                     monitor: &mut bool| {
+        if let Some(n) = name.take() {
+            let is_monitor = *monitor || n.contains(".monitor");
+            out.push(PulseSource {
+                name: n,
+                description: description.take(),
+                monitor: is_monitor,
+            });
+        }
+        *monitor = false;
+    };
+
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with("Source #") {
+            flush(&mut name, &mut description, &mut monitor);
+        } else if let Some(rest) = t.strip_prefix("Name: ") {
+            name = Some(rest.trim().to_string());
+        } else if let Some(rest) = t.strip_prefix("Description: ") {
+            description = Some(rest.trim().to_string());
+        } else if let Some(rest) = t.strip_prefix("Monitor of Sink: ") {
+            if rest.trim() != "n/a" {
+                monitor = true;
+            }
+        }
+    }
+    flush(&mut name, &mut description, &mut monitor);
+    out
+}
+
+#[cfg(target_os = "linux")]
+fn pulse_sources() -> Vec<PulseSource> {
+    // Force the C locale: `pactl list sources` translates its field keys
+    // (`Description:` → `Описание:` …) under a non-English locale, which would
+    // make the parser match nothing. Descriptions stay human-readable.
+    match std::process::Command::new("pactl")
+        .env("LC_ALL", "C")
+        .args(["list", "sources"])
+        .output()
+    {
+        Ok(o) => parse_pulse_sources(&String::from_utf8_lossy(&o.stdout)),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Real microphone inputs (everything that is not a monitor/loopback source).
+#[cfg(target_os = "linux")]
+fn pulse_input_sources() -> Vec<PulseSource> {
+    pulse_sources().into_iter().filter(|s| !s.monitor).collect()
+}
+
+/// System-audio loopback sources (`.monitor` of each sink).
+#[cfg(target_os = "linux")]
+fn pulse_monitor_sources() -> Vec<PulseSource> {
+    pulse_sources().into_iter().filter(|s| s.monitor).collect()
+}
+
+/// The current default PulseAudio/PipeWire input source name, if any.
+#[cfg(target_os = "linux")]
+fn default_pulse_source() -> Option<String> {
+    std::process::Command::new("pactl")
+        .args(["get-default-source"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// Ask PulseAudio/PipeWire for the monitor source of the current default sink.
@@ -162,6 +459,23 @@ fn find_wasapi_output_device() -> Result<cpal::Device, String> {
         .ok_or_else(|| "no default output device for WASAPI loopback".to_string())
 }
 
+/// Open the WASAPI output (loopback) device by name, falling back to default.
+#[cfg(target_os = "windows")]
+fn open_output_by_name(name: Option<&str>) -> Result<cpal::Device, String> {
+    if let Some(want) = name {
+        let wasapi = cpal::host_from_id(cpal::HostId::Wasapi)
+            .map_err(|e| format!("WASAPI host unavailable: {e}"))?;
+        if let Ok(devices) = wasapi.output_devices() {
+            for d in devices {
+                if d.name().ok().as_deref() == Some(want) {
+                    return Ok(d);
+                }
+            }
+        }
+    }
+    find_wasapi_output_device()
+}
+
 // ── Recording threads ─────────────────────────────────────────────────────────
 
 fn record(
@@ -169,17 +483,42 @@ fn record(
     stop_rx: std::sync::mpsc::Receiver<()>,
     source: CaptureSource,
     echo_cancel: bool,
+    mic_name: Option<String>,
+    sys_name: Option<String>,
 ) -> Result<(), String> {
     match source {
-        CaptureSource::Mic => {
-            let host = cpal::default_host();
-            record_single(default_mic(&host)?, output_path, stop_rx)
-        }
-        CaptureSource::System => record_system(output_path, stop_rx),
-        CaptureSource::Mixed => record_mixed(output_path, stop_rx, echo_cancel),
+        CaptureSource::Mic => record_mic(output_path, stop_rx, mic_name),
+        CaptureSource::System => record_system(output_path, stop_rx, sys_name),
+        CaptureSource::Mixed => record_mixed(output_path, stop_rx, echo_cancel, mic_name, sys_name),
     }
 }
 
+/// Capture a single microphone. Linux uses PulseAudio/PipeWire (`parec`) for the
+/// same clean device set the picker shows; other platforms use cpal.
+#[cfg(target_os = "linux")]
+fn record_mic(
+    output_path: PathBuf,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+    mic_name: Option<String>,
+) -> Result<(), String> {
+    let source = match mic_name {
+        Some(name) => name,
+        None => default_pulse_source().ok_or_else(|| "no default input source".to_string())?,
+    };
+    record_parec(&source, output_path, stop_rx)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn record_mic(
+    output_path: PathBuf,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+    mic_name: Option<String>,
+) -> Result<(), String> {
+    let host = cpal::default_host();
+    record_single(open_mic_by_name(&host, mic_name.as_deref())?, output_path, stop_rx)
+}
+
+#[cfg(not(target_os = "linux"))]
 fn record_single(
     device: cpal::Device,
     output_path: PathBuf,
@@ -236,8 +575,12 @@ fn record_single(
 fn record_system(
     output_path: PathBuf,
     stop_rx: std::sync::mpsc::Receiver<()>,
+    sys_name: Option<String>,
 ) -> Result<(), String> {
-    let monitor = find_pulseaudio_monitor()?;
+    let monitor = match sys_name {
+        Some(name) => name,
+        None => find_pulseaudio_monitor()?,
+    };
     record_parec(&monitor, output_path, stop_rx)
 }
 
@@ -245,16 +588,19 @@ fn record_system(
 fn record_system(
     output_path: PathBuf,
     stop_rx: std::sync::mpsc::Receiver<()>,
+    sys_name: Option<String>,
 ) -> Result<(), String> {
-    let device = find_wasapi_output_device()?;
+    let device = open_output_by_name(sys_name.as_deref())?;
     record_single(device, output_path, stop_rx)
 }
 
 /// macOS system audio via ScreenCaptureKit (audio-only). See `sck_capture`.
+/// `sys_name` is ignored — SCK captures the aggregate mix, not a chosen output.
 #[cfg(target_os = "macos")]
 fn record_system(
     output_path: PathBuf,
     stop_rx: std::sync::mpsc::Receiver<()>,
+    _sys_name: Option<String>,
 ) -> Result<(), String> {
     super::sck_capture::record_system(output_path, stop_rx)
 }
@@ -263,6 +609,7 @@ fn record_system(
 fn record_system(
     _output_path: PathBuf,
     _stop_rx: std::sync::mpsc::Receiver<()>,
+    _sys_name: Option<String>,
 ) -> Result<(), String> {
     Err("system audio capture is not yet supported on this platform".to_string())
 }
@@ -352,12 +699,21 @@ fn record_mixed(
     output_path: PathBuf,
     stop_rx: std::sync::mpsc::Receiver<()>,
     echo_cancel: bool,
+    mic_name: Option<String>,
+    sys_name: Option<String>,
 ) -> Result<(), String> {
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let monitor = find_pulseaudio_monitor()?;
+    let monitor = match sys_name {
+        Some(name) => name,
+        None => find_pulseaudio_monitor()?,
+    };
+    let mic_source = match mic_name {
+        Some(name) => name,
+        None => default_pulse_source().ok_or_else(|| "no default input source".to_string())?,
+    };
 
     let mic_tmp = output_path.with_extension("mic_tmp.wav");
     let sys_tmp = output_path.with_extension("sys_tmp.wav");
@@ -369,11 +725,9 @@ fn record_mixed(
     let sys_path = sys_tmp.clone();
     let monitor_name = monitor.clone();
 
-    let mic_thread = thread::spawn(move || {
-        let host = cpal::default_host();
-        let mic = default_mic(&host)?;
-        record_single(mic, mic_path, mic_stop_rx)
-    });
+    // Both legs now go through parec (same 48 kHz PulseAudio clock domain), so
+    // the separate temp files exist only to keep two writers off one lock.
+    let mic_thread = thread::spawn(move || record_parec(&mic_source, mic_path, mic_stop_rx));
 
     let sys_thread = thread::spawn(move || record_parec(&monitor_name, sys_path, sys_stop_rx));
 
@@ -491,6 +845,8 @@ fn record_mixed(
     output_path: PathBuf,
     stop_rx: std::sync::mpsc::Receiver<()>,
     echo_cancel: bool,
+    mic_name: Option<String>,
+    _sys_name: Option<String>,
 ) -> Result<(), String> {
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -507,7 +863,7 @@ fn record_mixed(
 
     let mic_thread = thread::spawn(move || {
         let host = cpal::default_host();
-        let mic = default_mic(&host)?;
+        let mic = open_mic_by_name(&host, mic_name.as_deref())?;
         record_single(mic, mic_path, mic_stop_rx)
     });
 
@@ -543,6 +899,8 @@ fn record_mixed(
     _output_path: PathBuf,
     _stop_rx: std::sync::mpsc::Receiver<()>,
     _echo_cancel: bool,
+    _mic_name: Option<String>,
+    _sys_name: Option<String>,
 ) -> Result<(), String> {
     Err("mixed audio capture is not yet supported on this platform".to_string())
 }
@@ -552,10 +910,380 @@ fn record_mixed(
     output_path: PathBuf,
     stop_rx: std::sync::mpsc::Receiver<()>,
     _echo_cancel: bool,
+    _mic_name: Option<String>,
+    sys_name: Option<String>,
 ) -> Result<(), String> {
     // On Windows, WASAPI loopback captures both mic and system via the output device.
-    let device = find_wasapi_output_device()?;
+    let device = open_output_by_name(sys_name.as_deref())?;
     record_single(device, output_path, stop_rx)
+}
+
+// ── Device enumeration ────────────────────────────────────────────────────────
+
+/// Lists capture devices via cpal (mics) and the platform loopback backend
+/// (system outputs). Stateless; the same name strings it returns are what
+/// [`CpalAudioCapture`] resolves against at session start.
+#[derive(Default)]
+pub struct CpalAudioDevices;
+
+impl CpalAudioDevices {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl AudioDeviceEnumerator for CpalAudioDevices {
+    async fn list_devices(&self) -> Result<AudioDeviceList, CoreError> {
+        // pactl/cpal enumeration is blocking (a subprocess on Linux); keep it
+        // off the async runtime's worker threads.
+        tokio::task::spawn_blocking(|| {
+            Ok(AudioDeviceList {
+                input: enumerate_inputs(),
+                output: enumerate_outputs(),
+                system_selectable: SYSTEM_SELECTABLE,
+            })
+        })
+        .await
+        .map_err(|e| CoreError::Recording(format!("device enumeration failed: {e}")))?
+    }
+}
+
+/// Microphone inputs. Linux uses PulseAudio/PipeWire sources (clean named
+/// devices with descriptions) instead of cpal's noisy ALSA PCM list.
+#[cfg(target_os = "linux")]
+fn enumerate_inputs() -> Vec<AudioDevice> {
+    let default = default_pulse_source();
+    pulse_input_sources()
+        .into_iter()
+        .map(|s| AudioDevice {
+            is_default: default.as_deref() == Some(s.name.as_str()),
+            label: s.label(),
+            id: s.name,
+        })
+        .collect()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn enumerate_inputs() -> Vec<AudioDevice> {
+    let host = cpal::default_host();
+    let default = host.default_input_device().and_then(|d| d.name().ok());
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    if let Ok(devices) = host.input_devices() {
+        for d in devices {
+            if let Ok(name) = d.name() {
+                if seen.insert(name.clone()) {
+                    out.push(AudioDevice {
+                        is_default: default.as_deref() == Some(name.as_str()),
+                        label: name.clone(),
+                        id: name,
+                    });
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(target_os = "linux")]
+const SYSTEM_SELECTABLE: bool = true;
+#[cfg(target_os = "windows")]
+const SYSTEM_SELECTABLE: bool = true;
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+const SYSTEM_SELECTABLE: bool = false;
+
+#[cfg(target_os = "linux")]
+fn enumerate_outputs() -> Vec<AudioDevice> {
+    let default = find_pulseaudio_monitor().ok();
+    pulse_monitor_sources()
+        .into_iter()
+        .map(|s| AudioDevice {
+            is_default: default.as_deref() == Some(s.name.as_str()),
+            label: s.label(),
+            id: s.name,
+        })
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn enumerate_outputs() -> Vec<AudioDevice> {
+    let wasapi = match cpal::host_from_id(cpal::HostId::Wasapi) {
+        Ok(h) => h,
+        Err(_) => return Vec::new(),
+    };
+    let default = wasapi.default_output_device().and_then(|d| d.name().ok());
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    if let Ok(devices) = wasapi.output_devices() {
+        for d in devices {
+            if let Ok(name) = d.name() {
+                if seen.insert(name.clone()) {
+                    out.push(AudioDevice {
+                        is_default: default.as_deref() == Some(name.as_str()),
+                        label: name.clone(),
+                        id: name,
+                    });
+                }
+            }
+        }
+    }
+    out
+}
+
+/// macOS (ScreenCaptureKit) has no per-output handle; no selectable list.
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+fn enumerate_outputs() -> Vec<AudioDevice> {
+    Vec::new()
+}
+
+// ── Live level monitor (device test) ──────────────────────────────────────────
+
+struct MonitorSession {
+    stop_tx: std::sync::mpsc::SyncSender<()>,
+    thread: thread::JoinHandle<Result<(), String>>,
+    /// Latest linear peak (0.0–1.0) as `f32` bits, updated by the capture thread.
+    level: Arc<AtomicU32>,
+}
+
+/// Captures one device without writing a file and publishes a live input level
+/// for the settings device-test meter. Reuses the same device resolution and
+/// capture backends as recording (PulseAudio on Linux, cpal elsewhere).
+#[derive(Default)]
+pub struct CpalLevelMonitor {
+    sessions: Mutex<HashMap<String, MonitorSession>>,
+}
+
+impl CpalLevelMonitor {
+    pub fn new() -> Self {
+        Self {
+            sessions: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl AudioLevelMonitor for CpalLevelMonitor {
+    async fn start(&self, id: &str, spec: CaptureSpec) -> Result<ResolvedDevices, CoreError> {
+        if matches!(spec.source, CaptureSource::Mixed) {
+            return Err(CoreError::Recording(
+                "level test captures one source at a time".to_string(),
+            ));
+        }
+
+        #[cfg(target_os = "macos")]
+        if matches!(spec.source, CaptureSource::System) {
+            return Err(CoreError::Recording(
+                "system-audio test is not available on macOS".to_string(),
+            ));
+        }
+
+        let resolved = resolve_devices(&spec).map_err(CoreError::Recording)?;
+        let source = spec.source;
+        let mic_id = resolved.mic_id.clone();
+        let sys_id = resolved.sys_id.clone();
+
+        let level = Arc::new(AtomicU32::new(0));
+        let level_thread = Arc::clone(&level);
+        let (stop_tx, stop_rx) = std::sync::mpsc::sync_channel(1);
+
+        let thread = thread::Builder::new()
+            .name(format!("audio-monitor-{id}"))
+            .spawn(move || match source {
+                CaptureSource::Mic => run_mic_monitor(mic_id, level_thread, stop_rx),
+                CaptureSource::System => run_system_monitor(sys_id, level_thread, stop_rx),
+                CaptureSource::Mixed => unreachable!("guarded above"),
+            })
+            .map_err(|e| CoreError::Recording(e.to_string()))?;
+
+        // Replace any previous session under the same id (e.g. switching legs).
+        if let Some(prev) = self.sessions.lock().unwrap().insert(
+            id.to_string(),
+            MonitorSession {
+                stop_tx,
+                thread,
+                level,
+            },
+        ) {
+            let _ = prev.stop_tx.send(());
+            let _ = prev.thread.join();
+        }
+
+        Ok(resolved.devices)
+    }
+
+    fn level(&self, id: &str) -> Option<AudioLevel> {
+        let sessions = self.sessions.lock().unwrap();
+        let s = sessions.get(id)?;
+        let peak = f32::from_bits(s.level.load(Ordering::Relaxed)).clamp(0.0, 1.0);
+        let peak_db = if peak > 0.0 {
+            (20.0 * peak.log10()).max(-60.0)
+        } else {
+            -60.0
+        };
+        Some(AudioLevel {
+            level: peak,
+            peak_db,
+        })
+    }
+
+    async fn stop(&self, id: &str) -> Result<(), CoreError> {
+        let session = self
+            .sessions
+            .lock()
+            .unwrap()
+            .remove(id)
+            .ok_or_else(|| CoreError::Recording(format!("monitor not found: {id}")))?;
+        let _ = session.stop_tx.send(());
+        session
+            .thread
+            .join()
+            .map_err(|_| CoreError::Recording("monitor thread panicked".into()))?
+            .map_err(CoreError::Recording)
+    }
+}
+
+/// Update `level` with the peak amplitude of `samples` (max |s|, clamped 0–1).
+fn publish_peak(level: &AtomicU32, samples: &[f32]) {
+    let peak = samples
+        .iter()
+        .fold(0.0_f32, |m, &s| m.max(s.abs()))
+        .min(1.0);
+    level.store(peak.to_bits(), Ordering::Relaxed);
+}
+
+// ── Mic monitor ───────────────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
+fn run_mic_monitor(
+    mic_name: Option<String>,
+    level: Arc<AtomicU32>,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+) -> Result<(), String> {
+    let source = match mic_name {
+        Some(name) => name,
+        None => default_pulse_source().ok_or_else(|| "no default input source".to_string())?,
+    };
+    monitor_parec(&source, level, stop_rx)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_mic_monitor(
+    mic_name: Option<String>,
+    level: Arc<AtomicU32>,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+) -> Result<(), String> {
+    let host = cpal::default_host();
+    monitor_cpal(open_mic_by_name(&host, mic_name.as_deref())?, level, stop_rx)
+}
+
+// ── System monitor ────────────────────────────────────────────────────────────
+
+#[cfg(target_os = "linux")]
+fn run_system_monitor(
+    sys_name: Option<String>,
+    level: Arc<AtomicU32>,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+) -> Result<(), String> {
+    let source = match sys_name {
+        Some(name) => name,
+        None => find_pulseaudio_monitor()?,
+    };
+    monitor_parec(&source, level, stop_rx)
+}
+
+#[cfg(target_os = "windows")]
+fn run_system_monitor(
+    sys_name: Option<String>,
+    level: Arc<AtomicU32>,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+) -> Result<(), String> {
+    monitor_cpal(open_output_by_name(sys_name.as_deref())?, level, stop_rx)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+fn run_system_monitor(
+    _sys_name: Option<String>,
+    _level: Arc<AtomicU32>,
+    _stop_rx: std::sync::mpsc::Receiver<()>,
+) -> Result<(), String> {
+    Err("system-audio test is not available on this platform".to_string())
+}
+
+// ── Capture backends (level only, no file) ────────────────────────────────────
+
+/// Meter a PulseAudio/PipeWire source via `parec`: mono 16 kHz is plenty for a
+/// level readout and cheap on CPU.
+#[cfg(target_os = "linux")]
+fn monitor_parec(
+    source_name: &str,
+    level: Arc<AtomicU32>,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+) -> Result<(), String> {
+    use std::io::Read;
+
+    let mut child = std::process::Command::new("parec")
+        .args([
+            "--device",
+            source_name,
+            "--format=float32le",
+            "--channels=1",
+            "--rate=16000",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to spawn parec: {e}"))?;
+
+    let mut out = child.stdout.take().unwrap();
+    let level_reader = Arc::clone(&level);
+
+    let read_thread = thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match out.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let samples: Vec<f32> = buf[..n]
+                        .chunks_exact(4)
+                        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                        .collect();
+                    publish_peak(&level_reader, &samples);
+                }
+            }
+        }
+    });
+
+    let _ = stop_rx.recv();
+    child.kill().ok();
+    child.wait().ok();
+    read_thread.join().ok();
+    level.store(0.0_f32.to_bits(), Ordering::Relaxed);
+    Ok(())
+}
+
+/// Meter a cpal device (mic input, or a Windows output endpoint in loopback).
+#[cfg(not(target_os = "linux"))]
+fn monitor_cpal(
+    device: cpal::Device,
+    level: Arc<AtomicU32>,
+    stop_rx: std::sync::mpsc::Receiver<()>,
+) -> Result<(), String> {
+    let config = device.default_input_config().map_err(|e| e.to_string())?;
+    let level_cb = Arc::clone(&level);
+    let stream = device
+        .build_input_stream(
+            &config.into(),
+            move |data: &[f32], _| publish_peak(&level_cb, data),
+            |err| tracing::error!("cpal monitor stream error: {err}"),
+            None,
+        )
+        .map_err(|e| e.to_string())?;
+    stream.play().map_err(|e| e.to_string())?;
+    let _ = stop_rx.recv();
+    drop(stream);
+    level.store(0.0_f32.to_bits(), Ordering::Relaxed);
+    Ok(())
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -563,6 +1291,122 @@ fn record_mixed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mic_spec() -> CaptureSpec {
+        CaptureSpec {
+            source: CaptureSource::Mic,
+            ..Default::default()
+        }
+    }
+    fn system_spec() -> CaptureSpec {
+        CaptureSpec {
+            source: CaptureSource::System,
+            ..Default::default()
+        }
+    }
+    fn mixed_spec() -> CaptureSpec {
+        CaptureSpec {
+            source: CaptureSource::Mixed,
+            ..Default::default()
+        }
+    }
+
+    // ── resolve_devices — leg presence per source (no hardware on resolution
+    //    shape; mic resolution needs a device so we only assert leg presence) ──
+
+    #[test]
+    fn resolve_devices_mic_only_has_no_system_leg() {
+        // Mic resolution can fail without hardware; only assert the system leg
+        // is absent for a mic-only spec (a pure structural property).
+        if let Ok(r) = resolve_devices(&mic_spec()) {
+            assert!(
+                r.devices.system.is_none() && r.sys_id.is_none(),
+                "mic-only must not resolve a system leg"
+            );
+        }
+    }
+
+    #[test]
+    fn system_selectable_const_matches_platform() {
+        let expected = cfg!(any(target_os = "linux", target_os = "windows"));
+        assert_eq!(SYSTEM_SELECTABLE, expected);
+    }
+
+    // ── pactl source parsing — keeps ALSA junk out of the mic list ────────────
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parse_pulse_sources_splits_inputs_from_monitors_with_labels() {
+        // Trimmed `pactl list sources` shape: one real mic, one monitor.
+        let text = "\
+Source #1
+\tName: alsa_output.pci-0000_00_1f.3.analog-stereo.monitor
+\tDescription: Monitor of Built-in Audio Analog Stereo
+\tMonitor of Sink: alsa_output.pci-0000_00_1f.3.analog-stereo
+Source #2
+\tName: alsa_input.pci-0000_00_1f.3.analog-stereo
+\tDescription: Built-in Audio Analog Stereo
+\tMonitor of Sink: n/a
+";
+        let sources = parse_pulse_sources(text);
+        assert_eq!(sources.len(), 2);
+
+        let inputs: Vec<_> = sources.iter().filter(|s| !s.monitor).collect();
+        let monitors: Vec<_> = sources.iter().filter(|s| s.monitor).collect();
+        assert_eq!(inputs.len(), 1, "exactly one real mic");
+        assert_eq!(inputs[0].name, "alsa_input.pci-0000_00_1f.3.analog-stereo");
+        assert_eq!(inputs[0].label(), "Built-in Audio Analog Stereo");
+        assert_eq!(monitors.len(), 1, "exactly one monitor");
+        assert!(monitors[0].monitor);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parse_pulse_sources_falls_back_to_name_without_description() {
+        let text = "Source #0\n\tName: some.weird.source\n\tMonitor of Sink: n/a\n";
+        let sources = parse_pulse_sources(text);
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].label(), "some.weird.source");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parse_pulse_sources_empty_is_empty() {
+        assert!(parse_pulse_sources("").is_empty());
+    }
+
+    // Manual diagnostic: meter the default mic for ~1.5 s and print the level.
+    //   cargo test -p meeting-adapters monitor_mic_level -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore = "captures from the mic; run manually"]
+    async fn monitor_mic_level() {
+        let mon = CpalLevelMonitor::new();
+        mon.start("probe", mic_spec()).await.unwrap();
+        for _ in 0..6 {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            let l = mon.level("probe").unwrap();
+            println!("level = {:.3}  ({:.1} dB)", l.level, l.peak_db);
+        }
+        mon.stop("probe").await.unwrap();
+        assert!(mon.level("probe").is_none(), "session must clear on stop");
+    }
+
+    // Manual diagnostic: print the device lists this machine actually exposes.
+    //   cargo test -p meeting-adapters print_enumerated_devices -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore = "prints local audio devices; run manually"]
+    async fn print_enumerated_devices() {
+        let list = CpalAudioDevices::new().list_devices().await.unwrap();
+        println!("system_selectable = {}", list.system_selectable);
+        println!("── inputs ({}) ──", list.input.len());
+        for d in &list.input {
+            println!("  {}{}", d.label, if d.is_default { "  [default]" } else { "" });
+        }
+        println!("── outputs ({}) ──", list.output.len());
+        for d in &list.output {
+            println!("  {}{}", d.label, if d.is_default { "  [default]" } else { "" });
+        }
+    }
 
     // ── State machine (no hardware) ───────────────────────────────────────────
 
@@ -623,7 +1467,7 @@ mod tests {
         let path = dir.path().join("mic.wav");
         let cap = CpalAudioCapture::new();
 
-        cap.start_session("s1", &path, CaptureSource::Mic, false)
+        cap.start_session("s1", &path, mic_spec())
             .await
             .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -640,7 +1484,7 @@ mod tests {
         let path = dir.path().join("system.wav");
         let cap = CpalAudioCapture::new();
 
-        cap.start_session("s2", &path, CaptureSource::System, false)
+        cap.start_session("s2", &path, system_spec())
             .await
             .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -658,7 +1502,7 @@ mod tests {
         let path = dir.path().join("mixed.wav");
         let cap = CpalAudioCapture::new();
 
-        cap.start_session("s3", &path, CaptureSource::Mixed, false)
+        cap.start_session("s3", &path, mixed_spec())
             .await
             .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -779,10 +1623,10 @@ mod tests {
         let mic_path = dir.path().join("mic.wav");
         let cap = CpalAudioCapture::new();
 
-        cap.start_session("sys", &sys_path, CaptureSource::System, false)
+        cap.start_session("sys", &sys_path, system_spec())
             .await
             .expect("system capture failed to start (Screen-Recording permission?)");
-        cap.start_session("mic", &mic_path, CaptureSource::Mic, false)
+        cap.start_session("mic", &mic_path, mic_spec())
             .await
             .expect("mic capture failed to start");
 

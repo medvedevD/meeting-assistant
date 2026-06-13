@@ -1,0 +1,53 @@
+Meeting Assistant — FFmpeg (LGPLv2.1) Compliance Notice
+=======================================================
+
+The in-app recording player is built on Qt Multimedia, which on Qt 6.7+ uses
+an FFmpeg-based media backend. This application therefore ships FFmpeg shared
+libraries (typically libavcodec, libavformat, libavutil, libswresample and
+libswscale) as bundled by the platform Qt deploy tool.
+
+These FFmpeg libraries, as distributed with the Qt online installer used to
+build this release, are configured and licensed under the GNU Lesser General
+Public License, version 2.1 or later (LGPLv2.1+). No GPL-only FFmpeg
+components are enabled or shipped.
+
+How we comply
+-------------
+
+1. Dynamic linking. FFmpeg is linked DYNAMICALLY (and loaded by the Qt
+   multimedia backend plugin at runtime). We do not statically link any FFmpeg
+   library. The FFmpeg shared libraries are shipped beside the application
+   (macOS: MeetingAssistant.app/Contents/Frameworks; Linux: inside the
+   AppImage's bundled Qt libraries; Windows: the windeployqt output) and can
+   be replaced by the user with a compatible build.
+
+2. Re-linking right. Because FFmpeg is dynamically linked, you may substitute
+   a modified or different but compatible version of the FFmpeg libraries. On
+   Linux/Windows replace the bundled shared objects/DLLs in place. On macOS,
+   the .app is ad-hoc signed; after replacing a library re-run
+   `codesign -s - --force` on the changed library and the .app, or run an
+   unsigned local build.
+
+3. Source code. The complete corresponding source code for FFmpeg is available
+   from the FFmpeg project:
+
+       https://ffmpeg.org/download.html
+       https://git.ffmpeg.org/ffmpeg.git
+
+   The exact FFmpeg version is the one bundled by the Qt release recorded in
+   `Qt-VERSION.txt` next to this file; the bundled libraries report their own
+   version via `--version` metadata.
+
+4. Written offer. For a period of three years from your receipt of this
+   application, the publisher will, on request, provide the complete
+   corresponding source code of the LGPLv2.1-covered FFmpeg libraries used
+   here (or a written copy on a physical medium for a charge no more than the
+   cost of distribution) by emailing: codemedvedev@gmail.com
+
+The full LGPLv2.1 license text accompanies the FFmpeg source distribution (its
+`COPYING.LGPLv2.1` file). FFmpeg is a trademark of Fabrice Bellard, originator
+of the FFmpeg project. Copyright belongs to the FFmpeg authors and
+contributors.
+
+Nothing in this notice grants rights in the Meeting Assistant application
+itself beyond those required by the LGPLv2.1 for the FFmpeg libraries.

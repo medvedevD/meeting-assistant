@@ -254,6 +254,17 @@ Page {
 
         Rectangle { Layout.fillWidth: true; height: 1; color: Theme.rule }
 
+        // ── recording playback ───────────────────────────────────────────────
+        AudioPlayer {
+            Layout.fillWidth: true
+            Layout.maximumWidth: scr.readingWidth
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: 16
+            visible: scr.audioPath.length > 0
+            source: scr.audioPath.length > 0
+                    ? pathUtils.fileUrl(scr.audioPath) : ""
+        }
+
         // ── inline reprocess progress + note ─────────────────────────────────
         ColumnLayout {
             Layout.fillWidth: true

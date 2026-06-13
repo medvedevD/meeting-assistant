@@ -9,7 +9,10 @@
 # Usage:  pwsh packaging/windows/build-installer.ps1 [-Debug]
 #
 # Qt discovery: $env:CMAKE_PREFIX_PATH -> $env:QT_DIR -> ~\Qt\<ver>\msvc* .
-[CmdletBinding()]
+#
+# No [CmdletBinding()]: it auto-provides a `-Debug` common parameter, which
+# collides with our own `-Debug` switch ("parameter 'Debug' defined multiple
+# times") and makes the script fail to parse under `pwsh ./build-installer.ps1`.
 param([switch]$Debug)
 $ErrorActionPreference = "Stop"
 
@@ -48,8 +51,12 @@ Write-Host "-> windeployqt: $WinDeployQt"
 
 # 1. Rust sidecar (same revision as the GUI; version-pinned together).
 Write-Host "-> cargo build meeting-server ($Profile)..."
+# Plain $relFlag, NOT @relFlag: PowerShell unwraps the single-element array
+# @("--release") into the scalar "--release", and splatting (@) a scalar string
+# iterates its characters, passing a lone "-" first (cargo: unexpected argument
+# '-'). A native command expands a plain array/scalar as args correctly.
 $relFlag = if ($Debug) { @() } else { @("--release") }
-cargo build @relFlag --manifest-path "$RustDir\Cargo.toml" --bin meeting-server
+cargo build $relFlag --manifest-path "$RustDir\Cargo.toml" --bin meeting-server
 if ($LASTEXITCODE) { throw "cargo build failed" }
 $Sidecar = Join-Path $RustDir "target\$Profile\meeting-server.exe"
 if (-not (Test-Path $Sidecar)) { throw "sidecar not built: $Sidecar" }
@@ -58,7 +65,7 @@ if (-not (Test-Path $Sidecar)) { throw "sidecar not built: $Sidecar" }
 Write-Host "-> cmake configure + build + install..."
 if (Test-Path $Stage) { Remove-Item -Recurse -Force $Stage }
 $gen = if (Get-Command ninja -ErrorAction SilentlyContinue) { @("-G","Ninja") } else { @() }
-cmake -S $QtAppDir -B $BuildDir @gen `
+cmake -S $QtAppDir -B $BuildDir $gen `
     -DCMAKE_BUILD_TYPE=Release `
     -DCMAKE_PREFIX_PATH="$QtPrefix" `
     -DMEETING_SERVER_BIN="$Sidecar" `
@@ -81,6 +88,15 @@ Write-Host "-> windeployqt..."
 & $WinDeployQt --release --qmldir "$QtAppDir\qml" --compiler-runtime `
     --no-translations "$Gui"
 if ($LASTEXITCODE) { throw "windeployqt failed" }
+
+# Fail-fast: the in-card audio player needs the QtMultimedia ffmpeg backend.
+# windeployqt bundles it from the QtMultimedia QML import, but assert it landed
+# (a missing plugin ships a dead player). Inno Setup packs Stage\* recursively,
+# so once it's here it reaches the installer.
+$mmPlugin = Get-ChildItem -Path $Stage -Recurse -Filter "ffmpegmediaplugin.dll" `
+    -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $mmPlugin) { throw "QtMultimedia ffmpeg plugin not bundled by windeployqt" }
+Write-Host "-> QtMultimedia backend bundled: $($mmPlugin.FullName)"
 
 # 4. Inno Setup -> installer.
 $Iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue

@@ -28,7 +28,7 @@ mod tests {
     use crate::{
         entities::Meeting,
         fakes::{FakeAudioCapture, FakeMeetingRepo},
-        ports::{CaptureSource, MeetingRepo},
+        ports::{CaptureSpec, MeetingRepo},
     };
     use std::path::PathBuf;
 
@@ -49,8 +49,7 @@ mod tests {
             .start_session(
                 &meeting.id,
                 std::path::Path::new("/tmp/r.wav"),
-                CaptureSource::Mic,
-                false,
+                CaptureSpec::default(),
             )
             .await
             .unwrap();
@@ -94,8 +93,7 @@ mod tests {
             .start_session(
                 id,
                 std::path::Path::new("/tmp/x.wav"),
-                CaptureSource::Mic,
-                false,
+                CaptureSpec::default(),
             )
             .await
             .unwrap();

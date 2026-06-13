@@ -3,7 +3,7 @@
   Info.plist template for MeetingAssistant.app.
 
   Consumed by CMake via the MACOSX_BUNDLE_INFO_PLIST target property; CMake
-  substitutes the ${MACOSX_BUNDLE_*} variables (see qt-app/CMakeLists.txt).
+  substitutes the MACOSX_BUNDLE variables (see qt-app/CMakeLists.txt).
   The non-variable keys below are the ones section-05/07 actually require —
   do not hand-edit them in the generated bundle, edit this template.
 -->

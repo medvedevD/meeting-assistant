@@ -93,6 +93,18 @@ echo "→ macdeployqt (Qt frameworks/plugins/QML)…"
 #        artefact free of dangling-dependency dylibs.
 rm -rf "$APP/Contents/PlugIns/sqldrivers"
 
+# ── 4c. Assert the QtMultimedia backend is present BEFORE signing ─────────────
+# The in-card audio player needs the ffmpeg media plugin; macdeployqt bundles it
+# from the linked Qt6::Multimedia + the QtMultimedia QML import. Catch a missing
+# plugin here (dead player on every machine) rather than shipping it. The
+# plugin's own dylib and the ffmpeg libs are .dylib under Contents/, so
+# codesign-deep.sh's recursive pass already signs them — no signer change needed.
+if ! find "$APP/Contents" -name 'libffmpegmediaplugin.dylib' | grep -q .; then
+    echo "Error: QtMultimedia ffmpeg plugin not bundled by macdeployqt." >&2
+    exit 1
+fi
+echo "→ QtMultimedia backend bundled ✓"
+
 # ── 5. Ad-hoc deep-sign + verify (the spike's crux) ──────────────────────────
 "$SCRIPT_DIR/codesign-deep.sh" "$APP"
 

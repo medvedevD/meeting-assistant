@@ -345,6 +345,12 @@ pub struct PersistedPaths {
 pub struct RecordingPrefs {
     pub source: String,
     pub echo_cancel: bool,
+    /// Default mic device name; absent/null = OS default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mic_device: Option<String>,
+    /// Default system-audio device name; absent/null = OS default. Ignored on macOS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_device: Option<String>,
 }
 
 impl Default for RecordingPrefs {
@@ -352,6 +358,8 @@ impl Default for RecordingPrefs {
         Self {
             source: "mic".into(),
             echo_cancel: false,
+            mic_device: None,
+            system_device: None,
         }
     }
 }
@@ -455,17 +463,17 @@ impl JsonSettingsStore {
 fn config_dir() -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".config")
-        })
+        .or_else(dirs::config_dir)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
+        .unwrap_or_else(|| PathBuf::from(".config"))
 }
 
 fn xdg_data_dir() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")
-        })
+        .or_else(dirs::data_dir)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".local/share")))
+        .unwrap_or_else(|| PathBuf::from(".local/share"))
 }
 
 fn default_models_dir() -> PathBuf {

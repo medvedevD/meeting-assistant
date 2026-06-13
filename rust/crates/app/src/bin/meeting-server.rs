@@ -33,7 +33,7 @@ mod template_service;
 #[path = "../transcription_model_service.rs"]
 mod transcription_model_service;
 
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
@@ -87,8 +87,12 @@ fn parse_args() -> Args {
 fn main() -> Result<()> {
     // stdout discipline: the logger goes to STDERR ONLY, configured before any
     // other code can run. stdout is reserved for the single handshake line.
+    // ANSI only when stderr is a real terminal (dev `run-qt.sh`). When the GUI
+    // spawns us our stderr is a pipe it tees into a plain log file — colour
+    // escapes there are unreadable noise.
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
+        .with_ansi(std::io::stderr().is_terminal())
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
@@ -224,6 +228,10 @@ async fn run(args: Args) -> Result<()> {
         settings_service,
         template_service,
         transcription_model_service,
+        std::sync::Arc::new(meeting_api::AudioApi {
+            enumerator: container.audio_devices,
+            monitor: container.audio_monitor,
+        }),
         token.clone(),
         env!("CARGO_PKG_VERSION"),
     );
@@ -288,12 +296,9 @@ async fn run(args: Args) -> Result<()> {
     // ── Drain the workers, then exit ──────────────────────────────────────────
     let _ = workers.transcribe_shutdown.send(());
     let _ = workers.protocol_shutdown.send(());
-    let drain = tokio::time::timeout(
-        Duration::from_millis(1200),
-        async {
-            let _ = tokio::join!(workers.transcribe_join, workers.protocol_join);
-        },
-    )
+    let drain = tokio::time::timeout(Duration::from_millis(1200), async {
+        let _ = tokio::join!(workers.transcribe_join, workers.protocol_join);
+    })
     .await;
     if drain.is_err() {
         tracing::warn!("workers did not stop within 1.2s — aborting");
@@ -446,8 +451,48 @@ fn try_acquire_singleton() -> Result<bool> {
 fn xdg_data_dir() -> std::path::PathBuf {
     std::env::var_os("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            let home = std::env::var_os("HOME").expect("$HOME is not set");
-            std::path::PathBuf::from(home).join(".local/share")
-        })
+        .or_else(dirs::data_dir)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".local/share")))
+        .expect("cannot resolve user's data directory")
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    struct EnvGuard {
+        keys: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn clear(keys: &[&'static str]) -> Self {
+            let keys = keys
+                .iter()
+                .map(|&key| {
+                    let value = std::env::var_os(key);
+                    std::env::remove_var(key);
+                    (key, value)
+                })
+                .collect();
+            Self { keys }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.keys.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn xdg_data_dir_does_not_require_home() {
+        let _guard = EnvGuard::clear(&["XDG_DATA_HOME", "HOME"]);
+        std::env::set_var("USERPROFILE", r"C:\Users\meeting-test");
+
+        assert!(!super::xdg_data_dir().as_os_str().is_empty());
+    }
 }

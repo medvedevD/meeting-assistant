@@ -31,9 +31,10 @@ pub fn no_default_template() -> DefaultTemplateFn {
     Arc::new(|| None)
 }
 use crate::routes::{
-    health, jobs, meetings, protocols, recordings, settings, templates, transcription_models,
-    version,
+    audio, health, jobs, meetings, protocols, recordings, settings, templates,
+    transcription_models, version,
 };
+pub use crate::routes::audio::AudioApi;
 use crate::settings_service::SettingsService;
 use crate::template_service::TemplateService;
 use crate::transcription_model_service::TranscriptionModelService;
@@ -87,6 +88,7 @@ pub fn create_server_router(
     settings_service: Arc<dyn SettingsService>,
     template_service: Arc<dyn TemplateService>,
     transcription_model_service: Arc<dyn TranscriptionModelService>,
+    audio_api: Arc<AudioApi>,
     auth_token: String,
     build_version: impl Into<String>,
 ) -> Router {
@@ -118,8 +120,17 @@ pub fn create_server_router(
         .with_state(template_service);
 
     let transcription_models = transcription_model_routes()
-        .route_layer(middleware::from_fn_with_state(token, require_bearer))
+        .route_layer(middleware::from_fn_with_state(
+            token.clone(),
+            require_bearer,
+        ))
         .with_state(transcription_model_service);
+
+    // Audio routes (device enumeration + live level monitor) carry their own
+    // state, same separate-state + bearer pattern as settings/templates.
+    let audio = audio_routes()
+        .route_layer(middleware::from_fn_with_state(token, require_bearer))
+        .with_state(audio_api);
 
     let meta = Router::new()
         .route("/health", get(health::handle))
@@ -158,6 +169,7 @@ pub fn create_server_router(
         .merge(settings)
         .merge(templates)
         .merge(transcription_models)
+        .merge(audio)
         .layer(governor);
 
     authed.merge(meta)
@@ -210,6 +222,16 @@ fn settings_routes() -> Router<Arc<dyn SettingsService>> {
         .route(
             "/api/v1/settings/secret-store/reset",
             post(settings::reset_secret_store),
+        )
+}
+
+fn audio_routes() -> Router<Arc<AudioApi>> {
+    Router::new()
+        .route("/api/v1/audio/devices", get(audio::devices))
+        .route("/api/v1/audio/monitor", post(audio::monitor_start))
+        .route(
+            "/api/v1/audio/monitor/:id",
+            get(audio::monitor_level).delete(audio::monitor_stop),
         )
 }
 
@@ -412,6 +434,10 @@ mod tests {
             Arc::new(FakeSettings),
             Arc::new(FakeTemplates),
             Arc::new(FakeTranscriptionModels),
+            Arc::new(AudioApi {
+                enumerator: meeting_core::fakes::FakeAudioDeviceEnumerator::new(),
+                monitor: meeting_core::fakes::FakeAudioLevelMonitor::new(),
+            }),
             TOKEN.to_string(),
             "0.1.0-test",
         )
@@ -445,6 +471,10 @@ mod tests {
         ("POST", "/api/v1/transcription-models/base/install"),
         ("GET", "/api/v1/transcription-models/installations/job-1"),
         ("DELETE", "/api/v1/transcription-models/base"),
+        ("GET", "/api/v1/audio/devices"),
+        ("POST", "/api/v1/audio/monitor"),
+        ("GET", "/api/v1/audio/monitor/abc"),
+        ("DELETE", "/api/v1/audio/monitor/abc"),
     ];
 
     #[tokio::test]

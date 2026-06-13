@@ -1,13 +1,15 @@
 use anyhow::{Context, Result};
 use meeting_adapters::{
-    build_llm, resolve_transcription_model_path, AnthropicProvider, CpalAudioCapture, Db,
-    FileTemplateLoader, FsMeetingFileStore, JsonSettingsStore, KeyringSecretStore,
-    LazyWhisperTranscriber, LiveJobs, SqliteJobRepo, SqliteMeetingRepo, SwappableLlm,
-    TranscriberPrefs, WhisperTranscriber, Worker, PROTOCOL_KINDS, TRANSCRIBE_KINDS,
+    build_llm, resolve_transcription_model_path, AnthropicProvider, CpalAudioCapture,
+    CpalAudioDevices, CpalLevelMonitor, Db, FileTemplateLoader, FsMeetingFileStore,
+    JsonSettingsStore, KeyringSecretStore, LazyWhisperTranscriber, LiveJobs, SqliteJobRepo,
+    SqliteMeetingRepo, SwappableLlm, TranscriberPrefs, WhisperTranscriber, Worker, PROTOCOL_KINDS,
+    TRANSCRIBE_KINDS,
 };
 use meeting_core::entities::meeting::now_unix;
 use meeting_core::ports::{
-    AudioCapture, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo, TemplateLoader, Transcriber,
+    AudioCapture, AudioDeviceEnumerator, AudioLevelMonitor, JobRepo, LlmProvider, MeetingFileStore,
+    MeetingRepo, TemplateLoader, Transcriber,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -43,6 +45,8 @@ pub struct Container {
     pub llm: Arc<dyn LlmProvider>,
     pub templates: Arc<dyn TemplateLoader>,
     pub audio_capture: Arc<dyn AudioCapture>,
+    pub audio_devices: Arc<dyn AudioDeviceEnumerator>,
+    pub audio_monitor: Arc<dyn AudioLevelMonitor>,
     pub file_store: Arc<dyn MeetingFileStore>,
     pub recordings_dir: PathBuf,
     /// Live, in-memory job table shared between the worker (writer), the
@@ -69,6 +73,8 @@ impl Container {
         let llm = Arc::new(AnthropicProvider::new(api_key));
         let templates = Arc::new(FileTemplateLoader::new(prompts_dir));
         let audio_capture = Arc::new(CpalAudioCapture::new());
+        let audio_devices = Arc::new(CpalAudioDevices::new());
+        let audio_monitor = Arc::new(CpalLevelMonitor::new());
         let file_store: Arc<dyn MeetingFileStore> = Arc::new(FsMeetingFileStore);
 
         Ok(Self {
@@ -78,6 +84,8 @@ impl Container {
             llm,
             templates,
             audio_capture,
+            audio_devices,
+            audio_monitor,
             file_store,
             recordings_dir,
             progress: meeting_core::LiveProgress::new(),
@@ -166,6 +174,8 @@ impl Container {
         let templates: Arc<dyn TemplateLoader> = templates_handle.clone();
 
         let audio_capture = Arc::new(CpalAudioCapture::new());
+        let audio_devices = Arc::new(CpalAudioDevices::new());
+        let audio_monitor = Arc::new(CpalLevelMonitor::new());
         let file_store: Arc<dyn MeetingFileStore> = Arc::new(FsMeetingFileStore);
 
         Ok(Self {
@@ -175,6 +185,8 @@ impl Container {
             llm,
             templates,
             audio_capture,
+            audio_devices,
+            audio_monitor,
             file_store,
             recordings_dir,
             progress: meeting_core::LiveProgress::new(),
@@ -221,12 +233,7 @@ impl Container {
         };
         let cpu_pool = (num_cpus::get_physical() / threads_per_job.max(1)).max(1);
         let io_pool = DEFAULT_IO_POOL;
-        tracing::info!(
-            cpu_pool,
-            io_pool,
-            threads_per_job,
-            "worker pools sized"
-        );
+        tracing::info!(cpu_pool, io_pool, threads_per_job, "worker pools sized");
 
         let (transcribe_shutdown, t_rx) = tokio::sync::oneshot::channel::<()>();
         let transcribe_worker = Arc::new(Worker::new(
@@ -296,8 +303,50 @@ pub fn default_prompts_dir() -> PathBuf {
 fn xdg_data_dir() -> PathBuf {
     std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let home = std::env::var_os("HOME").expect("$HOME is not set");
-            PathBuf::from(home).join(".local/share")
-        })
+        .or_else(dirs::data_dir)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".local/share")))
+        .expect("cannot resolve user's data directory")
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    struct EnvGuard {
+        keys: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn clear(keys: &[&'static str]) -> Self {
+            let keys = keys
+                .iter()
+                .map(|&key| {
+                    let value = std::env::var_os(key);
+                    std::env::remove_var(key);
+                    (key, value)
+                })
+                .collect();
+            Self { keys }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.keys.drain(..) {
+                match value {
+                    Some(value) => std::env::set_var(key, value),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn xdg_data_dir_does_not_require_home() {
+        let _guard = EnvGuard::clear(&["XDG_DATA_HOME", "HOME"]);
+        std::env::set_var("USERPROFILE", r"C:\Users\meeting-test");
+
+        assert!(!xdg_data_dir().as_os_str().is_empty());
+    }
 }

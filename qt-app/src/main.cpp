@@ -1,5 +1,7 @@
 #include "ApiClient.h"
 #include "JobPoller.h"
+#include "Logging.h"
+#include "PathUtils.h"
 #include "SidecarManager.h"
 
 #include <QGuiApplication>
@@ -15,6 +17,10 @@ int main(int argc, char *argv[]) {
     QGuiApplication::setApplicationName(QStringLiteral("Meeting Assistant"));
     QGuiApplication::setOrganizationName(QStringLiteral("meeting-assistant"));
     QGuiApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+
+    // Tee logs (incl. relayed sidecar stderr) to a file — a Finder/Explorer/
+    // .desktop launch has no terminal, so this is the only diagnosable record.
+    logging::installFileLogger();
 
     auto loadFont = [](const QString &path) -> QString {
         const int id = QFontDatabase::addApplicationFont(path);
@@ -48,6 +54,7 @@ int main(int argc, char *argv[]) {
 
     SidecarManager sidecar;
     ApiClient api;
+    PathUtils pathUtils;
 
     // Wire the client the moment the sidecar is Ready (handshake + version
     // gate + /health all passed).
@@ -69,6 +76,8 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("sidecar"),
                                              &sidecar);
     engine.rootContext()->setContextProperty(QStringLiteral("api"), &api);
+    engine.rootContext()->setContextProperty(QStringLiteral("pathUtils"),
+                                             &pathUtils);
     engine.rootContext()->setContextProperty(QStringLiteral("controlsStyle"),
                                               QQuickStyle::name());
     // qt-redesign Phase-1 dev affordance: MEETY_THEME_GALLERY=1 swaps the root

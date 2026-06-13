@@ -1,8 +1,9 @@
 use crate::{
     entities::{Job, JobKind, JobStatus, Meeting, Segment, Transcript},
     ports::{
-        AudioCapture, CaptureSource, JobRepo, LlmProvider, MeetingFileStore, MeetingRepo,
-        TemplateBundle, TemplateLoader, Transcriber,
+        AudioCapture, AudioDevice, AudioDeviceEnumerator, AudioDeviceList, AudioLevel,
+        AudioLevelMonitor, CaptureSource, CaptureSpec, JobRepo, LlmProvider, MeetingFileStore,
+        MeetingRepo, ResolvedDevices, TemplateBundle, TemplateLoader, Transcriber,
     },
     CoreError,
 };
@@ -498,8 +499,8 @@ impl TemplateLoader for FakeTemplateLoader {
 #[derive(Default)]
 pub struct FakeAudioCapture {
     active: Mutex<HashSet<String>>,
-    /// Each entry is `(session_id, source, echo_cancel)` in call order.
-    pub started: Mutex<Vec<(String, CaptureSource, bool)>>,
+    /// Each entry is `(session_id, spec)` in call order.
+    pub started: Mutex<Vec<(String, CaptureSpec)>>,
     pub stopped: Mutex<Vec<String>>,
 }
 
@@ -508,14 +509,23 @@ impl FakeAudioCapture {
         Arc::new(Self::default())
     }
 
+    /// Returns the full `CaptureSpec` for the most-recently started session.
+    pub fn last_spec(&self) -> Option<CaptureSpec> {
+        self.started.lock().unwrap().last().map(|(_, s)| s.clone())
+    }
+
     /// Returns the `CaptureSource` for the most-recently started session, if any.
     pub fn last_source(&self) -> Option<CaptureSource> {
-        self.started.lock().unwrap().last().map(|(_, s, _)| *s)
+        self.started.lock().unwrap().last().map(|(_, s)| s.source)
     }
 
     /// Returns the `echo_cancel` flag for the most-recently started session, if any.
     pub fn last_echo_cancel(&self) -> Option<bool> {
-        self.started.lock().unwrap().last().map(|(_, _, e)| *e)
+        self.started
+            .lock()
+            .unwrap()
+            .last()
+            .map(|(_, s)| s.echo_cancel)
     }
 }
 
@@ -525,15 +535,32 @@ impl AudioCapture for FakeAudioCapture {
         &self,
         session_id: &str,
         _output_path: &Path,
-        source: CaptureSource,
-        echo_cancel: bool,
-    ) -> Result<(), CoreError> {
+        spec: CaptureSpec,
+    ) -> Result<ResolvedDevices, CoreError> {
         self.active.lock().unwrap().insert(session_id.to_string());
+        // Echo the request back as "resolved": the fake has no real devices, so
+        // a pinned name resolves to itself and `None` stays the default.
+        let resolved = ResolvedDevices {
+            mic: match spec.source {
+                CaptureSource::Mic | CaptureSource::Mixed => {
+                    Some(spec.mic_device.clone().unwrap_or_else(|| "default".into()))
+                }
+                CaptureSource::System => None,
+            },
+            system: match spec.source {
+                CaptureSource::System | CaptureSource::Mixed => Some(
+                    spec.system_device
+                        .clone()
+                        .unwrap_or_else(|| "default".into()),
+                ),
+                CaptureSource::Mic => None,
+            },
+        };
         self.started
             .lock()
             .unwrap()
-            .push((session_id.to_string(), source, echo_cancel));
-        Ok(())
+            .push((session_id.to_string(), spec));
+        Ok(resolved)
     }
 
     async fn stop_session(&self, session_id: &str) -> Result<(), CoreError> {
@@ -549,6 +576,106 @@ impl AudioCapture for FakeAudioCapture {
 
     fn is_active(&self, session_id: &str) -> bool {
         self.active.lock().unwrap().contains(session_id)
+    }
+}
+
+// ── FakeAudioDeviceEnumerator ────────────────────────────────────────────────
+
+/// Returns a fixed device list. Defaults to one mic + one system source, both
+/// marked default, with `system_selectable = true`.
+pub struct FakeAudioDeviceEnumerator {
+    list: AudioDeviceList,
+}
+
+impl Default for FakeAudioDeviceEnumerator {
+    fn default() -> Self {
+        Self {
+            list: AudioDeviceList {
+                input: vec![AudioDevice {
+                    id: "fake-mic".into(),
+                    label: "Fake Microphone".into(),
+                    is_default: true,
+                }],
+                output: vec![AudioDevice {
+                    id: "fake-monitor".into(),
+                    label: "Fake System Output".into(),
+                    is_default: true,
+                }],
+                system_selectable: true,
+            },
+        }
+    }
+}
+
+impl FakeAudioDeviceEnumerator {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    pub fn with_list(list: AudioDeviceList) -> Arc<Self> {
+        Arc::new(Self { list })
+    }
+}
+
+#[async_trait]
+impl AudioDeviceEnumerator for FakeAudioDeviceEnumerator {
+    async fn list_devices(&self) -> Result<AudioDeviceList, CoreError> {
+        Ok(self.list.clone())
+    }
+}
+
+// ── FakeAudioLevelMonitor ─────────────────────────────────────────────────────
+
+/// Records start/stop calls and returns a fixed level for any active session.
+#[derive(Default)]
+pub struct FakeAudioLevelMonitor {
+    active: Mutex<HashSet<String>>,
+    pub started: Mutex<Vec<(String, CaptureSpec)>>,
+}
+
+impl FakeAudioLevelMonitor {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+}
+
+#[async_trait]
+impl AudioLevelMonitor for FakeAudioLevelMonitor {
+    async fn start(&self, id: &str, spec: CaptureSpec) -> Result<ResolvedDevices, CoreError> {
+        self.active.lock().unwrap().insert(id.to_string());
+        let resolved = ResolvedDevices {
+            mic: match spec.source {
+                CaptureSource::Mic => Some(spec.mic_device.clone().unwrap_or_else(|| "default".into())),
+                _ => None,
+            },
+            system: match spec.source {
+                CaptureSource::System => {
+                    Some(spec.system_device.clone().unwrap_or_else(|| "default".into()))
+                }
+                _ => None,
+            },
+        };
+        self.started.lock().unwrap().push((id.to_string(), spec));
+        Ok(resolved)
+    }
+
+    fn level(&self, id: &str) -> Option<AudioLevel> {
+        if self.active.lock().unwrap().contains(id) {
+            Some(AudioLevel {
+                level: 0.5,
+                peak_db: -6.0,
+            })
+        } else {
+            None
+        }
+    }
+
+    async fn stop(&self, id: &str) -> Result<(), CoreError> {
+        if self.active.lock().unwrap().remove(id) {
+            Ok(())
+        } else {
+            Err(CoreError::Recording(format!("monitor not found: {id}")))
+        }
     }
 }
 

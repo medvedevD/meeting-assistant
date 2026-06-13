@@ -2,8 +2,11 @@ Meeting Assistant — Qt (LGPLv3) Compliance Notice
 =================================================
 
 This application uses the Qt framework (Qt 6, modules: Qt Quick, Qt Quick
-Controls, Qt Network and their runtime dependencies) under the terms of the
-GNU Lesser General Public License, version 3 (LGPLv3).
+Controls, Qt Network, Qt Multimedia and their runtime dependencies, including
+the Qt multimedia backend plugin) under the terms of the GNU Lesser General
+Public License, version 3 (LGPLv3). Qt Multimedia's FFmpeg backend ships
+separate FFmpeg libraries covered by their own notice — see
+`FFmpeg-LGPLv2.1-NOTICE.txt` alongside this file.
 
 How we comply
 -------------

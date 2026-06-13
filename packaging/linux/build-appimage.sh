@@ -73,10 +73,12 @@ cp "$REPO/packaging/assets/meeting-assistant.png" "$ICON_DST/meeting-assistant.p
 
 # ── 3. Fetch linuxdeploy + the Qt plugin (cached) ────────────────────────────
 mkdir -p "$TOOLS"
-fetch() { # fetch <name> <url>
+fetch() { # fetch <name> <url> — echoes ONLY the path on stdout (captured by $())
     local out="$TOOLS/$1"
     if [[ ! -x "$out" ]]; then
-        echo "→ downloading $1…"
+        # Progress must go to stderr; on a cache miss a stdout echo here would be
+        # captured into LD/LDQT alongside the path and then run as a command.
+        echo "→ downloading $1…" >&2
         curl -fL --retry 3 -o "$out" "$2"
         chmod +x "$out"
     fi
@@ -94,6 +96,60 @@ export QML_SOURCES_PATHS="$QT_APP_DIR/qml"
 export PATH="$QT_PREFIX/bin:$PATH"
 export OUTPUT="MeetingAssistant-$ARCH.AppImage"
 
+# The in-card audio player (QtMultimedia) loads its backend from the
+# `multimedia` plugin category, which linuxdeploy-plugin-qt does NOT bundle from
+# a QML-import scan alone — the backend plugin lives under plugins/multimedia/,
+# not in the QML tree. Force it in; its NEEDED ffmpeg libs (libav*) are then
+# pulled by linuxdeploy's dependency resolver. Without this the player silently
+# fails to play on a clean machine.
+export EXTRA_QT_PLUGINS="multimedia"
+
+# We ship ONLY the FFmpeg backend (Qt 6.7 default; same as macOS/Windows). The
+# `multimedia` category also contains the GStreamer backend plugin, which drags
+# the entire GStreamer stack (libgstgl, libgstpbutils, … → libGL/gbm/wayland).
+# cmake configure needs the plugin file present (find_package imports it as a
+# target), so it can't be removed earlier — delete it now, after the build and
+# before linuxdeploy (which finds plugins via qmake, not cmake, so it then sees
+# only ffmpeg). NOTE: this removes it from the Qt prefix; a second *local* run
+# needs a fresh Qt. CI uses a throwaway Qt, so this is a non-issue there.
+rm -f "$QT_PREFIX/plugins/multimedia/libgstreamermediaplugin.so"
+
+# Qt 6.7's ffmpeg media plugin dlopens libav*/libsw* at runtime (they're NOT in
+# its ELF NEEDED list), but the aqtinstall prebuilt ships none of them and the
+# build container's apt ffmpeg (4.x on the glibc-floor Ubuntu) is too old. Qt
+# 6.7.x is built against FFmpeg 6.1 (libavcodec.so.60), which BtbN no longer
+# publishes — so build it from source: LGPL (no --enable-gpl), shared, no x86asm
+# (avoids a nasm dep), default codec set (native WAV/MP3/AAC decoders cover the
+# recordings). Cached across runs by the workflow (dist/linux/.tools).
+FF_VER="6.1.1"
+ff_prefix="$TOOLS/ffmpeg-$FF_VER-install"
+if [[ ! -f "$ff_prefix/lib/libavcodec.so" ]]; then
+    echo "→ building LGPL FFmpeg $FF_VER from source (first run; then cached)…"
+    ff_tar="$TOOLS/ffmpeg-$FF_VER.tar.xz"
+    [[ -f "$ff_tar" ]] || curl -fL --retry 3 -o "$ff_tar" \
+        "https://ffmpeg.org/releases/ffmpeg-$FF_VER.tar.xz"
+    ff_src="$TOOLS/ffmpeg-$FF_VER-src"
+    rm -rf "$ff_src"; mkdir -p "$ff_src"
+    tar -xf "$ff_tar" -C "$ff_src" --strip-components=1
+    (
+        cd "$ff_src"
+        ./configure --prefix="$ff_prefix" \
+            --enable-shared --disable-static \
+            --disable-programs --disable-doc --disable-debug --disable-x86asm
+        make -j"$(nproc)"
+        make install
+    )
+fi
+mkdir -p "$APPDIR/usr/lib"
+cp -aP "$ff_prefix"/lib/libav*.so* "$ff_prefix"/lib/libsw*.so* "$APPDIR/usr/lib/"
+echo "→ staged FFmpeg $FF_VER: $(find "$APPDIR/usr/lib" -name 'libav*.so.*' -o -name 'libsw*.so.*' | grep -c .) versioned libs"
+
+# linuxdeploy resolves NEEDED libs via the loader path; the staged ffmpeg libs
+# reference each other by soname (libavcodec → libavutil.so.58 …), so put the
+# AppDir lib dir on LD_LIBRARY_PATH or it can't find them ("Could not find
+# dependency: libavutil.so.58") even though they sit right there.
+export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
 echo "→ linuxdeploy (+ qt plugin)…"
 mkdir -p "$DIST"
 # No --custom-apprun: linuxdeploy + the qt plugin generate the AppRun and the
@@ -104,6 +160,19 @@ mkdir -p "$DIST"
     --desktop-file "$APPDIR/usr/share/applications/meeting-assistant.desktop" \
     --icon-file "$ICON_DST/meeting-assistant.png" \
     --output appimage )
+
+# Fail-fast: assert the multimedia backend + ffmpeg actually landed in the
+# AppDir. A missing plugin here ships an app whose player is dead on every
+# other machine — exactly the kind of plugin gap that bit the xcb deploy.
+if ! find "$APPDIR" -name 'libffmpegmediaplugin.so' | grep -q .; then
+    echo "Error: QtMultimedia ffmpeg plugin not bundled (EXTRA_QT_PLUGINS=multimedia did not take)." >&2
+    exit 1
+fi
+if ! find "$APPDIR" -name 'libavcodec.so*' | grep -q .; then
+    echo "Error: ffmpeg runtime libs (libavcodec) not bundled — player will fail to decode." >&2
+    exit 1
+fi
+echo "→ QtMultimedia backend + ffmpeg libs bundled ✓"
 
 echo "✓ AppImage: $DIST/$OUTPUT"
 echo "  Both binaries (meeting-assistant-qt + meeting-server) live in"

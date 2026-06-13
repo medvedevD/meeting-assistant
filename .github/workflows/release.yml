@@ -1,0 +1,269 @@
+name: Release
+
+# Tag-triggered packaging: turns a `v*` tag into a GitHub **prerelease** with the
+# three user-facing installers (macOS arm64 .dmg, Windows x64 Setup.exe, Linux
+# x86_64 .AppImage). The per-OS Qt/Rust install steps are copied verbatim from
+# qt-ci.yml (the glibc floor, xcb plugins and uv-driven aqtinstall dance were
+# hard-won there) — the only difference is that instead of "verify artifact" we
+# run packaging/<os>/* to produce the real installer, then publish.
+#
+# workflow_dispatch = dry run: it builds + uploads the installers as workflow
+# artifacts but does NOT create a release, so the packaging path can be validated
+# on a throwaway pre-tag without burning a version number. The `targets` input
+# picks WHICH OSes to build — unselected ones never spawn a job (zero Actions
+# minutes), so a re-validation can skip the already-green, 10x-billed macOS.
+# A real `v*` tag push ignores the input and always builds all three (a release
+# needs every installer) and additionally runs the `release` job.
+#
+# Alpha is unsigned/ad-hoc (no secrets): macOS ad-hoc `codesign -s -`, Windows
+# unsigned (SmartScreen one-click bypass), Linux unsigned AppImage.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: "OSes to build (dry-run only; a tag always builds all 3)"
+        type: choice
+        default: linux,windows
+        options:
+          - linux,windows
+          - linux
+          - windows
+          - macos
+          - linux,windows,macos
+
+permissions:
+  contents: write   # the release job needs this to create the GitHub Release
+
+jobs:
+  # Resolve the build matrix: a tag push builds all three; a manual dispatch
+  # honours the `targets` input. Job-level `if` can't read the `matrix` context,
+  # so filtering has to happen by shaping the matrix here rather than skipping
+  # entries downstream — and an unselected OS then never starts a runner.
+  setup:
+    name: select targets
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            sel="${{ inputs.targets }}"
+          else
+            sel="linux,windows,macos"   # tag push → full release, every installer
+          fi
+
+          entry() { # entry <key> → one matrix include object
+            case "$1" in
+              linux)   echo '{"os":"ubuntu-latest","container":"ubuntu:20.04","installer_glob":"dist/linux/*.AppImage"}' ;;
+              macos)   echo '{"os":"macos-latest","container":"","installer_glob":"dist/macos/*.dmg"}' ;;
+              windows) echo '{"os":"windows-latest","container":"","installer_glob":"dist/windows/*.exe"}' ;;
+              *) echo "::error::unknown target '$1'" >&2; exit 1 ;;
+            esac
+          }
+
+          inc=""
+          IFS=',' read -ra keys <<< "$sel"
+          for k in "${keys[@]}"; do
+            k="$(echo "$k" | xargs)"   # trim whitespace
+            # entry's `exit 1` only kills the $() subshell, so propagate it here.
+            obj="$(entry "$k")" || exit 1
+            inc="${inc:+$inc,}${obj}"
+          done
+          echo "matrix={\"include\":[$inc]}" >> "$GITHUB_OUTPUT"
+
+  package:
+    name: package (${{ matrix.os }})
+    needs: setup
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+
+    steps:
+      # ── Bootstrap the bare ubuntu:20.04 container (matches qt-ci.yml) ─────────
+      - name: Bootstrap build container (Linux)
+        if: matrix.container != ''
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git build-essential file sudo \
+            desktop-file-utils python3 python3-pip
+          ln -sf /usr/bin/python3 /usr/local/bin/python
+          python3 -m pip install --upgrade "cmake>=3.21" ninja
+
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Compute Rust cache key suffix
+        id: rust_cache_key
+        shell: bash
+        run: echo "img=${ImageOS:-$RUNNER_OS}-${ImageVersion:-0}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: ${{ steps.rust_cache_key.outputs.img }}
+
+      # cpal/ALSA, reqwest/OpenSSL, the Qt offscreen/xcb libs and FUSE-less
+      # linuxdeploy deps — same set qt-ci.yml installs.
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            clang libclang-dev \
+            libasound2-dev pkg-config libssl-dev \
+            libgl1-mesa-dev libegl1 libxkbcommon-dev libxkbcommon-x11-0 \
+            libfontconfig1 libfreetype6 libdbus-1-dev \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-xinerama0 libxcb-cursor0 \
+            libxcb-shape0 libxcb-shm0 libxcb-sync1 libxcb-xfixes0 \
+            libxcb-glx0 libxcb-render0 libxcb-xkb1 libxcb-util1 \
+            libpulse0 libxrandr2 xz-utils \
+            libfuse2
+
+      # ^ libpulse0 (libpulse.so.0) + libxrandr2 (libXrandr.so.2) are NEEDED by
+      #   the QtMultimedia plugins build-appimage.sh bundles; xz-utils lets tar
+      #   unpack the BtbN FFmpeg .tar.xz the script downloads for the player
+      #   backend. (The script strips the GStreamer plugin before linuxdeploy, so
+      #   its deep dependency chain is never needed.) qt-ci.yml doesn't bundle
+      #   multimedia, so it never needed any of these.
+
+      - name: Install Qt 6.7 (host runners)
+        if: matrix.container == ''
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.7.3'
+          # qtmultimedia is NOT in the default desktop set; the in-card audio
+          # player's find_package(Qt6 … Multimedia) fails without it.
+          modules: qtmultimedia
+          cache: true
+
+      - name: Install uv (Linux container)
+        if: matrix.container != ''
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Qt 6.7 (Linux container)
+        if: matrix.container != ''
+        shell: bash
+        run: |
+          qtdir="$RUNNER_TEMP/Qt"
+          # -m qtmultimedia: the audio player needs Qt6::Multimedia, which the
+          # base desktop archive omits.
+          uvx --python 3.12 --from aqtinstall aqt \
+            install-qt linux desktop 6.7.3 linux_gcc_64 -m qtmultimedia -O "$qtdir"
+          qmake="$(find "$qtdir/6.7.3" -path '*/bin/qmake' | head -n1)"
+          root="$(dirname "$(dirname "$qmake")")"
+          test -x "$root/bin/qmake"
+          echo "QT_ROOT_DIR=$root" >> "$GITHUB_ENV"
+          echo "$root/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=$root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+
+      # The packaging scripts discover Qt via CMAKE_PREFIX_PATH; QT_ROOT_DIR is
+      # what both install-qt-action and the container step above export.
+      - name: Point packaging scripts at Qt
+        shell: bash
+        run: echo "CMAKE_PREFIX_PATH=$QT_ROOT_DIR" >> "$GITHUB_ENV"
+
+      # ── Windows: MSVC env (build-installer.ps1 prefers ninja, which needs
+      #    cl.exe on PATH) + Inno Setup for the installer. ───────────────────────
+      - name: Set up MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        run: choco install innosetup --no-progress -y
+
+      # Cache build-appimage.sh's tool dir so the from-source FFmpeg is built
+      # once (~8 min), not every release. The script skips the build when
+      # dist/linux/.tools/ffmpeg-*-install/lib/libavcodec.so already exists; the
+      # key busts when the script (its ffmpeg version/flags) changes.
+      - name: Cache Linux build tools (FFmpeg + linuxdeploy)
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: dist/linux/.tools
+          # Keyed on the FFmpeg version (bump the suffix to force a rebuild), not
+          # the script hash — so unrelated build-appimage.sh edits don't trigger
+          # an ~8-min FFmpeg rebuild.
+          key: linux-tools-${{ runner.arch }}-ffmpeg6.1.1-v1
+
+      # ── Build the installer with the existing per-OS packaging recipe ─────────
+      - name: Package macOS (.dmg, ad-hoc signed)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: ./packaging/macos/build-app.sh
+
+      - name: Package Linux (.AppImage)
+        if: runner.os == 'Linux'
+        shell: bash
+        # FUSE is unavailable in the container; linuxdeploy's AppImages must
+        # self-extract instead of mounting.
+        run: |
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          ./packaging/linux/build-appimage.sh
+
+      - name: Package Windows (Setup.exe)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/windows/build-installer.ps1
+
+      - name: Verify installer produced
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=( ${{ matrix.installer_glob }} )
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::no installer matched ${{ matrix.installer_glob }}"
+            exit 1
+          fi
+          printf 'installer: %s\n' "${files[@]}"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ runner.os }}-${{ runner.arch }}
+          path: ${{ matrix.installer_glob }}
+          if-no-files-found: error
+          retention-days: 14
+
+  # Only on a real tag push: gather the three installers and publish a prerelease.
+  release:
+    name: publish prerelease
+    needs: package
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: installers
+          merge-multiple: true
+
+      - name: List collected installers
+        run: ls -lR installers
+
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --prerelease \
+            --title "Meeting Assistant ${GITHUB_REF_NAME}" \
+            --notes "Alpha build for cross-OS self-test. **Unsigned / ad-hoc-signed** — expect a Gatekeeper (macOS) / SmartScreen (Windows) prompt; see packaging/macos/HOMEBREW-SUNSET.md and packaging/windows/SMARTSCREEN.md for the one-time bypass. Requires your own Anthropic API key (Settings) for protocol generation." \
+            installers/*
