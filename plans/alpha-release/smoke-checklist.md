@@ -24,11 +24,11 @@ file; the previous run is kept as `…log.prev`. Grab this on any failure:
 
 ## Install + open past the gate
 
-- **macOS** — preferred alpha path: download `meeting-assistant.rb` from the
-  GitHub Release, then run `brew install --cask ./meeting-assistant.rb`. The
-  local cask installs the release DMG and removes quarantine in `postflight`, so
-  the app launches without a manual `xattr` step. Direct DMG fallback: open the
-  `.dmg`, drag to Applications, then run
+- **macOS** — preferred alpha path: download `install-macos.sh` from the GitHub
+  Release, then run `bash ~/Downloads/install-macos.sh`. The release-pinned
+  installer downloads and verifies the DMG, installs the app in `/Applications`,
+  removes quarantine, verifies the code seal, and launches it. Direct DMG
+  fallback: open the `.dmg`, drag to Applications, then run
   `xattr -dr com.apple.quarantine /Applications/MeetingAssistant.app`. This is
   not a public distribution fix; the durable exit is Developer ID signing +
   notarization/stapling. See `packaging/macos/HOMEBREW-SUNSET.md`.

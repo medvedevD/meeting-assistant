@@ -39,10 +39,10 @@ Windows + Linux machines the gating dependency (the author has macOS locally).
   (macOS) and unsigned (Windows/Linux); bypass is documented. (See
   `packaging/macos/HOMEBREW-SUNSET.md`, `packaging/windows/SMARTSCREEN.md`.)
 - **Auto-updater** — not in alpha; re-download to update.
-- **Public Homebrew Cask / winget / repo distribution** — GitHub Release only
-  for now. A release-attached local `meeting-assistant.rb` cask is allowed as a
-  personal alpha install helper because it only automates the documented macOS
-  quarantine bypass for this exact release.
+- **Homebrew Cask / winget / repo distribution** — GitHub Release only for now.
+  A release-attached `install-macos.sh` is allowed as a personal alpha install
+  helper because it pins and verifies this exact release DMG before automating
+  the documented macOS quarantine bypass.
 - **Intel-mac (x86_64) / universal binaries** — arm64 only this round.
 - New app features. This is purely a release-engineering task.
 - Apple Developer ID enrollment and any CI secrets.
@@ -91,9 +91,10 @@ break cannot silently regress on beta.
   - Windows: install Inno Setup (e.g. `choco install innosetup`), then
     `packaging/windows/build-installer.ps1` → `MeetingAssistant-Setup-<ver>.exe`
   - Final job: `gh release create "$TAG" --prerelease --title … --notes-file …`
-    attaching the three installers plus a generated macOS local cask
-    (`meeting-assistant.rb`) that pins the DMG URL/SHA and removes quarantine in
-    `postflight` for the personal alpha install path.
+    attaching the three installers plus a generated macOS installer
+    (`install-macos.sh`) that pins the DMG URL/SHA, verifies the download and
+    code seal, installs into `/Applications`, and removes quarantine for the
+    personal alpha install path.
 - `plans/alpha-release/smoke-checklist.md` *(new, side file)* — personal per-OS
   manual pass for the **full happy path** acceptance bar: launch → sidecar
   handshake → mic permission prompt → record → stop → transcription job

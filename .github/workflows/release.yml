@@ -268,7 +268,7 @@ jobs:
       - name: List collected installers
         run: ls -lR installers
 
-      - name: Generate macOS local cask
+      - name: Generate macOS installer
         shell: bash
         run: |
           set -euo pipefail
@@ -278,11 +278,17 @@ jobs:
             echo "::error::expected exactly one macOS DMG, got ${#dmgs[@]}"
             exit 1
           fi
-          ./packaging/macos/render-release-cask.sh \
+          ./packaging/macos/render-release-installer.sh \
             "${GITHUB_REF_NAME}" \
             "${dmgs[0]}" \
-            "installers/meeting-assistant.rb" \
+            "installers/install-macos.sh" \
             "${GITHUB_REPOSITORY}"
+
+      - name: Validate macOS installer
+        shell: bash
+        run: |
+          bash -n installers/install-macos.sh
+          test -x installers/install-macos.sh
 
       - name: Create GitHub prerelease
         env:
@@ -292,5 +298,5 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --prerelease \
             --title "Meeting Assistant ${GITHUB_REF_NAME}" \
-            --notes "Alpha build for cross-OS self-test. **Unsigned / ad-hoc-signed** — expect Gatekeeper (macOS) / SmartScreen (Windows). Preferred macOS alpha install: download meeting-assistant.rb from this release and run brew install --cask ./meeting-assistant.rb; the local cask installs the DMG and removes quarantine in postflight. Direct DMG fallback: remove quarantine manually after dragging to Applications. The durable public-distribution fix is Developer ID signing + notarization/stapling. Requires your own Anthropic API key (Settings) for protocol generation." \
+            --notes "Alpha build for cross-OS self-test. **Unsigned / ad-hoc-signed** — expect Gatekeeper (macOS) / SmartScreen (Windows). Preferred macOS alpha install: download install-macos.sh from this release and run bash ~/Downloads/install-macos.sh. The release-pinned installer verifies the DMG checksum, installs the app in /Applications, removes quarantine, verifies the code seal, and launches it. Direct DMG fallback: remove quarantine manually after dragging to Applications. The durable public-distribution fix is Developer ID signing + notarization/stapling. Requires your own Anthropic API key (Settings) for protocol generation." \
             installers/*
