@@ -24,11 +24,13 @@ file; the previous run is kept as `…log.prev`. Grab this on any failure:
 
 ## Install + open past the gate
 
-- **macOS** — preferred alpha path: download `install-macos.sh` from the GitHub
-  Release, then run `bash ~/Downloads/install-macos.sh`. The release-pinned
-  installer downloads and verifies the DMG, installs the app in `/Applications`,
-  removes quarantine, verifies the code seal, and launches it. Direct DMG
-  fallback: open the `.dmg`, drag to Applications, then run
+- **macOS** — do not open `MeetingAssistant.app` inside the DMG. Run the
+  one-line `curl …/install-macos.sh | bash` command shown at the top of the
+  GitHub Release. The release-pinned installer downloads and verifies the DMG,
+  installs the app in `/Applications`, removes quarantine recursively, verifies
+  the code seal, and launches the installed copy. Eject any previously mounted
+  Meeting Assistant DMG before launching again. Direct DMG fallback: open the
+  `.dmg`, drag to Applications, then run
   `xattr -dr com.apple.quarantine /Applications/MeetingAssistant.app`. This is
   not a public distribution fix; the durable exit is Developer ID signing +
   notarization/stapling. See `packaging/macos/HOMEBREW-SUNSET.md`.

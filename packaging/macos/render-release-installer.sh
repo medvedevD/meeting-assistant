@@ -87,8 +87,8 @@ else
 fi
 
 codesign --verify --deep --strict "\$DEST"
-if xattr -p com.apple.quarantine "\$DEST" >/dev/null 2>&1; then
-    echo "Error: macOS quarantine attribute is still present." >&2
+if xattr -lr "\$DEST" 2>/dev/null | grep 'com.apple.quarantine' >/dev/null; then
+    echo "Error: macOS quarantine attribute remains inside the app bundle." >&2
     exit 1
 fi
 

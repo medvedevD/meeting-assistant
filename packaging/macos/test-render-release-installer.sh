@@ -21,6 +21,7 @@ grep -Fq \
     'DMG_URL="https://github.com/example/meeting-assistant/releases/download/v0.1.0-alpha.test/MeetingAssistant-0.1.0.dmg"' \
     "$OUT"
 grep -Fq 'xattr -dr com.apple.quarantine "$DEST"' "$OUT"
+grep -Fq 'xattr -lr "$DEST"' "$OUT"
 grep -Fq 'codesign --verify --deep --strict "$DEST"' "$OUT"
 grep -Fq 'open "$DEST"' "$OUT"
 

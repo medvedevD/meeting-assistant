@@ -298,5 +298,15 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --prerelease \
             --title "Meeting Assistant ${GITHUB_REF_NAME}" \
-            --notes "Alpha build for cross-OS self-test. **Unsigned / ad-hoc-signed** — expect Gatekeeper (macOS) / SmartScreen (Windows). Preferred macOS alpha install: download install-macos.sh from this release and run bash ~/Downloads/install-macos.sh. The release-pinned installer verifies the DMG checksum, installs the app in /Applications, removes quarantine, verifies the code seal, and launches it. Direct DMG fallback: remove quarantine manually after dragging to Applications. The durable public-distribution fix is Developer ID signing + notarization/stapling. Requires your own Anthropic API key (Settings) for protocol generation." \
+            --notes "## macOS alpha install
+
+              Do not open MeetingAssistant.app inside the DMG. Run this command in Terminal:
+
+              curl -fL https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/install-macos.sh | bash
+
+              The installer verifies the pinned DMG checksum, installs to /Applications, removes quarantine recursively, verifies the code seal, and launches the installed copy. Eject any previously opened Meeting Assistant DMG before launching again.
+
+              ## Other platforms
+
+              Windows and Linux installers are attached below. This is an unsigned/ad-hoc-signed alpha for cross-OS self-testing. Windows may show SmartScreen. Protocol generation requires your own API key in Settings. The durable macOS public-distribution fix remains Developer ID signing plus notarization/stapling." \
             installers/*
