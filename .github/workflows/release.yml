@@ -146,9 +146,9 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.7.3'
-          # These modules are NOT in the default desktop set: the audio player
-          # needs Qt6::Multimedia and inline SVG icons need Qt6::Svg.
-          modules: qtmultimedia qtsvg
+          # qtmultimedia is NOT in the default desktop set; the in-card audio
+          # player's find_package(Qt6 … Multimedia) fails without it.
+          modules: qtmultimedia
           cache: true
 
       - name: Install uv (Linux container)
@@ -160,10 +160,10 @@ jobs:
         shell: bash
         run: |
           qtdir="$RUNNER_TEMP/Qt"
-          # The base desktop archive omits Qt Multimedia and Qt SVG.
+          # -m qtmultimedia: the audio player needs Qt6::Multimedia, which the
+          # base desktop archive omits. Qt SVG is part of the base archive.
           uvx --python 3.12 --from aqtinstall aqt \
-            install-qt linux desktop 6.7.3 linux_gcc_64 \
-              -m qtmultimedia qtsvg -O "$qtdir"
+            install-qt linux desktop 6.7.3 linux_gcc_64 -m qtmultimedia -O "$qtdir"
           qmake="$(find "$qtdir/6.7.3" -path '*/bin/qmake' | head -n1)"
           root="$(dirname "$(dirname "$qmake")")"
           test -x "$root/bin/qmake"
