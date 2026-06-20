@@ -106,7 +106,18 @@ if ! find "$APP/Contents" -name 'libffmpegmediaplugin.dylib' | grep -q .; then
 fi
 echo "→ QtMultimedia backend bundled ✓"
 
-# ── 4d. Bundle the ffmpeg CLI beside the helper (Contents/MacOS) ──────────────
+# ── 4d. Assert the SVG image plugin is present BEFORE signing ────────────────
+# MeetyIcon renders the app's button glyphs as data:image/svg+xml through
+# QQuick Image. A dev machine can hide a missing bundle plugin by loading it
+# from the Qt install, but a clean macOS install cannot. Keep the release
+# artefact honest here instead of shipping blank icon buttons.
+if ! find "$APP/Contents/PlugIns/imageformats" -name 'libqsvg.dylib' | grep -q .; then
+    echo "Error: Qt SVG image plugin not bundled by macdeployqt; button icons will be blank." >&2
+    exit 1
+fi
+echo "→ Qt SVG image plugin bundled ✓"
+
+# ── 4e. Bundle the ffmpeg CLI beside the helper (Contents/MacOS) ──────────────
 # Mixed recording (mic via cpal + system via ScreenCaptureKit) shells out to the
 # `ffmpeg` CLI, which the sidecar locates next to its own binary. macdeployqt
 # bundles only the QtMultimedia *plugin* libs, not the executable, and a clean
