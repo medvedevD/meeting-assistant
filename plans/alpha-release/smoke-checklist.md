@@ -24,16 +24,11 @@ file; the previous run is kept as `…log.prev`. Grab this on any failure:
 
 ## Install + open past the gate
 
-- **macOS** — do not open `MeetingAssistant.app` inside the DMG. Run the
-  one-line `curl …/install-macos.sh | bash` command shown at the top of the
-  GitHub Release. The release-pinned installer downloads and verifies the DMG,
-  installs the app in `/Applications`, removes quarantine recursively, verifies
-  the code seal, and launches the installed copy. Eject any previously mounted
-  Meeting Assistant DMG before launching again. Direct DMG fallback: open the
-  `.dmg`, drag to Applications, then run
-  `xattr -dr com.apple.quarantine /Applications/MeetingAssistant.app`. This is
-  not a public distribution fix; the durable exit is Developer ID signing +
-  notarization/stapling. See `packaging/macos/HOMEBREW-SUNSET.md`.
+- **macOS** — recommended: `brew tap medvedevd/meeting-assistant`, then
+  `brew install --cask meeting-assistant`. Plain DMG fallback: drag the app to
+  Applications, launch it there, then follow the in-DMG
+  **Privacy & Security → Open Anyway** guide. Do not run the app directly from
+  inside the DMG. See `packaging/macos/HOMEBREW-SUNSET.md`.
 - **Windows** — run `MeetingAssistant-Setup-*.exe`. SmartScreen: **More info →
   Run anyway** (unsigned). See `packaging/windows/SMARTSCREEN.md`.
 - **Linux** — `chmod +x MeetingAssistant-*.AppImage` and run it. If it fails to

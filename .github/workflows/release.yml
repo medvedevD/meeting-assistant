@@ -279,28 +279,6 @@ jobs:
       - name: List collected installers
         run: ls -lR installers
 
-      - name: Generate macOS installer
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          dmgs=(installers/*.dmg)
-          if [[ ${#dmgs[@]} -ne 1 ]]; then
-            echo "::error::expected exactly one macOS DMG, got ${#dmgs[@]}"
-            exit 1
-          fi
-          ./packaging/macos/render-release-installer.sh \
-            "${GITHUB_REF_NAME}" \
-            "${dmgs[0]}" \
-            "installers/install-macos.sh" \
-            "${GITHUB_REPOSITORY}"
-
-      - name: Validate macOS installer
-        shell: bash
-        run: |
-          bash -n installers/install-macos.sh
-          test -x installers/install-macos.sh
-
       - name: Create GitHub prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -322,12 +300,7 @@ jobs:
 
           **Or download the app:** grab \`MeetingAssistant-*.dmg\` below, open it, and drag the app onto the Programs (Applications) folder. The DMG window shows the one-time first-launch steps (if macOS blocks it: System Settings → Privacy & Security → Open Anyway).
 
-          **Or one-line installer (Terminal, no Homebrew):**
-          \`\`\`
-          curl -fL https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/install-macos.sh | bash
-          \`\`\`
-
-          The Homebrew and Terminal paths strip macOS quarantine, so the app opens with no Gatekeeper "cannot verify" wall. With the plain DMG download, follow the bundled guide for the one-time approval. Do **not** run MeetingAssistant.app directly from inside the DMG — install it first.
+          Homebrew strips macOS quarantine, so the app opens without the Gatekeeper "cannot verify" wall. With the plain DMG download, follow the bundled guide for the one-time approval. Do **not** run MeetingAssistant.app directly from inside the DMG — install it first.
 
           ## Other platforms
 

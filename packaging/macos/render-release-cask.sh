@@ -7,7 +7,7 @@
 # interpolated from `version`: a prerelease tag (v0.1.0-alpha.7) differs from
 # the DMG-embedded version (0.1.0), so a `url ".../#{version}/MeetingAssistant-#{version}.dmg"`
 # cask would point at a file that doesn't exist. We pin the real tag + real DMG
-# name + real checksum instead (mirrors render-release-installer.sh).
+# name + real checksum instead.
 #
 # The emitted cask's `version` is the tag without the leading `v`
 # (e.g. 0.1.0-alpha.7) — unique per release so `brew upgrade` detects new alpha
