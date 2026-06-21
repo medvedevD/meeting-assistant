@@ -163,27 +163,63 @@ FINAL="$DIST/MeetingAssistant.app"
 rm -rf "$FINAL"; ditto "$APP" "$FINAL"
 echo "✓ Signed app: $FINAL"
 
-# ── 7. DMG for the Homebrew Cask ─────────────────────────────────────────────
+# ── 7. DMG: drag-to-install layout + in-window first-launch steps ─────────────
+# Consumed by BOTH free channels — the Homebrew cask (render-release-cask.sh
+# points at this DMG) and the plain "download the DMG" GUI path. The DMG shows a
+# soft gradient backdrop with the app + Applications icons in a row near the top
+# and the first-launch steps (the un-notarized Gatekeeper "Open Anyway" path)
+# printed in the background below them. No separate guide file — the steps are in
+# the window itself (see make-dmg-background.swift).
+#
+# Built with create-dmg. Note: macOS 26 Finder does NOT reliably honor a DMG's
+# saved window size, so the window may open larger than requested. The layout
+# tolerates this: the gradient stretches cleanly, icons sit up top and text
+# below so they never collide, and there is no arrow keyed to an icon position.
+# create-dmg is used (not dmgbuild) because its Finder-written background
+# reliably renders on macOS 26, whereas dmgbuild's can show blank there.
 if [[ $MAKE_DMG -eq 1 ]]; then
+    command -v create-dmg >/dev/null 2>&1 || {
+        echo "Error: create-dmg not found (brew install create-dmg)." >&2; exit 1; }
     VER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
         "$FINAL/Contents/Info.plist" 2>/dev/null || echo 0.1.0)"
     DMG="$DIST/MeetingAssistant-$VER.dmg"
+    BG="$SCRIPT_DIR/../assets/dmg-background.png"
+    [[ -f "$BG" ]] || { echo "Error: missing DMG background: $BG" >&2; exit 1; }
+    # Finder treats background pixels as window points; a Retina-style 2x image
+    # is cropped instead of scaled and hides the lower first-launch guide.
+    BG_W="$(sips -g pixelWidth "$BG" 2>/dev/null | awk '/pixelWidth:/ {print $2}')"
+    BG_H="$(sips -g pixelHeight "$BG" 2>/dev/null | awk '/pixelHeight:/ {print $2}')"
+    [[ "$BG_W" == 720 && "$BG_H" == 480 ]] || {
+        echo "Error: DMG background must be exactly 720x480, got ${BG_W:-?}x${BG_H:-?}." >&2
+        exit 1
+    }
     echo "→ Building ${DMG} ..."
     rm -f "$DMG"
     DMG_SRC="$(mktemp -d)"
     ditto "$FINAL" "$DMG_SRC/MeetingAssistant.app"
-    ln -s /Applications "$DMG_SRC/Applications"
-    hdiutil create -volname "Meeting Assistant" -srcfolder "$DMG_SRC" \
-        -ov -format UDZO "$DMG" >/dev/null
+    # Icons in a top row (app left, Applications right); --app-drop-link adds the
+    # Applications symlink. Background art paints the steps below the icons.
+    create-dmg \
+        --volname "Meeting Assistant" \
+        --background "$BG" \
+        --window-pos 200 120 \
+        --window-size 720 480 \
+        --icon-size 110 \
+        --icon "MeetingAssistant.app" 230 150 \
+        --app-drop-link 490 150 \
+        --no-internet-enable \
+        "$DMG" "$DMG_SRC"
     rm -rf "$DMG_SRC"
     SHA="$(shasum -a 256 "$DMG" | awk '{print $1}')"
     echo "✓ DMG:    $DMG"
     echo "✓ sha256: $SHA"
-    echo "  → paste this sha256 into packaging/macos/Casks/meeting-assistant.rb"
+    echo "  → the Homebrew Cask is generated per-release by"
+    echo "    packaging/macos/render-release-cask.sh (no static .rb to edit)."
 fi
 
 echo
 echo "✓ macOS packaging complete."
 echo "  NOTE: spctl rejects this (ad-hoc, un-notarized) — expected. The"
-echo "  Homebrew Cask 'no_quarantine' is what lets it launch on a clean Mac."
-echo "  Sunset risk + exit: packaging/macos/HOMEBREW-SUNSET.md"
+echo "  Homebrew Cask's postflight strips com.apple.quarantine so it launches"
+echo "  on a clean Mac; the curl installer does the same. Sunset risk + the"
+echo "  durable fix (Developer ID + notarize): packaging/macos/HOMEBREW-SUNSET.md"
