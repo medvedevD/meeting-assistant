@@ -1,4 +1,5 @@
 #include "ApiClient.h"
+#include "AppPreferences.h"
 #include "JobPoller.h"
 #include "Logging.h"
 #include "PathUtils.h"
@@ -54,6 +55,8 @@ int main(int argc, char *argv[]) {
 
     SidecarManager sidecar;
     ApiClient api;
+    AppPreferences appPreferences(
+        AppPreferences::firstRunPreviewFromEnvironment());
     PathUtils pathUtils;
 
     // Wire the client the moment the sidecar is Ready (handshake + version
@@ -76,6 +79,8 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty(QStringLiteral("sidecar"),
                                              &sidecar);
     engine.rootContext()->setContextProperty(QStringLiteral("api"), &api);
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("appPreferences"), &appPreferences);
     engine.rootContext()->setContextProperty(QStringLiteral("pathUtils"),
                                              &pathUtils);
     engine.rootContext()->setContextProperty(QStringLiteral("controlsStyle"),
@@ -85,12 +90,6 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty(
         QStringLiteral("themeGalleryEnabled"),
         qEnvironmentVariableIsSet("MEETY_THEME_GALLERY"));
-    // Dev-only: FIRST_RUN=1 ./run-qt.sh forces the welcome/first-run surface
-    // while the script also isolates XDG data/config from the real profile.
-    engine.rootContext()->setContextProperty(
-        QStringLiteral("firstRunPreviewEnabled"),
-        qEnvironmentVariableIsSet("FIRST_RUN"));
-
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed, &app,
         []() { QCoreApplication::exit(-1); }, Qt::QueuedConnection);

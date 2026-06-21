@@ -107,7 +107,11 @@ Item {
     Component { id: diagComp;     DiagnosticsScreen {} }
     Component {
         id: welcomeComp
-        WelcomeScreen { shell: shellRef; store: store }
+        WelcomeScreen {
+            shell: shellRef
+            store: store
+            preferences: appPreferences
+        }
     }
 
     // ── date helpers (port of Sidebar.jsx groupByDate / formatTime) ──────────

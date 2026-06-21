@@ -1,7 +1,4 @@
-// WelcomeScreen — first-run and empty-content state from the Meety design.
-// The sidebar owns the meeting list; this content pane explains the first run
-// when there are no meetings and falls back to a compact "choose or record"
-// state when meetings exist but none is selected.
+// WelcomeScreen — persistent first-run onboarding and the empty-selection state.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -11,18 +8,78 @@ Page {
     id: scr
     property var shell
     property var store
+    property var preferences
 
-    readonly property bool firstRun: ((typeof firstRunPreviewEnabled !== "undefined"
-                                       && firstRunPreviewEnabled) === true)
-                                     || (store !== undefined && store.status === "empty")
+    readonly property bool previewEnabled:
+        preferences !== undefined
+        && preferences !== null
+        && preferences.firstRunPreviewEnabled === true
+    readonly property bool onboardingCompleted:
+        preferences !== undefined
+        && preferences !== null
+        && preferences.onboardingCompleted === true
+    readonly property string viewState:
+        store !== undefined && store !== null && store.status === "loading"
+        ? "loading"
+        : previewEnabled
+          || (!onboardingCompleted
+              && store !== undefined
+              && store !== null
+              && store.status === "empty")
+          ? "firstRun"
+          : "empty"
 
     font.family: Theme.fontUi
     font.pixelSize: Theme.fsBody
     background: Rectangle { color: Theme.paper }
 
+    function completeOnboarding() {
+        if (!scr.previewEnabled
+                && scr.preferences !== undefined
+                && scr.preferences !== null)
+            scr.preferences.completeOnboarding()
+    }
+
+    function reconcileExistingProfile() {
+        if (scr.previewEnabled
+                || scr.store === undefined
+                || scr.store === null
+                || scr.store.status !== "success"
+                || !scr.store.meetings
+                || scr.store.meetings.length === 0)
+            return
+        scr.completeOnboarding()
+    }
+
+    Component.onCompleted: reconcileExistingProfile()
+
+    Connections {
+        target: scr.store
+        enabled: scr.store !== undefined && scr.store !== null
+
+        function onStatusChanged() {
+            scr.reconcileExistingProfile()
+        }
+    }
+
     Loader {
         anchors.fill: parent
-        sourceComponent: scr.firstRun ? firstRunComp : emptyComp
+        sourceComponent: scr.viewState === "loading"
+                         ? loadingComp
+                         : scr.viewState === "firstRun"
+                           ? firstRunComp
+                           : emptyComp
+    }
+
+    Component {
+        id: loadingComp
+
+        Item {
+            BusyIndicator {
+                anchors.centerIn: parent
+                running: true
+            }
+        }
     }
 
     Component {
@@ -76,13 +133,19 @@ Page {
                         iconName: "mic"
                         variant: "accent"
                         enabled: scr.shell !== undefined
-                        onClicked: scr.shell.showNewRecording()
+                        onClicked: {
+                            scr.completeOnboarding()
+                            scr.shell.showNewRecording()
+                        }
                     }
                     MeetyButton {
                         text: qsTr("Импорт")
                         iconName: "doc"
                         enabled: scr.shell !== undefined
-                        onClicked: scr.shell.showNewRecording()
+                        onClicked: {
+                            scr.completeOnboarding()
+                            scr.shell.showNewRecording()
+                        }
                     }
                 }
             }
@@ -222,24 +285,28 @@ Page {
                         Layout.leftMargin: scr.width >= 760 ? 44 : 32
                         Layout.rightMargin: scr.width >= 760 ? 44 : 32
                         number: "1"
-                        title: qsTr("Разрешите «Запись экрана»")
-                        desc: qsTr("для захвата системного звука. Никаких снимков экрана meety не делает.")
+                        title: Qt.platform.os === "osx"
+                               ? qsTr("Разрешите доступ к микрофону и «Запись экрана»")
+                               : qsTr("Разрешите доступ к микрофону")
+                        desc: Qt.platform.os === "osx"
+                              ? qsTr("Второе разрешение нужно только для системного звука. Снимки экрана meety не делает.")
+                              : qsTr("Источник системного звука можно выбрать на экране записи, если он доступен в системе.")
                     }
                     WelcomeBullet {
                         Layout.fillWidth: true
                         Layout.leftMargin: scr.width >= 760 ? 44 : 32
                         Layout.rightMargin: scr.width >= 760 ? 44 : 32
                         number: "2"
-                        title: qsTr("Скачайте модель Whisper")
-                        desc: qsTr("≈3 ГБ · large-v3. Транскрипция идет локально, без интернета.")
+                        title: qsTr("Выберите модель Whisper")
+                        desc: qsTr("Размер и качество можно подобрать в настройках. Транскрипция идёт локально.")
                     }
                     WelcomeBullet {
                         Layout.fillWidth: true
                         Layout.leftMargin: scr.width >= 760 ? 44 : 32
                         Layout.rightMargin: scr.width >= 760 ? 44 : 32
                         number: "3"
-                        title: qsTr("Добавьте API-ключ Claude")
-                        desc: qsTr("для генерации протоколов. Ключ хранится в системном Keychain.")
+                        title: qsTr("Настройте генерацию протоколов")
+                        desc: qsTr("Выберите облачный LLM и добавьте его API-ключ либо используйте локальную Ollama.")
                     }
 
                     MeetyButton {
@@ -252,7 +319,10 @@ Page {
                         variant: "accent"
                         large: true
                         enabled: scr.shell !== undefined
-                        onClicked: scr.shell.showNewRecording()
+                        onClicked: {
+                            scr.completeOnboarding()
+                            scr.shell.showNewRecording()
+                        }
                     }
 
                     MeetyButton {
@@ -262,7 +332,10 @@ Page {
                         text: qsTr("У меня уже есть запись — импортировать")
                         variant: "ghost"
                         enabled: scr.shell !== undefined
-                        onClicked: scr.shell.showNewRecording()
+                        onClicked: {
+                            scr.completeOnboarding()
+                            scr.shell.showNewRecording()
+                        }
                     }
 
                     Item { Layout.fillHeight: true; Layout.minimumHeight: scr.width >= 760 ? 36 : 26 }
