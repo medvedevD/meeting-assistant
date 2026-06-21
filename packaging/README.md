@@ -6,7 +6,7 @@ GUI (`meeting-assistant-qt`, `MeetingAssistant` on macOS) plus the Rust
 
 | OS | Recipe | Artifact | Gate |
 |---|---|---|---|
-| macOS | [`macos/build-app.sh`](macos/build-app.sh) | `MeetingAssistant.app` + `.dmg`, ad-hoc deep-signed | Homebrew Cask `no_quarantine` (no paid Apple Dev ID in v1) |
+| macOS | [`macos/build-app.sh`](macos/build-app.sh) | `MeetingAssistant.app` + guided `.dmg`, ad-hoc deep-signed | self-hosted Homebrew Cask or `Open Anyway` |
 | Linux | [`linux/build-appimage.sh`](linux/build-appimage.sh) | `MeetingAssistant-<arch>.AppImage` | none ($0) |
 | Windows | [`windows/build-installer.ps1`](windows/build-installer.ps1) | `MeetingAssistant-Setup-<ver>.exe` (Inno Setup) | unsigned → 1-click SmartScreen |
 
@@ -89,8 +89,8 @@ FFmpeg compliance mirrors Qt's (dynamic link + written offer + source URL) in
 ## Per-OS gate status & documented exits
 
 - **macOS — Homebrew unsigned-cask sunset (~Sept 2026): TRACKED.** v1 is
-  ad-hoc signed + un-notarized; the cask's `no_quarantine` is what makes it
-  launch. Homebrew is sunsetting unsigned casks around **2026-09-01**.
+  ad-hoc signed + un-notarized; the self-hosted cask removes quarantine in
+  `postflight`. Homebrew is sunsetting unsigned casks around **2026-09-01**.
   Full risk, date, fallback (self-hosted tap) and exit (Apple Developer ID +
   notarization) → **[macos/HOMEBREW-SUNSET.md](macos/HOMEBREW-SUNSET.md)**.
   Early-spike result → **[macos/SPIKE-RESULTS.md](macos/SPIKE-RESULTS.md)**.
@@ -107,10 +107,10 @@ FFmpeg compliance mirrors Qt's (dynamic link + written offer + source URL) in
 ```
 packaging/
   README.md                     ← this file
-  assets/                       app icon (png/icns/ico) — shared by all 3
+  assets/                       app icons + macOS DMG background
   LICENSES/                     Qt LGPLv3 written offer + license text (bundled)
   macos/   Info.plist.in  entitlements.plist  codesign-deep.sh  build-app.sh
-           Casks/meeting-assistant.rb  HOMEBREW-SUNSET.md  SPIKE-RESULTS.md
+           render-release-cask.sh  HOMEBREW-SUNSET.md  SPIKE-RESULTS.md
   linux/   build-appimage.sh  meeting-assistant.desktop
   windows/ build-installer.ps1  installer.iss  SMARTSCREEN.md
 ```

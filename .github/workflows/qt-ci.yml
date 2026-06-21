@@ -136,7 +136,7 @@ jobs:
           qtdir="$RUNNER_TEMP/Qt"
           # Qt 6.7 renamed the Linux desktop arch gcc_64 -> linux_gcc_64.
           # -m qtmultimedia: the audio player needs Qt6::Multimedia, which the
-          # base desktop archive omits.
+          # base desktop archive omits. Qt SVG is part of the base archive.
           uvx --python 3.12 --from aqtinstall aqt \
             install-qt linux desktop 6.7.3 linux_gcc_64 -m qtmultimedia -O "$qtdir"
           # The on-disk folder name has varied across aqt/Qt versions

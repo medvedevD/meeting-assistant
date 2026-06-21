@@ -22,15 +22,26 @@ month and leave margin).
 
 ## What still works after the sunset (the fallback, already built)
 
-A **self-hosted tap** (`packaging/macos/Casks/meeting-assistant.rb`, installed
-via `brew tap <owner>/meeting-assistant <repo>` then `brew install --cask`):
+A **self-hosted tap** — `medvedevD/homebrew-meeting-assistant` — carries a cask
+generated per-release by `packaging/macos/render-release-cask.sh` and published
+by the `release.yml` "Publish Homebrew cask" step (there is no static `.rb` in
+this repo). Install:
+
+```sh
+brew tap medvedevd/meeting-assistant
+brew install --cask meeting-assistant
+```
+
 homebrew-cask policy does **not** govern third-party taps, so the cask keeps
-installing. **But** the fallback is strictly lower-trust and does **not**
-satisfy Gatekeeper for an un-notarized app — on a clean machine the user still
-hits the Sequoia "Privacy & Security → Open Anyway" wall (the right-click→Open
-bypass was removed in macOS 15). `no_quarantine` in a self-hosted cask still
-works *for now* but is on the same deprecation track. The self-hosted tap buys
-time; it is **not** a permanent answer.
+installing past the central-tap sunset. The cask's `postflight` strips
+`com.apple.quarantine`, so on a clean machine the app **launches without the
+Gatekeeper wall** — no "Open Anyway" detour (Gatekeeper's launch check only
+fires on quarantined files; removing the bit removes the check). Caveats: (1)
+Homebrew 6+ makes the user `brew trust` the tap once, because the postflight
+runs a command; (2) the app is still un-notarized, so this is lower-trust and
+not a permanent answer; (3) ad-hoc signing still resets the Screen-Recording TCC
+grant on every update. The self-hosted tap buys time; the real fix below is
+still required.
 
 ## Documented exit (the real fix)
 

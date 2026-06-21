@@ -39,7 +39,8 @@ Windows + Linux machines the gating dependency (the author has macOS locally).
   (macOS) and unsigned (Windows/Linux); bypass is documented. (See
   `packaging/macos/HOMEBREW-SUNSET.md`, `packaging/windows/SMARTSCREEN.md`.)
 - **Auto-updater** — not in alpha; re-download to update.
-- **Homebrew Cask / winget / repo distribution** — GitHub Release only for now.
+- **winget / repo distribution** — not in alpha. macOS additionally ships
+  through the self-hosted Homebrew tap `medvedevD/homebrew-meeting-assistant`.
 - **Intel-mac (x86_64) / universal binaries** — arm64 only this round.
 - New app features. This is purely a release-engineering task.
 - Apple Developer ID enrollment and any CI secrets.
@@ -88,7 +89,8 @@ break cannot silently regress on beta.
   - Windows: install Inno Setup (e.g. `choco install innosetup`), then
     `packaging/windows/build-installer.ps1` → `MeetingAssistant-Setup-<ver>.exe`
   - Final job: `gh release create "$TAG" --prerelease --title … --notes-file …`
-    attaching the three installers (download artifacts from the build jobs first).
+    attaching the three platform installers and updating the self-hosted
+    Homebrew tap with a release-pinned Cask.
 - `plans/alpha-release/smoke-checklist.md` *(new, side file)* — personal per-OS
   manual pass for the **full happy path** acceptance bar: launch → sidecar
   handshake → mic permission prompt → record → stop → transcription job

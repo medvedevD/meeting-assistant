@@ -161,7 +161,7 @@ jobs:
         run: |
           qtdir="$RUNNER_TEMP/Qt"
           # -m qtmultimedia: the audio player needs Qt6::Multimedia, which the
-          # base desktop archive omits.
+          # base desktop archive omits. Qt SVG is part of the base archive.
           uvx --python 3.12 --from aqtinstall aqt \
             install-qt linux desktop 6.7.3 linux_gcc_64 -m qtmultimedia -O "$qtdir"
           qmake="$(find "$qtdir/6.7.3" -path '*/bin/qmake' | head -n1)"
@@ -210,6 +210,12 @@ jobs:
           path: dist/macos/.tools
           key: macos-tools-${{ runner.arch }}-ffmpeg6.1.1-v2
 
+      # build-app.sh uses create-dmg for the drag-to-install layout + bundled
+      # first-launch guide. (textutil, used for the guide RTF, is built in.)
+      - name: Install create-dmg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install create-dmg
+
       # ── Build the installer with the existing per-OS packaging recipe ─────────
       - name: Package macOS (.dmg, ad-hoc signed)
         if: runner.os == 'macOS'
@@ -255,7 +261,14 @@ jobs:
     needs: package
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    # Job-level env so the cask-publish step's `if:` can test for the token
+    # (the `secrets` context isn't available in a step `if:`; `env` is). A
+    # fine-grained PAT with contents:write on <owner>/homebrew-meeting-assistant.
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all installers
         uses: actions/download-artifact@v4
         with:
@@ -270,9 +283,74 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          owner="${GITHUB_REPOSITORY%%/*}"
+          owner_lc="$(printf '%s' "$owner" | tr '[:upper:]' '[:lower:]')"
+          # Heredoc body sits at the run-block baseline so YAML dedents it to
+          # column 0 — leading spaces would render as markdown code blocks.
+          # Unquoted heredoc expands ${...}; backticks are escaped to stay literal.
+          cat > notes.md <<EOF
+          ## macOS install
+
+          **Homebrew (recommended):**
+          \`\`\`
+          brew tap ${owner_lc}/meeting-assistant
+          brew install --cask meeting-assistant
+          \`\`\`
+          Homebrew 6+ asks you to \`brew trust\` the tap once — it strips the macOS quarantine flag for you. Approve it with the command Homebrew prints, then re-run the install.
+
+          **Or download the app:** grab \`MeetingAssistant-*.dmg\` below, open it, and drag the app onto the Programs (Applications) folder. The DMG window shows the one-time first-launch steps (if macOS blocks it: System Settings → Privacy & Security → Open Anyway).
+
+          Homebrew strips macOS quarantine, so the app opens without the Gatekeeper "cannot verify" wall. With the plain DMG download, follow the bundled guide for the one-time approval. Do **not** run MeetingAssistant.app directly from inside the DMG — install it first.
+
+          ## Other platforms
+
+          Windows and Linux installers are attached below. This is an unsigned / ad-hoc-signed alpha for cross-OS self-testing; Windows may show SmartScreen. Protocol generation needs your own API key in Settings.
+
+          The durable macOS public-distribution fix remains Developer ID signing + notarization/stapling (see packaging/macos/HOMEBREW-SUNSET.md).
+          EOF
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
             --prerelease \
             --title "Meeting Assistant ${GITHUB_REF_NAME}" \
-            --notes "Alpha build for cross-OS self-test. **Unsigned / ad-hoc-signed** — expect a Gatekeeper (macOS) / SmartScreen (Windows) prompt; see packaging/macos/HOMEBREW-SUNSET.md and packaging/windows/SMARTSCREEN.md for the one-time bypass. Requires your own Anthropic API key (Settings) for protocol generation." \
+            --notes-file notes.md \
             installers/*
+
+      # Update the self-hosted Homebrew tap so `brew install --cask` and
+      # `brew upgrade` track this release. Runs AFTER the release exists (the
+      # cask URL points at the just-published DMG asset). Best-effort: skipped
+      # cleanly when HOMEBREW_TAP_TOKEN is unset, so a release never fails on it.
+      - name: Publish Homebrew cask to self-hosted tap
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmgs=(installers/*.dmg)
+          if [[ ${#dmgs[@]} -ne 1 ]]; then
+            echo "::error::expected exactly one macOS DMG, got ${#dmgs[@]}"
+            exit 1
+          fi
+          owner="${GITHUB_REPOSITORY%%/*}"
+          tap_repo="${owner}/homebrew-meeting-assistant"
+          git clone --depth 1 \
+            "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${tap_repo}.git" tap
+          mkdir -p tap/Casks
+          ./packaging/macos/render-release-cask.sh \
+            "${GITHUB_REF_NAME}" "${dmgs[0]}" "tap/Casks/meeting-assistant.rb" "${GITHUB_REPOSITORY}"
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/meeting-assistant.rb
+          if git diff --cached --quiet; then
+            echo "Cask already up to date; nothing to push."
+            exit 0
+          fi
+          git commit -m "meeting-assistant ${GITHUB_REF_NAME#v}"
+          git push origin HEAD
+          echo "Published cask to ${tap_repo}"
+
+      - name: Note when Homebrew tap token is missing
+        if: env.HOMEBREW_TAP_TOKEN == ''
+        run: |
+          echo "::notice::HOMEBREW_TAP_TOKEN not set — skipped updating the Homebrew tap." \
+               "Add a fine-grained PAT (contents:write on <owner>/homebrew-meeting-assistant)" \
+               "as the HOMEBREW_TAP_TOKEN repo secret to auto-publish the cask."
