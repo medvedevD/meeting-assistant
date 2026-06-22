@@ -216,17 +216,12 @@ fn custom_model_name(path: &str) -> String {
         .to_string()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptionModelSource {
+    #[default]
     Managed,
     CustomPath,
-}
-
-impl Default for TranscriptionModelSource {
-    fn default() -> Self {
-        Self::Managed
-    }
 }
 
 // ── LLM provider preferences ───────────────────────────────────────────────────

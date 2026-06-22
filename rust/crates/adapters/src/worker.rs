@@ -117,7 +117,11 @@ impl Worker {
     /// any survivors are aborted when the sidecar's outer 1.2s budget
     /// expires (they recover on next start via `recover_running_jobs`).
     pub async fn run(self: Arc<Self>, mut shutdown: tokio::sync::oneshot::Receiver<()>) {
-        info!(worker = self.name, pool_size = self.pool_size, "worker started");
+        info!(
+            worker = self.name,
+            pool_size = self.pool_size,
+            "worker started"
+        );
 
         let mut inflight: JoinSet<()> = JoinSet::new();
 
@@ -223,7 +227,27 @@ impl Worker {
             return;
         }
 
-        let result = if job.kind.is_transcription() {
+        // A previous attempt may have persisted the canonical result and then
+        // failed while enqueueing the chained job or marking this job done.
+        // Reuse that durable result instead of repeating Whisper inference or
+        // issuing another paid LLM request.
+        let result = if job.kind.is_transcription()
+            && meeting
+                .transcript_text
+                .as_deref()
+                .is_some_and(|text| !text.is_empty())
+        {
+            info!(job_id = %job.id, "transcript already persisted — skipping transcription");
+            Ok(())
+        } else if !job.kind.is_transcription()
+            && meeting
+                .protocol_text
+                .as_deref()
+                .is_some_and(|text| !text.is_empty())
+        {
+            info!(job_id = %job.id, "protocol already persisted — skipping LLM generation");
+            Ok(())
+        } else if job.kind.is_transcription() {
             self.run_transcribe(&job, &meeting, cancel.clone()).await
         } else {
             // JobKind::RegenerateProtocol
@@ -239,16 +263,22 @@ impl Worker {
                 // Enqueue before `mark_done` so the protocol job already exists in
                 // the queue by the time a client observes the transcription done.
                 if job.kind.is_transcription() && job.then_protocol {
-                    let proto =
-                        Job::new_regenerate_protocol(job.meeting_id.clone(), job.template_name.clone());
-                    match self.job_repo.enqueue(&proto).await {
-                        Ok(()) => info!(job_id = %job.id, next = %proto.id, "enqueued chained protocol job"),
-                        Err(e) => error!(job_id = %job.id, "failed to enqueue chained protocol job: {e}"),
+                    let proto = Job::new_regenerate_protocol(
+                        job.meeting_id.clone(),
+                        job.template_name.clone(),
+                    );
+                    if let Err(e) = self.job_repo.enqueue(&proto).await {
+                        error!(job_id = %job.id, "failed to enqueue chained protocol job: {e}");
+                        self.handle_failure(&job, &e).await;
+                        return;
                     }
+                    info!(job_id = %job.id, next = %proto.id, "enqueued chained protocol job");
                 }
                 let now = now_unix();
                 if let Err(e) = self.job_repo.mark_done(&job.id, now).await {
                     error!(job_id = %job.id, "mark_done failed: {e}");
+                    self.handle_failure(&job, &e).await;
+                    return;
                 } else {
                     info!(job_id = %job.id, kind = %job.kind.as_str(), "job done");
                 }
@@ -326,6 +356,13 @@ impl Worker {
                 date: &date,
             },
         );
+        // SQLite is the canonical result store: every readback path uses the
+        // meeting repository. Persist there before attempting the secondary
+        // Markdown copy so a successful job always survives restart.
+        self.meeting_repo
+            .save_transcript(&meeting.id, &transcript.text)
+            .await?;
+
         match self
             .file_store
             .write_transcript(&meeting.meeting_dir, &rendered)
@@ -337,18 +374,17 @@ impl Worker {
                     .save_transcript_file(&meeting.id, &transcript.text, &path)
                     .await
                 {
-                    warn!(job_id = %job.id, "save_transcript_file failed: {e}");
+                    warn!(
+                        job_id = %job.id,
+                        "transcript text is persisted, but saving its file path failed: {e}"
+                    );
                 }
             }
             Err(e) => {
-                warn!(job_id = %job.id, "write transcript.md failed: {e}");
-                if let Err(e) = self
-                    .meeting_repo
-                    .save_transcript(&meeting.id, &transcript.text)
-                    .await
-                {
-                    warn!(job_id = %job.id, "save_transcript fallback failed: {e}");
-                }
+                warn!(
+                    job_id = %job.id,
+                    "transcript text is persisted, but writing transcript.md failed: {e}"
+                );
             }
         }
         Ok(())
@@ -387,6 +423,13 @@ impl Worker {
             ) => r?,
         };
 
+        // Persist the generated protocol before the optional Markdown copy.
+        // This prevents a filesystem problem from turning a paid LLM response
+        // into a silently successful but missing result.
+        self.meeting_repo
+            .save_protocol(&meeting.id, &protocol.markdown)
+            .await?;
+
         match self
             .file_store
             .write_protocol(&meeting.meeting_dir, &protocol.markdown)
@@ -398,18 +441,17 @@ impl Worker {
                     .save_protocol_file(&meeting.id, &protocol.markdown, &path)
                     .await
                 {
-                    warn!(job_id = %job.id, "save_protocol_file failed: {e}");
+                    warn!(
+                        job_id = %job.id,
+                        "protocol text is persisted, but saving its file path failed: {e}"
+                    );
                 }
             }
             Err(e) => {
-                warn!(job_id = %job.id, "write protocol.md failed: {e}");
-                if let Err(e) = self
-                    .meeting_repo
-                    .save_protocol(&meeting.id, &protocol.markdown)
-                    .await
-                {
-                    warn!(job_id = %job.id, "save_protocol fallback failed: {e}");
-                }
+                warn!(
+                    job_id = %job.id,
+                    "protocol text is persisted, but writing protocol.md failed: {e}"
+                );
             }
         }
         Ok(())
@@ -427,21 +469,39 @@ impl Worker {
         if attempts >= MAX_ATTEMPTS || !class.is_retryable() {
             // Persist the classified cause for the UI (only on terminal failure).
             warn!(job_id = %job.id, attempts, error_class = class.as_str(), "job permanently failed: {msg}");
-            let _ = self
+            let persisted = self
                 .job_repo
                 .mark_permanently_failed(&job.id, &msg, Some(class.as_str()), attempts, now)
                 .await;
-            self.clear_progress(&job.id);
+            match persisted {
+                Ok(()) => self.clear_progress(&job.id),
+                Err(persist_err) => {
+                    error!(
+                        job_id = %job.id,
+                        "failed to persist terminal job failure: {persist_err}"
+                    );
+                }
+            }
         } else {
             let backoff_secs = 10i64 * (1 << attempts.min(10));
             let retry_after = now + backoff_secs;
             warn!(job_id = %job.id, attempts, backoff_secs, "job failed, will retry");
-            let _ = self
+            let persisted = self
                 .job_repo
                 .reset_for_retry(&job.id, &msg, attempts, retry_after, now)
                 .await;
-            // Re-queued; live progress will be re-established on next claim.
-            self.clear_progress(&job.id);
+            match persisted {
+                Ok(()) => {
+                    // Re-queued; live progress will be re-established on next claim.
+                    self.clear_progress(&job.id);
+                }
+                Err(persist_err) => {
+                    error!(
+                        job_id = %job.id,
+                        "failed to persist retry state: {persist_err}"
+                    );
+                }
+            }
         }
     }
 }
@@ -515,7 +575,9 @@ mod tests {
                 _transcript: &str,
                 _instructions: Option<&str>,
             ) -> Result<String, meeting_core::CoreError> {
-                Err(meeting_core::CoreError::ApiAuth("no API key configured".into()))
+                Err(meeting_core::CoreError::ApiAuth(
+                    "no API key configured".into(),
+                ))
             }
         }
 
@@ -607,17 +669,23 @@ mod tests {
         worker.execute(claimed, CancellationToken::new()).await;
 
         // The file got the rich, timestamped Markdown view.
-        let written = fs.written.lock().unwrap();
-        let (path, body) = written
-            .iter()
-            .find(|(p, _)| p.ends_with("transcript.md"))
-            .expect("transcript.md should be written");
+        let (path, body) = {
+            let written = fs.written.lock().unwrap();
+            written
+                .iter()
+                .find(|(p, _)| p.ends_with("transcript.md"))
+                .expect("transcript.md should be written")
+                .clone()
+        };
         assert!(path.ends_with("transcript.md"));
         assert!(
             body.contains("# Транскрипция: Стендап"),
             "missing header: {body}"
         );
-        assert!(body.contains("[00:00] привет мир"), "missing timestamp: {body}");
+        assert!(
+            body.contains("[00:00] привет мир"),
+            "missing timestamp: {body}"
+        );
         assert_ne!(
             body.trim(),
             "привет мир",
@@ -633,6 +701,230 @@ mod tests {
             .transcript_text
             .expect("transcript text should be persisted");
         assert_eq!(stored, "привет мир");
+    }
+
+    #[tokio::test]
+    async fn transcript_db_failure_requeues_job_instead_of_marking_done() {
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+        mr.set_fail_transcript_saves(true);
+
+        let job = Job::new_reprocess_transcribe(m.id.clone());
+        jr.enqueue(&job).await.unwrap();
+
+        let worker = make_worker(Arc::clone(&jr), Arc::clone(&mr));
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        worker.execute(claimed, CancellationToken::new()).await;
+
+        let after = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert_eq!(after.status, JobStatus::Pending);
+        assert_eq!(after.attempts, 1);
+        assert!(
+            mr.find_by_id(&m.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .transcript_text
+                .is_none(),
+            "failed canonical persistence must not be reported as done"
+        );
+    }
+
+    #[tokio::test]
+    async fn protocol_db_failure_requeues_job_instead_of_marking_done() {
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+        mr.save_transcript(&m.id, "transcript body").await.unwrap();
+        mr.set_fail_protocol_saves(true);
+
+        let job = Job::new_regenerate_protocol(m.id.clone(), None);
+        jr.enqueue(&job).await.unwrap();
+        let worker = Worker::new(
+            Arc::clone(&jr) as Arc<dyn JobRepo>,
+            Arc::clone(&mr) as Arc<dyn MeetingRepo>,
+            FakeTranscriber::new("ok"),
+            FakeMeetingFileStore::new(),
+            FakeLlmProvider::new("# Протокол"),
+            FakeTemplateLoader::empty(),
+            meeting_core::LiveProgress::new(),
+            PROTOCOL_KINDS,
+            1,
+            "protocol",
+        );
+
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        worker.execute(claimed, CancellationToken::new()).await;
+
+        let after = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert_eq!(after.status, JobStatus::Pending);
+        assert_eq!(after.attempts, 1);
+        assert!(
+            mr.find_by_id(&m.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .protocol_text
+                .is_none(),
+            "failed canonical persistence must not be reported as done"
+        );
+    }
+
+    #[tokio::test]
+    async fn markdown_file_failure_still_completes_after_db_persistence() {
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let fs = FakeMeetingFileStore::new();
+        fs.set_fail_result_writes(true);
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+
+        let job = Job::new_reprocess_transcribe(m.id.clone());
+        jr.enqueue(&job).await.unwrap();
+        let worker = Worker::new(
+            Arc::clone(&jr) as Arc<dyn JobRepo>,
+            Arc::clone(&mr) as Arc<dyn MeetingRepo>,
+            FakeTranscriber::new("persisted text"),
+            fs,
+            FakeLlmProvider::new("# Протокол"),
+            FakeTemplateLoader::empty(),
+            meeting_core::LiveProgress::new(),
+            TRANSCRIBE_KINDS,
+            1,
+            "transcribe",
+        );
+
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        worker.execute(claimed, CancellationToken::new()).await;
+
+        assert_eq!(
+            jr.find_by_id(&job.id).await.unwrap().unwrap().status,
+            JobStatus::Done
+        );
+        assert_eq!(
+            mr.find_by_id(&m.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .transcript_text
+                .as_deref(),
+            Some("persisted text")
+        );
+    }
+
+    #[tokio::test]
+    async fn chained_protocol_enqueue_failure_requeues_persisted_transcription() {
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+
+        let mut job = Job::new_reprocess_transcribe(m.id.clone());
+        job.then_protocol = true;
+        jr.enqueue(&job).await.unwrap();
+        jr.set_fail_protocol_enqueue(true);
+
+        let worker = make_worker(Arc::clone(&jr), Arc::clone(&mr));
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        worker.execute(claimed, CancellationToken::new()).await;
+
+        let after = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert_eq!(after.status, JobStatus::Pending);
+        assert_eq!(after.attempts, 1);
+        assert!(
+            mr.find_by_id(&m.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .transcript_text
+                .is_some(),
+            "transcript must remain available for the retry"
+        );
+    }
+
+    #[tokio::test]
+    async fn retry_with_persisted_protocol_skips_duplicate_llm_request() {
+        struct CountingLlm {
+            calls: Arc<AtomicUsize>,
+        }
+
+        #[async_trait]
+        impl meeting_core::ports::LlmProvider for CountingLlm {
+            async fn generate(
+                &self,
+                _transcript: &str,
+                _instructions: Option<&str>,
+            ) -> Result<String, CoreError> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                Ok("# duplicate".into())
+            }
+        }
+
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+        mr.save_transcript(&m.id, "transcript body").await.unwrap();
+        mr.save_protocol(&m.id, "# already persisted")
+            .await
+            .unwrap();
+
+        let job = Job::new_regenerate_protocol(m.id.clone(), None);
+        jr.enqueue(&job).await.unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let worker = Worker::new(
+            Arc::clone(&jr) as Arc<dyn JobRepo>,
+            Arc::clone(&mr) as Arc<dyn MeetingRepo>,
+            FakeTranscriber::new("ok"),
+            FakeMeetingFileStore::new(),
+            Arc::new(CountingLlm {
+                calls: Arc::clone(&calls),
+            }),
+            FakeTemplateLoader::empty(),
+            meeting_core::LiveProgress::new(),
+            PROTOCOL_KINDS,
+            1,
+            "protocol",
+        );
+
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        worker.execute(claimed, CancellationToken::new()).await;
+
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            jr.find_by_id(&job.id).await.unwrap().unwrap().status,
+            JobStatus::Done
+        );
+    }
+
+    #[tokio::test]
+    async fn mark_done_failure_requeues_without_losing_persisted_result() {
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+
+        let job = Job::new_reprocess_transcribe(m.id.clone());
+        jr.enqueue(&job).await.unwrap();
+        jr.set_fail_mark_done(true);
+
+        let worker = make_worker(Arc::clone(&jr), Arc::clone(&mr));
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        worker.execute(claimed, CancellationToken::new()).await;
+
+        let after = jr.find_by_id(&job.id).await.unwrap().unwrap();
+        assert_eq!(after.status, JobStatus::Pending);
+        assert_eq!(after.attempts, 1);
+        assert!(mr
+            .find_by_id(&m.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .transcript_text
+            .is_some());
     }
 
     // ── Concurrency / shutdown tests ─────────────────────────────────────────
@@ -774,8 +1066,15 @@ mod tests {
         })
         .await;
 
-        assert!(done.is_ok(), "both jobs should finish; serial worker deadlocks the barrier");
-        assert_eq!(peak.load(Ordering::SeqCst), 2, "two transcribes ran in parallel");
+        assert!(
+            done.is_ok(),
+            "both jobs should finish; serial worker deadlocks the barrier"
+        );
+        assert_eq!(
+            peak.load(Ordering::SeqCst),
+            2,
+            "two transcribes ran in parallel"
+        );
 
         run.abort();
     }
@@ -851,7 +1150,11 @@ mod tests {
             .unwrap();
 
         let after = jr.find_by_id(&job.id).await.unwrap().unwrap();
-        assert_eq!(after.status, JobStatus::Done, "drained job must be marked Done");
+        assert_eq!(
+            after.status,
+            JobStatus::Done,
+            "drained job must be marked Done"
+        );
     }
 
     #[tokio::test]
@@ -920,7 +1223,10 @@ mod tests {
             }
         })
         .await;
-        assert!(p_done.is_ok(), "protocol job should finish while transcribe is still running");
+        assert!(
+            p_done.is_ok(),
+            "protocol job should finish while transcribe is still running"
+        );
 
         // T(M1) is still mid-flight at this point.
         assert_eq!(

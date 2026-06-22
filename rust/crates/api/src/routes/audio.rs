@@ -21,7 +21,9 @@ pub struct AudioApi {
 type Svc = Arc<AudioApi>;
 
 /// `GET /api/v1/audio/devices` — selectable mic inputs and system-audio sources.
-pub async fn devices(State(svc): State<Svc>) -> Result<Json<AudioDeviceList>, (StatusCode, String)> {
+pub async fn devices(
+    State(svc): State<Svc>,
+) -> Result<Json<AudioDeviceList>, (StatusCode, String)> {
     svc.enumerator
         .list_devices()
         .await
@@ -69,7 +71,10 @@ pub async fn monitor_level(
     State(svc): State<Svc>,
     Path(id): Path<String>,
 ) -> Result<Json<AudioLevel>, StatusCode> {
-    svc.monitor.level(&id).map(Json).ok_or(StatusCode::NOT_FOUND)
+    svc.monitor
+        .level(&id)
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
 }
 
 /// `DELETE /api/v1/audio/monitor/:id` — stop a metering session.

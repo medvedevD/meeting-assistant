@@ -283,11 +283,13 @@ mod tests {
         let model_path = dir.path().join("ggml-custom.bin");
         fs::write(&model_path, b"not a real model, enough for path validation")
             .expect("write model");
-        let mut settings = PersistedSettings::default();
-        settings.transcriber = PersistedTranscriberPrefs {
-            model_source: TranscriptionModelSource::CustomPath,
-            custom_model_path: Some(model_path.display().to_string()),
-            ..PersistedTranscriberPrefs::default()
+        let settings = PersistedSettings {
+            transcriber: PersistedTranscriberPrefs {
+                model_source: TranscriptionModelSource::CustomPath,
+                custom_model_path: Some(model_path.display().to_string()),
+                ..PersistedTranscriberPrefs::default()
+            },
+            ..PersistedSettings::default()
         };
 
         let resolved = resolve_transcription_model_path(&settings).expect("model should resolve");

@@ -89,39 +89,41 @@ impl MeetingRepo for SqliteMeetingRepo {
     async fn save_transcript(&self, id: &str, text: &str) -> Result<(), CoreError> {
         let db = Arc::clone(&self.0);
         let id = id.to_string();
+        let query_id = id.clone();
         let text = text.to_string();
 
-        tokio::task::spawn_blocking(move || {
+        let updated = tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().unwrap();
             conn.execute(
                 "UPDATE meetings SET transcript_text=?1 WHERE id=?2",
-                rusqlite::params![text, id],
+                rusqlite::params![text, query_id],
             )
         })
         .await
         .map_err(|e| CoreError::Storage(e.to_string()))?
         .map_err(|e| CoreError::Storage(e.to_string()))?;
 
-        Ok(())
+        ensure_meeting_updated(updated, &id)
     }
 
     async fn save_protocol(&self, id: &str, text: &str) -> Result<(), CoreError> {
         let db = Arc::clone(&self.0);
         let id = id.to_string();
+        let query_id = id.clone();
         let text = text.to_string();
 
-        tokio::task::spawn_blocking(move || {
+        let updated = tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().unwrap();
             conn.execute(
                 "UPDATE meetings SET protocol_text=?1 WHERE id=?2",
-                rusqlite::params![text, id],
+                rusqlite::params![text, query_id],
             )
         })
         .await
         .map_err(|e| CoreError::Storage(e.to_string()))?
         .map_err(|e| CoreError::Storage(e.to_string()))?;
 
-        Ok(())
+        ensure_meeting_updated(updated, &id)
     }
 
     async fn save_transcript_file(
@@ -132,41 +134,43 @@ impl MeetingRepo for SqliteMeetingRepo {
     ) -> Result<(), CoreError> {
         let db = Arc::clone(&self.0);
         let id = id.to_string();
+        let query_id = id.clone();
         let text = text.to_string();
         let path_str = path.display().to_string();
 
-        tokio::task::spawn_blocking(move || {
+        let updated = tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().unwrap();
             conn.execute(
                 "UPDATE meetings SET transcript_text=?1, transcript_path=?2 WHERE id=?3",
-                rusqlite::params![text, path_str, id],
+                rusqlite::params![text, path_str, query_id],
             )
         })
         .await
         .map_err(|e| CoreError::Storage(e.to_string()))?
         .map_err(|e| CoreError::Storage(e.to_string()))?;
 
-        Ok(())
+        ensure_meeting_updated(updated, &id)
     }
 
     async fn save_protocol_file(&self, id: &str, text: &str, path: &Path) -> Result<(), CoreError> {
         let db = Arc::clone(&self.0);
         let id = id.to_string();
+        let query_id = id.clone();
         let text = text.to_string();
         let path_str = path.display().to_string();
 
-        tokio::task::spawn_blocking(move || {
+        let updated = tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().unwrap();
             conn.execute(
                 "UPDATE meetings SET protocol_text=?1, protocol_path=?2 WHERE id=?3",
-                rusqlite::params![text, path_str, id],
+                rusqlite::params![text, path_str, query_id],
             )
         })
         .await
         .map_err(|e| CoreError::Storage(e.to_string()))?
         .map_err(|e| CoreError::Storage(e.to_string()))?;
 
-        Ok(())
+        ensure_meeting_updated(updated, &id)
     }
 
     async fn update_name(&self, id: &str, name: &str) -> Result<(), CoreError> {
@@ -296,6 +300,14 @@ impl MeetingRepo for SqliteMeetingRepo {
     }
 }
 
+fn ensure_meeting_updated(updated: usize, id: &str) -> Result<(), CoreError> {
+    if updated == 1 {
+        Ok(())
+    } else {
+        Err(CoreError::NotFound(format!("meeting {id}")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,6 +378,29 @@ mod tests {
         let found = repo.find_by_id(&m.id).await.unwrap().unwrap();
         assert_eq!(found.protocol_text.as_deref(), Some("# Протокол"));
         assert_eq!(found.protocol_path, Some(path));
+    }
+
+    #[tokio::test]
+    async fn result_updates_reject_unknown_meeting() {
+        let repo = make_repo();
+        let path = PathBuf::from("/meetings/missing/result.md");
+
+        assert!(matches!(
+            repo.save_transcript("missing", "text").await,
+            Err(CoreError::NotFound(_))
+        ));
+        assert!(matches!(
+            repo.save_protocol("missing", "text").await,
+            Err(CoreError::NotFound(_))
+        ));
+        assert!(matches!(
+            repo.save_transcript_file("missing", "text", &path).await,
+            Err(CoreError::NotFound(_))
+        ));
+        assert!(matches!(
+            repo.save_protocol_file("missing", "text", &path).await,
+            Err(CoreError::NotFound(_))
+        ));
     }
 
     #[tokio::test]

@@ -130,7 +130,7 @@ mod tests {
             meeting.audio_path,
             meeting.meeting_dir.join("recording.wav")
         );
-        assert!(meeting.audio_path.starts_with(&meetings_dir()));
+        assert!(meeting.audio_path.starts_with(meetings_dir()));
     }
 
     #[tokio::test]
@@ -146,7 +146,7 @@ mod tests {
         )
         .await;
 
-        assert!(meeting.meeting_dir.starts_with(&meetings_dir()));
+        assert!(meeting.meeting_dir.starts_with(meetings_dir()));
     }
 
     #[tokio::test]

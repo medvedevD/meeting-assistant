@@ -192,8 +192,8 @@ mod tests {
 
         assert_eq!(rolled_back, 2);
         assert_eq!(current_version(&conn), 1);
-        assert_eq!(column_exists(&conn, "things", "note"), false);
-        assert_eq!(column_exists(&conn, "things", "name"), true);
+        assert!(!column_exists(&conn, "things", "note"));
+        assert!(column_exists(&conn, "things", "name"));
     }
 
     #[test]

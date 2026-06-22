@@ -10,6 +10,7 @@ use crate::{
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 // ── FakeTranscriber ──────────────────────────────────────────────────────────
@@ -44,11 +45,21 @@ impl Transcriber for FakeTranscriber {
 #[derive(Default)]
 pub struct FakeMeetingRepo {
     store: Mutex<Vec<Meeting>>,
+    fail_transcript_saves: AtomicBool,
+    fail_protocol_saves: AtomicBool,
 }
 
 impl FakeMeetingRepo {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    pub fn set_fail_transcript_saves(&self, fail: bool) {
+        self.fail_transcript_saves.store(fail, Ordering::SeqCst);
+    }
+
+    pub fn set_fail_protocol_saves(&self, fail: bool) {
+        self.fail_protocol_saves.store(fail, Ordering::SeqCst);
     }
 }
 
@@ -75,12 +86,16 @@ impl MeetingRepo for FakeMeetingRepo {
             .lock()
             .unwrap()
             .iter()
-            .filter(|m| m.audio_path == PathBuf::from(path))
-            .last()
+            .rfind(|m| m.audio_path == *path)
             .cloned())
     }
 
     async fn save_transcript(&self, id: &str, text: &str) -> Result<(), CoreError> {
+        if self.fail_transcript_saves.load(Ordering::SeqCst) {
+            return Err(CoreError::Storage(
+                "injected transcript persistence failure".into(),
+            ));
+        }
         let mut store = self.store.lock().unwrap();
         if let Some(m) = store.iter_mut().find(|m| m.id == id) {
             m.transcript_text = Some(text.to_string());
@@ -91,6 +106,11 @@ impl MeetingRepo for FakeMeetingRepo {
     }
 
     async fn save_protocol(&self, id: &str, text: &str) -> Result<(), CoreError> {
+        if self.fail_protocol_saves.load(Ordering::SeqCst) {
+            return Err(CoreError::Storage(
+                "injected protocol persistence failure".into(),
+            ));
+        }
         let mut store = self.store.lock().unwrap();
         if let Some(m) = store.iter_mut().find(|m| m.id == id) {
             m.protocol_text = Some(text.to_string());
@@ -106,6 +126,11 @@ impl MeetingRepo for FakeMeetingRepo {
         text: &str,
         path: &Path,
     ) -> Result<(), CoreError> {
+        if self.fail_transcript_saves.load(Ordering::SeqCst) {
+            return Err(CoreError::Storage(
+                "injected transcript persistence failure".into(),
+            ));
+        }
         let mut store = self.store.lock().unwrap();
         if let Some(m) = store.iter_mut().find(|m| m.id == id) {
             m.transcript_text = Some(text.to_string());
@@ -117,6 +142,11 @@ impl MeetingRepo for FakeMeetingRepo {
     }
 
     async fn save_protocol_file(&self, id: &str, text: &str, path: &Path) -> Result<(), CoreError> {
+        if self.fail_protocol_saves.load(Ordering::SeqCst) {
+            return Err(CoreError::Storage(
+                "injected protocol persistence failure".into(),
+            ));
+        }
         let mut store = self.store.lock().unwrap();
         if let Some(m) = store.iter_mut().find(|m| m.id == id) {
             m.protocol_text = Some(text.to_string());
@@ -190,6 +220,7 @@ pub struct FakeMeetingFileStore {
     pub removed_dirs: Mutex<Vec<PathBuf>>,
     /// Files returned by `list_audio_files`, regardless of the queried dir.
     audio_files: Mutex<Vec<PathBuf>>,
+    fail_result_writes: AtomicBool,
 }
 
 impl FakeMeetingFileStore {
@@ -203,11 +234,20 @@ impl FakeMeetingFileStore {
             ..Self::default()
         })
     }
+
+    pub fn set_fail_result_writes(&self, fail: bool) {
+        self.fail_result_writes.store(fail, Ordering::SeqCst);
+    }
 }
 
 #[async_trait]
 impl MeetingFileStore for FakeMeetingFileStore {
     async fn write_transcript(&self, dir: &Path, text: &str) -> Result<PathBuf, CoreError> {
+        if self.fail_result_writes.load(Ordering::SeqCst) {
+            return Err(CoreError::Storage(
+                "injected transcript file failure".into(),
+            ));
+        }
         let path = dir.join("transcript.md");
         self.written
             .lock()
@@ -217,6 +257,9 @@ impl MeetingFileStore for FakeMeetingFileStore {
     }
 
     async fn write_protocol(&self, dir: &Path, text: &str) -> Result<PathBuf, CoreError> {
+        if self.fail_result_writes.load(Ordering::SeqCst) {
+            return Err(CoreError::Storage("injected protocol file failure".into()));
+        }
         let path = dir.join("protocol.md");
         self.written
             .lock()
@@ -258,17 +301,34 @@ impl MeetingFileStore for FakeMeetingFileStore {
 #[derive(Default)]
 pub struct FakeJobRepo {
     store: Mutex<Vec<Job>>,
+    fail_protocol_enqueue: AtomicBool,
+    fail_mark_done: AtomicBool,
 }
 
 impl FakeJobRepo {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }
+
+    pub fn set_fail_protocol_enqueue(&self, fail: bool) {
+        self.fail_protocol_enqueue.store(fail, Ordering::SeqCst);
+    }
+
+    pub fn set_fail_mark_done(&self, fail: bool) {
+        self.fail_mark_done.store(fail, Ordering::SeqCst);
+    }
 }
 
 #[async_trait]
 impl JobRepo for FakeJobRepo {
     async fn enqueue(&self, job: &Job) -> Result<(), CoreError> {
+        if job.kind == JobKind::RegenerateProtocol
+            && self.fail_protocol_enqueue.load(Ordering::SeqCst)
+        {
+            return Err(CoreError::Storage(
+                "injected chained protocol enqueue failure".into(),
+            ));
+        }
         self.store.lock().unwrap().push(job.clone());
         Ok(())
     }
@@ -317,6 +377,9 @@ impl JobRepo for FakeJobRepo {
     }
 
     async fn mark_done(&self, id: &str, now_ts: i64) -> Result<(), CoreError> {
+        if self.fail_mark_done.load(Ordering::SeqCst) {
+            return Err(CoreError::Storage("injected mark_done failure".into()));
+        }
         let mut store = self.store.lock().unwrap();
         if let Some(j) = store.iter_mut().find(|j| j.id == id) {
             j.status = JobStatus::Done;
@@ -357,7 +420,7 @@ impl JobRepo for FakeJobRepo {
             j.status = JobStatus::Failed;
             j.attempts = attempts;
             j.last_error = Some(error.to_string());
-            j.error_class = error_class.and_then(crate::entities::ErrorClass::from_str);
+            j.error_class = error_class.and_then(crate::entities::ErrorClass::parse);
             j.updated_at = now_ts;
         }
         Ok(())
@@ -645,13 +708,17 @@ impl AudioLevelMonitor for FakeAudioLevelMonitor {
         self.active.lock().unwrap().insert(id.to_string());
         let resolved = ResolvedDevices {
             mic: match spec.source {
-                CaptureSource::Mic => Some(spec.mic_device.clone().unwrap_or_else(|| "default".into())),
+                CaptureSource::Mic => {
+                    Some(spec.mic_device.clone().unwrap_or_else(|| "default".into()))
+                }
                 _ => None,
             },
             system: match spec.source {
-                CaptureSource::System => {
-                    Some(spec.system_device.clone().unwrap_or_else(|| "default".into()))
-                }
+                CaptureSource::System => Some(
+                    spec.system_device
+                        .clone()
+                        .unwrap_or_else(|| "default".into()),
+                ),
                 _ => None,
             },
         };
@@ -686,9 +753,7 @@ pub struct FakeTemplateBundle {
 }
 
 impl FakeTemplateBundle {
-    pub fn new(
-        entries: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
-    ) -> Self {
+    pub fn new(entries: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>) -> Self {
         Self {
             entries: entries
                 .into_iter()

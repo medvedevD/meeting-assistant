@@ -112,7 +112,7 @@ impl MeetingFileStore for FsMeetingFileStore {
                 let path = entry.path();
                 let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
                 if is_dir {
-                    if depth + 1 <= max_depth {
+                    if depth < max_depth {
                         stack.push((path, depth + 1));
                     }
                 } else if path
@@ -193,7 +193,11 @@ mod tests {
         })
         .await;
         assert!(res.is_err());
-        assert_eq!(calls.get(), 1, "must not retry a non-sharing-violation error");
+        assert_eq!(
+            calls.get(),
+            1,
+            "must not retry a non-sharing-violation error"
+        );
     }
 
     // NotFound means the target is already gone — treated as success.

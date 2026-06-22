@@ -438,7 +438,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri(&format!("/api/v1/meetings/{}", m.id))
+                    .uri(format!("/api/v1/meetings/{}", m.id))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -470,7 +470,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("GET")
-                    .uri(&format!("/api/v1/meetings/{}", m.id))
+                    .uri(format!("/api/v1/meetings/{}", m.id))
                     .body(Body::empty())
                     .unwrap(),
             )

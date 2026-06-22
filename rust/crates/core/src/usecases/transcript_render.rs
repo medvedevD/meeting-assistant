@@ -203,7 +203,10 @@ mod tests {
         let md = render_markdown(&t, &meta());
         assert!(md.contains("[00:00] привет\n"), "got: {md}");
         assert!(md.contains("[00:02] мир\n"), "got: {md}");
-        assert!(!md.contains("[00:01]"), "empty segment must be skipped: {md}");
+        assert!(
+            !md.contains("[00:01]"),
+            "empty segment must be skipped: {md}"
+        );
     }
 
     #[test]

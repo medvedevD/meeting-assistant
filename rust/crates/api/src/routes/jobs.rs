@@ -103,9 +103,13 @@ pub async fn cancel(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    let outcome = cancel_job_usecase(Arc::clone(&state.job_repo), Arc::clone(&state.progress), &id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let outcome = cancel_job_usecase(
+        Arc::clone(&state.job_repo),
+        Arc::clone(&state.progress),
+        &id,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     match outcome {
         CancelOutcome::NotFound => Err((StatusCode::NOT_FOUND, format!("job {id} not found"))),
         CancelOutcome::Cancelled | CancelOutcome::Cancelling => Ok(StatusCode::ACCEPTED),
@@ -127,7 +131,10 @@ pub async fn active(
         .into_iter()
         .map(|job| {
             let mut r: JobResponse = job.into();
-            r.progress = state.progress.get(&r.id).map(|e| e.value().progress.clone());
+            r.progress = state
+                .progress
+                .get(&r.id)
+                .map(|e| e.value().progress.clone());
             r
         })
         .collect();
@@ -598,8 +605,7 @@ mod tests {
         jr.enqueue(&running).await.unwrap();
         jr.claim_pending(i64::MAX).await.unwrap();
 
-        let progress: crate::router::LiveJobs =
-            meeting_core::LiveProgress::new();
+        let progress: crate::router::LiveJobs = meeting_core::LiveProgress::new();
         let token = CancellationToken::new();
         progress.insert(
             running.id.clone(),
@@ -624,7 +630,10 @@ mod tests {
 
         let resp = app.oneshot(delete_request(&running.id)).await.unwrap();
         assert_eq!(resp.status(), StatusCode::ACCEPTED);
-        assert!(token.is_cancelled(), "running job's token must be signalled");
+        assert!(
+            token.is_cancelled(),
+            "running job's token must be signalled"
+        );
     }
 
     // ── GET /api/v1/jobs/:id/events (SSE) ────────────────────────────────────
@@ -698,7 +707,10 @@ mod tests {
         let body = body_text(resp).await;
         assert!(body.contains("event: status"), "body: {body}");
         assert!(body.contains("\"status\":\"done\""), "body: {body}");
-        assert!(body.contains(&format!("\"id\":\"{}\"", done.id)), "body: {body}");
+        assert!(
+            body.contains(&format!("\"id\":\"{}\"", done.id)),
+            "body: {body}"
+        );
     }
 
     #[tokio::test]

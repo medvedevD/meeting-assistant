@@ -24,7 +24,10 @@ pub struct LiveEntry {
 #[derive(Clone, Debug)]
 pub enum ProgressEvent {
     /// A progress snapshot was written for this job (it is claimed / running).
-    Snapshot { job_id: String, progress: JobProgress },
+    Snapshot {
+        job_id: String,
+        progress: JobProgress,
+    },
     /// The job left the live table (it reached a terminal state). A subscriber
     /// should read the persisted job from the DB to obtain the final status.
     Terminal { job_id: String },
@@ -164,7 +167,10 @@ mod tests {
         // The cancellation token survived the publish (same entry, mutated in place).
         let entry = live.get("j1").expect("entry present");
         entry.cancel.cancel();
-        assert!(token.is_cancelled(), "publish must not replace the cancel token");
+        assert!(
+            token.is_cancelled(),
+            "publish must not replace the cancel token"
+        );
     }
 
     #[tokio::test]

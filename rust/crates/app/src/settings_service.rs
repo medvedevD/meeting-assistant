@@ -238,10 +238,7 @@ impl SettingsService for AppSettingsService {
     }
 
     async fn lock_secret_store(&self) -> Result<(), String> {
-        self.handles
-            .secrets
-            .lock()
-            .map_err(|e| e.to_string())?;
+        self.handles.secrets.lock().map_err(|e| e.to_string())?;
         // Keys are no longer readable — rebuild so the active LLM reflects that.
         self.rebuild_llm(&self.store().load());
         Ok(())

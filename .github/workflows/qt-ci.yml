@@ -19,9 +19,44 @@ jobs:
       - name: Enforce protocol-version single source of truth
         run: bash .github/scripts/check-protocol-version.sh
 
+  rust-quality:
+    name: rust quality gate
+    needs: protocol-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: rust-quality-${{ runner.os }}
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang libclang-dev \
+            libasound2-dev pkg-config libssl-dev
+
+      - name: Rust format check
+        run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
+
+      - name: Rust clippy
+        run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
+
+      - name: Rust workspace tests
+        run: cargo test --manifest-path rust/Cargo.toml --workspace
+
   build-and-test:
     name: build+test (${{ matrix.os }})
-    needs: protocol-version
+    needs: [protocol-version, rust-quality]
     runs-on: ${{ matrix.os }}
     # Build the Linux AppImage inside an Ubuntu 20.04 container (glibc 2.31 —
     # the oldest base the Qt 6.7 prebuilt binaries support). AppImage bundles

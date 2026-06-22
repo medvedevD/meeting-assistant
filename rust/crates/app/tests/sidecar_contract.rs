@@ -57,7 +57,8 @@ impl Sidecar {
     /// Spawn with a fresh isolated data dir.
     fn spawn() -> Sidecar {
         let data = tempfile::tempdir().expect("tempdir");
-        Sidecar::spawn_in(&data.path().to_path_buf(), &[], data)
+        let data_path = data.path().to_path_buf();
+        Sidecar::spawn_in(&data_path, &[], data)
     }
 
     /// Spawn pointing at `data_dir` (shared between instances for the

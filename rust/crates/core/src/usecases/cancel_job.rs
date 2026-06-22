@@ -121,9 +121,13 @@ mod tests {
             },
         );
 
-        let out = cancel_job(Arc::clone(&jr) as Arc<dyn JobRepo>, Arc::clone(&live), &job.id)
-            .await
-            .unwrap();
+        let out = cancel_job(
+            Arc::clone(&jr) as Arc<dyn JobRepo>,
+            Arc::clone(&live),
+            &job.id,
+        )
+        .await
+        .unwrap();
         assert_eq!(out, CancelOutcome::Cancelling);
         assert!(token.is_cancelled(), "token should be flipped");
 
