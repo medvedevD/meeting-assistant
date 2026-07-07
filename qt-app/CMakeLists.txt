@@ -13,9 +13,9 @@ project(meeting-assistant-qt
 # Qt 6.7 it loads the ffmpeg media backend at runtime — the platform deploy
 # tools bundle it, but its plugins must be covered by macOS signing/notarization
 # and the AppImage/Windows layouts (see packaging/).
-find_package(Qt6 6.8 REQUIRED COMPONENTS Quick QuickControls2 Network Multimedia Svg)
+find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2 Network Multimedia Svg)
 
-qt_standard_project_setup(REQUIRES 6.8)
+qt_standard_project_setup(REQUIRES 6.7)
 
 # QML files live in qml/ (an extra dir); let Qt generate the qmldir for it.
 if(QT_KNOWN_POLICY_QTP0004)

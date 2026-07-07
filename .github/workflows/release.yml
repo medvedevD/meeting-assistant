@@ -61,7 +61,11 @@ jobs:
           entry() { # entry <key> → one matrix include object
             case "$1" in
               linux)   echo '{"os":"ubuntu-latest","container":"ubuntu:20.04","installer_glob":"dist/linux/*.AppImage"}' ;;
-              macos)   echo '{"os":"macos-latest","container":"","installer_glob":"dist/macos/*.dmg"}' ;;
+              # macos-14 (not macos-latest): aqt's Qt 6.7 prebuilt hard-links
+              # -framework AGL, removed from the macos-15+/Xcode 26 SDK on
+              # macos-latest. macos-14 keeps the AGL stub and is arm64 (the
+              # .dmg's target arch). See qt-ci.yml for the same pin.
+              macos)   echo '{"os":"macos-14","container":"","installer_glob":"dist/macos/*.dmg"}' ;;
               windows) echo '{"os":"windows-latest","container":"","installer_glob":"dist/windows/*.exe"}' ;;
               *) echo "::error::unknown target '$1'" >&2; exit 1 ;;
             esac
@@ -178,11 +182,11 @@ jobs:
       #   its deep dependency chain is never needed.) qt-ci.yml doesn't bundle
       #   multimedia, so it never needed any of these.
 
-      - name: Install Qt 6.8 (host runners)
+      - name: Install Qt 6.7 (host runners)
         if: matrix.container == ''
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.8.3'
+          version: '6.7.3'
           # qtmultimedia is NOT in the default desktop set; the in-card audio
           # player's find_package(Qt6 … Multimedia) fails without it.
           modules: qtmultimedia
@@ -192,7 +196,7 @@ jobs:
         if: matrix.container != ''
         uses: astral-sh/setup-uv@v5
 
-      - name: Install Qt 6.8 (Linux container)
+      - name: Install Qt 6.7 (Linux container)
         if: matrix.container != ''
         shell: bash
         run: |
@@ -200,8 +204,8 @@ jobs:
           # -m qtmultimedia: the audio player needs Qt6::Multimedia, which the
           # base desktop archive omits. Qt SVG is part of the base archive.
           uvx --python 3.12 --from aqtinstall aqt \
-            install-qt linux desktop 6.8.3 linux_gcc_64 -m qtmultimedia -O "$qtdir"
-          qmake="$(find "$qtdir/6.8.3" -path '*/bin/qmake' | head -n1)"
+            install-qt linux desktop 6.7.3 linux_gcc_64 -m qtmultimedia -O "$qtdir"
+          qmake="$(find "$qtdir/6.7.3" -path '*/bin/qmake' | head -n1)"
           root="$(dirname "$(dirname "$qmake")")"
           test -x "$root/bin/qmake"
           echo "QT_ROOT_DIR=$root" >> "$GITHUB_ENV"

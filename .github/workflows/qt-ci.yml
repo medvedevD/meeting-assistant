@@ -59,7 +59,7 @@ jobs:
     needs: [protocol-version, rust-quality]
     runs-on: ${{ matrix.os }}
     # Build the Linux AppImage inside an Ubuntu 20.04 container (glibc 2.31 —
-    # the oldest base the Qt 6.8 prebuilt binaries support). AppImage bundles
+    # the oldest base the Qt 6.7 prebuilt binaries support). AppImage bundles
     # system libs but never glibc itself, so the floor is whatever the build
     # host ships: building on ubuntu-latest (glibc 2.39) made the artifact
     # require GLIBC_2.38 and fail on Astra Linux / Debian 11/12. macOS and
@@ -72,7 +72,11 @@ jobs:
           - os: ubuntu-latest
             container: ubuntu:20.04
             sidecar: rust/target/release/meeting-server
-          - os: macos-latest
+          # macos-14 (not macos-latest): the aqt-installed Qt 6.7 prebuilt
+          # hard-links -framework AGL, which the macos-15+ / Xcode 26 SDK on
+          # macos-latest removed (ld: framework 'AGL' not found). macos-14 still
+          # ships the AGL stub and is arm64, matching the shipped .dmg arch.
+          - os: macos-14
             sidecar: rust/target/release/meeting-server
           - os: windows-latest
             sidecar: rust/target/release/meeting-server.exe
@@ -143,11 +147,11 @@ jobs:
 
       # macOS/Windows run directly on the hosted image, where install-qt-action
       # can use its bundled toolcache Python.
-      - name: Install Qt 6.8 (host runners)
+      - name: Install Qt 6.7 (host runners)
         if: matrix.container == ''
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.8.3'
+          version: '6.7.3'
           # qtmultimedia is NOT in the default desktop set; the in-card audio
           # player's find_package(Qt6 … Multimedia) fails without it.
           modules: qtmultimedia
@@ -156,7 +160,7 @@ jobs:
       # Inside the ubuntu:20.04 container install-qt-action can't be used: its
       # toolcache CPython needs GLIBC_2.34+ and won't start. The container's own
       # Python 3.8 is too old for a modern aqtinstall (and old aqtinstall builds
-      # that run on 3.8 predate Qt 6.8.3 and fail to resolve qt_base). Use uv to
+      # that run on 3.8 predate Qt 6.7.3 and fail to resolve qt_base). Use uv to
       # fetch a self-contained CPython (python-build-standalone, glibc 2.17+, so
       # it runs fine on focal) and drive a current aqtinstall through it. Export
       # QT_ROOT_DIR/PATH so the rest of the job matches the host-runner action.
@@ -164,19 +168,19 @@ jobs:
         if: matrix.container != ''
         uses: astral-sh/setup-uv@v5
 
-      - name: Install Qt 6.8 (Linux container)
+      - name: Install Qt 6.7 (Linux container)
         if: matrix.container != ''
         shell: bash
         run: |
           qtdir="$RUNNER_TEMP/Qt"
-          # Qt 6.8 renamed the Linux desktop arch gcc_64 -> linux_gcc_64.
+          # Qt 6.7 renamed the Linux desktop arch gcc_64 -> linux_gcc_64.
           # -m qtmultimedia: the audio player needs Qt6::Multimedia, which the
           # base desktop archive omits. Qt SVG is part of the base archive.
           uvx --python 3.12 --from aqtinstall aqt \
-            install-qt linux desktop 6.8.3 linux_gcc_64 -m qtmultimedia -O "$qtdir"
+            install-qt linux desktop 6.7.3 linux_gcc_64 -m qtmultimedia -O "$qtdir"
           # The on-disk folder name has varied across aqt/Qt versions
           # (gcc_64 vs linux_gcc_64); resolve it from qmake rather than guess.
-          qmake="$(find "$qtdir/6.8.3" -path '*/bin/qmake' | head -n1)"
+          qmake="$(find "$qtdir/6.7.3" -path '*/bin/qmake' | head -n1)"
           root="$(dirname "$(dirname "$qmake")")"
           test -x "$root/bin/qmake"
           echo "QT_ROOT_DIR=$root" >> "$GITHUB_ENV"
