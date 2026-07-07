@@ -79,7 +79,7 @@ chmod +x MeetingAssistant-*.AppImage
 
 ## Разработка
 
-Требуются Rust, CMake и Qt 6.7+ с модулями Quick, Network, Multimedia и Svg.
+Требуются Rust, CMake и Qt 6.8+ с модулями Quick, Network, Multimedia и Svg.
 
 Основной dev workflow:
 

@@ -3,7 +3,7 @@
 # logic can drift between the shipped app and the test) plus the generated
 # ClientProtocol.h, and runs them headlessly against a real meeting-server.
 
-find_package(Qt6 6.7 REQUIRED COMPONENTS Test Gui Qml Quick QuickControls2 Network)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Test Gui Qml Quick QuickControls2 Network)
 
 qt_add_executable(tst_job_poller
     tst_job_poller.cpp
