@@ -789,8 +789,8 @@ fn record_parec(
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     let mut w = w.lock().unwrap();
-                    for chunk in buf[..n].chunks_exact(4) {
-                        let s = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                    for chunk in buf[..n].as_chunks::<4>().0 {
+                        let s = f32::from_le_bytes(*chunk);
                         let _ = w.write_sample(s);
                     }
                 }
@@ -1472,8 +1472,11 @@ fn monitor_parec(
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     let samples: Vec<f32> = buf[..n]
-                        .chunks_exact(4)
-                        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .copied()
+                        .map(f32::from_le_bytes)
                         .collect();
                     publish_peak(&level_reader, &samples);
                 }
