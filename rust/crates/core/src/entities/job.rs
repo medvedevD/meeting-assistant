@@ -20,7 +20,7 @@ impl JobStatus {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "pending" => Some(Self::Pending),
             "running" => Some(Self::Running),
@@ -53,7 +53,7 @@ impl JobKind {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "transcribe" => Some(Self::Transcribe),
             "reprocess_transcribe" => Some(Self::ReprocessTranscribe),
@@ -130,7 +130,7 @@ impl ErrorClass {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "audio_corrupt" => Some(Self::AudioCorrupt),
             "api_quota" => Some(Self::ApiQuota),
@@ -288,9 +288,9 @@ mod tests {
             ErrorClass::Cancelled,
             ErrorClass::Unknown,
         ] {
-            assert_eq!(ErrorClass::from_str(c.as_str()), Some(c));
+            assert_eq!(ErrorClass::parse(c.as_str()), Some(c));
         }
-        assert_eq!(ErrorClass::from_str("bogus"), None);
+        assert_eq!(ErrorClass::parse("bogus"), None);
     }
 
     #[test]

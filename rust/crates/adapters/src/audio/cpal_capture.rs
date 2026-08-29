@@ -76,9 +76,7 @@ impl AudioCapture for CpalAudioCapture {
 
         let thread = thread::Builder::new()
             .name(format!("cpal-recording-{id}"))
-            .spawn(move || {
-                record(path, stop_rx, source, spec.echo_cancel, mic_name, sys_name)
-            })
+            .spawn(move || record(path, stop_rx, source, spec.echo_cancel, mic_name, sys_name))
             .map_err(|e| CoreError::Recording(e.to_string()))?;
 
         self.sessions
@@ -118,6 +116,7 @@ impl AudioCapture for CpalAudioCapture {
 /// On Linux, `pactl list sources short` returns names like
 /// `alsa_output.pci-0000_00_1f.3.analog-stereo.monitor`.
 /// This is a pure function — testable without audio hardware.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn find_monitor_device(names: &[impl AsRef<str>]) -> Option<usize> {
     names.iter().position(|n| n.as_ref().contains(".monitor"))
 }
@@ -323,7 +322,9 @@ struct PulseSource {
 impl PulseSource {
     /// Human label: the `Description` if present, else the raw node name.
     fn label(&self) -> String {
-        self.description.clone().unwrap_or_else(|| self.name.clone())
+        self.description
+            .clone()
+            .unwrap_or_else(|| self.name.clone())
     }
 }
 
@@ -336,19 +337,18 @@ fn parse_pulse_sources(text: &str) -> Vec<PulseSource> {
     let mut description: Option<String> = None;
     let mut monitor = false;
 
-    let mut flush = |name: &mut Option<String>,
-                     description: &mut Option<String>,
-                     monitor: &mut bool| {
-        if let Some(n) = name.take() {
-            let is_monitor = *monitor || n.contains(".monitor");
-            out.push(PulseSource {
-                name: n,
-                description: description.take(),
-                monitor: is_monitor,
-            });
-        }
-        *monitor = false;
-    };
+    let mut flush =
+        |name: &mut Option<String>, description: &mut Option<String>, monitor: &mut bool| {
+            if let Some(n) = name.take() {
+                let is_monitor = *monitor || n.contains(".monitor");
+                out.push(PulseSource {
+                    name: n,
+                    description: description.take(),
+                    monitor: is_monitor,
+                });
+            }
+            *monitor = false;
+        };
 
     for line in text.lines() {
         let t = line.trim();
@@ -517,7 +517,11 @@ fn record_mic(
     mic_name: Option<String>,
 ) -> Result<(), String> {
     let host = cpal::default_host();
-    record_single(open_mic_by_name(&host, mic_name.as_deref())?, output_path, stop_rx)
+    record_single(
+        open_mic_by_name(&host, mic_name.as_deref())?,
+        output_path,
+        stop_rx,
+    )
 }
 
 // ── cpal sample-format handling (Windows/macOS) ───────────────────────────────
@@ -785,8 +789,8 @@ fn record_parec(
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     let mut w = w.lock().unwrap();
-                    for chunk in buf[..n].chunks_exact(4) {
-                        let s = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                    for chunk in buf[..n].as_chunks::<4>().0 {
+                        let s = f32::from_le_bytes(*chunk);
                         let _ = w.write_sample(s);
                     }
                 }
@@ -882,6 +886,7 @@ fn record_mixed(
 /// Always applies `highpass=f=80,dynaudnorm` to the mic track to reduce background noise.
 /// If `echo_cancel` is true, also prepends an `anlms` adaptive filter that subtracts the
 /// system audio from the mic track before mixing (acoustic echo cancellation).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn build_mix_filter(echo_cancel: bool) -> String {
     if echo_cancel {
         "[0:a][1:a]anlms=order=512:mu=0.05:eps=1[mic_aec];\
@@ -939,7 +944,11 @@ pub(crate) fn build_mix_filter_resync(echo_cancel: bool) -> String {
 /// testable without a real install layout.
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn resolve_ffmpeg_in(dir: &Path) -> std::ffi::OsString {
-    let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+    let name = if cfg!(windows) {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    };
     let bundled = dir.join(name);
     if bundled.is_file() {
         bundled.into_os_string()
@@ -960,7 +969,7 @@ fn ffmpeg_program() -> std::ffi::OsString {
 
 /// Mix two WAV files into one using ffmpeg with the given `-filter_complex`.
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
-fn ffmpeg_mix(a: &PathBuf, b: &PathBuf, out: &PathBuf, filter: &str) -> Result<(), String> {
+fn ffmpeg_mix(a: &Path, b: &Path, out: &Path, filter: &str) -> Result<(), String> {
     let status = std::process::Command::new(ffmpeg_program())
         .args([
             "-y",
@@ -1388,7 +1397,11 @@ fn run_mic_monitor(
     stop_rx: std::sync::mpsc::Receiver<()>,
 ) -> Result<(), String> {
     let host = cpal::default_host();
-    monitor_cpal(open_mic_by_name(&host, mic_name.as_deref())?, level, stop_rx)
+    monitor_cpal(
+        open_mic_by_name(&host, mic_name.as_deref())?,
+        level,
+        stop_rx,
+    )
 }
 
 // ── System monitor ────────────────────────────────────────────────────────────
@@ -1459,8 +1472,11 @@ fn monitor_parec(
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
                     let samples: Vec<f32> = buf[..n]
-                        .chunks_exact(4)
-                        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .copied()
+                        .map(f32::from_le_bytes)
                         .collect();
                     publish_peak(&level_reader, &samples);
                 }
@@ -1615,11 +1631,19 @@ Source #2
         println!("system_selectable = {}", list.system_selectable);
         println!("── inputs ({}) ──", list.input.len());
         for d in &list.input {
-            println!("  {}{}", d.label, if d.is_default { "  [default]" } else { "" });
+            println!(
+                "  {}{}",
+                d.label,
+                if d.is_default { "  [default]" } else { "" }
+            );
         }
         println!("── outputs ({}) ──", list.output.len());
         for d in &list.output {
-            println!("  {}{}", d.label, if d.is_default { "  [default]" } else { "" });
+            println!(
+                "  {}{}",
+                d.label,
+                if d.is_default { "  [default]" } else { "" }
+            );
         }
     }
 
@@ -1701,9 +1725,7 @@ Source #2
         let path = dir.path().join("mic.wav");
         let cap = CpalAudioCapture::new();
 
-        cap.start_session("s1", &path, mic_spec())
-            .await
-            .unwrap();
+        cap.start_session("s1", &path, mic_spec()).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         cap.stop_session("s1").await.unwrap();
 
@@ -1718,9 +1740,7 @@ Source #2
         let path = dir.path().join("system.wav");
         let cap = CpalAudioCapture::new();
 
-        cap.start_session("s2", &path, system_spec())
-            .await
-            .unwrap();
+        cap.start_session("s2", &path, system_spec()).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         cap.stop_session("s2").await.unwrap();
 
@@ -1736,9 +1756,7 @@ Source #2
         let path = dir.path().join("mixed.wav");
         let cap = CpalAudioCapture::new();
 
-        cap.start_session("s3", &path, mixed_spec())
-            .await
-            .unwrap();
+        cap.start_session("s3", &path, mixed_spec()).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         cap.stop_session("s3").await.unwrap();
 
@@ -1850,7 +1868,11 @@ Source #2
         // No bundled binary → fall back to PATH ("ffmpeg").
         assert_eq!(resolve_ffmpeg_in(dir.path()), OsStr::new("ffmpeg"));
         // A bundled ffmpeg(.exe) next to the sidecar is preferred.
-        let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+        let name = if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        };
         let bundled = dir.path().join(name);
         std::fs::write(&bundled, b"").unwrap();
         assert_eq!(resolve_ffmpeg_in(dir.path()), bundled.into_os_string());

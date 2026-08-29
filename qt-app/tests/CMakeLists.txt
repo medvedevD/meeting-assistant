@@ -145,6 +145,51 @@ set_tests_properties(qt_meety_menu_long_items_expand PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     TIMEOUT 30)
 
+qt_add_executable(tst_first_run
+    tst_first_run.cpp
+    ../src/AppPreferences.h ../src/AppPreferences.cpp)
+
+target_include_directories(tst_first_run PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../src")
+target_compile_definitions(tst_first_run PRIVATE
+    MA_FIRST_RUN_QML_IMPORT_DIR="${CMAKE_CURRENT_BINARY_DIR}/first_run_qml"
+    MA_WELCOME_QML_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../qml/screens/WelcomeScreen.qml")
+
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
+    PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyButton.qml"
+    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyButton.qml")
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
+    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyIcon.qml")
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyWordmark.qml"
+    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyWordmark.qml")
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
+    PROPERTIES QT_RESOURCE_ALIAS "qml/theme/Theme.qml")
+
+qt_add_qml_module(tst_first_run
+    URI MeetingAssistant
+    VERSION 1.0
+    NO_CACHEGEN
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/first_run_qml/MeetingAssistant"
+    QML_FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyButton.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyWordmark.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml")
+
+target_link_libraries(tst_first_run PRIVATE
+    Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2)
+
+add_test(NAME qt_first_run_screen_states COMMAND tst_first_run)
+set_tests_properties(qt_first_run_screen_states PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 30)
+
 qt_add_executable(tst_smoke
     tst_smoke.cpp
     ../src/SidecarManager.h ../src/SidecarManager.cpp
@@ -192,6 +237,6 @@ add_test(NAME qt_no_sync_transcribe_in_qml
 # the scan for shared Qt; keep it for a static build where they must be linked.
 if(QT6_IS_SHARED_LIBS_BUILD)
     set_target_properties(
-        tst_pipeline_progress tst_protocol_document tst_meety_menu
+        tst_pipeline_progress tst_protocol_document tst_meety_menu tst_first_run
         PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN ON)
 endif()

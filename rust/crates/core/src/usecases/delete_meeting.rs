@@ -9,6 +9,7 @@ use std::sync::Arc;
 /// so a full delete can safely wipe it. Covers two layouts:
 ///   * `recordings_dir/<uuid>`            — produced by copy-import.
 ///   * `recordings_dir/<slug>_<uuid8>`    — produced by start_recording.
+///
 /// In-place imports may live anywhere (including a shared folder under
 /// `recordings_dir`), so they fail this check and only their own files are
 /// removed.

@@ -94,9 +94,7 @@ pub async fn unlock_secret_store(
 }
 
 /// `POST /api/v1/settings/secret-store/lock` — drop decrypted keys from memory.
-pub async fn lock_secret_store(
-    State(svc): State<Svc>,
-) -> Result<StatusCode, (StatusCode, String)> {
+pub async fn lock_secret_store(State(svc): State<Svc>) -> Result<StatusCode, (StatusCode, String)> {
     svc.lock_secret_store()
         .await
         .map(|_| StatusCode::NO_CONTENT)

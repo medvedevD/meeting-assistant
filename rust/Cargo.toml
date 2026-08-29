@@ -14,7 +14,36 @@ serde_json = "1"
 async-trait = "0.1"
 uuid = { version = "1", features = ["v4"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
-reqwest = { version = "0.12", features = ["json", "stream", "blocking"] }
+# TLS backend is rustls, NOT the default `native-tls`. On Linux native-tls means
+# the *system* OpenSSL, and the AppImage is built in an ubuntu:20.04 container
+# (glibc floor), so linuxdeploy bundled OpenSSL 1.1.1 next to the sidecar. On a
+# host whose /etc/ssl/openssl.cnf registers an OpenSSL 3 engine — e.g. Astra
+# Linux, which configures the GOST engine at
+# `dynamic_path = /usr/lib/x86_64-linux-gnu/engines-3/gost.so` — the bundled 1.1.1
+# dlopen'd that engine, so libcrypto.so.1.1 and libcrypto.so.3 ended up in one
+# address space. Loading the CA store then crashed the sidecar with SIGSEGV in
+# `X509_STORE_load_locations → EVP_PKEY_free → ENGINE_finish`, before it could
+# log a single line — the GUI only saw "core crashed".
+#
+# rustls removes OpenSSL from the process (and from the AppImage) entirely, so
+# TLS no longer depends on the host's OpenSSL version, openssl.cnf, or engines.
+# `rustls-tls-native-roots` still reads the host CA store, but through
+# rustls-native-certs, which parses in Rust and skips unusable certs instead of
+# crashing — self-hosted/corporate roots keep working. It resolves to the `ring`
+# provider (`__rustls-ring`), so CI needs no NASM/cmake as aws-lc-rs would.
+#
+# `default-features = false` drops reqwest's defaults
+# ("default-tls", "charset", "http2", "system-proxy") — all but the TLS one are
+# re-listed below to keep behaviour unchanged.
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "stream",
+    "blocking",
+    "charset",
+    "http2",
+    "system-proxy",
+    "rustls-tls-native-roots",
+] }
 wiremock = "0.5"
 dirs = "5"
 dashmap = "6"

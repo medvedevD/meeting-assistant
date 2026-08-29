@@ -226,7 +226,7 @@ impl Transcriber for WhisperTranscriber {
 
 fn run_whisper(
     ctx: &WhisperContext,
-    audio_path: &PathBuf,
+    audio_path: &Path,
     prefs: &TranscriberPrefs,
     on_progress: &ProgressSink,
     abort_flag: &Arc<AbortFlag>,
@@ -467,6 +467,7 @@ pub(crate) trait WhisperRunner: Send + Sync {
 pub(crate) type RunnerFactory =
     Arc<dyn Fn(&Path, bool) -> Result<Arc<dyn WhisperRunner>, CoreError> + Send + Sync>;
 
+#[derive(Default)]
 pub(crate) struct LazyState {
     pub(crate) runner: Option<Arc<dyn WhisperRunner>>,
     /// `use_gpu` the currently-loaded runner was built with. A mismatch with the
@@ -474,17 +475,6 @@ pub(crate) struct LazyState {
     pub(crate) loaded_use_gpu: Option<bool>,
     pub(crate) active_count: usize,
     pub(crate) unload_handle: Option<tokio::task::AbortHandle>,
-}
-
-impl Default for LazyState {
-    fn default() -> Self {
-        Self {
-            runner: None,
-            loaded_use_gpu: None,
-            active_count: 0,
-            unload_handle: None,
-        }
-    }
 }
 
 pub struct LazyWhisperTranscriber {
@@ -681,7 +671,11 @@ impl LazyWhisperTranscriber {
             // so we never swap a context out from under an in-flight transcription.
             let gpu_changed = state.loaded_use_gpu != Some(prefs.use_gpu);
             if state.runner.is_none() || (gpu_changed && state.active_count == 0) {
-                tracing::info!(use_gpu = prefs.use_gpu, "loading whisper model: {:?}", model_path);
+                tracing::info!(
+                    use_gpu = prefs.use_gpu,
+                    "loading whisper model: {:?}",
+                    model_path
+                );
                 // Early return on error — active_count and unload_handle are untouched
                 state.runner = Some((self.factory)(&model_path, prefs.use_gpu)?);
                 state.loaded_use_gpu = Some(prefs.use_gpu);
@@ -755,6 +749,35 @@ impl Drop for LazyWhisperTranscriber {
             }
         }
     }
+}
+
+fn resample(samples: Vec<f32>, from_rate: u32, to_rate: u32) -> anyhow::Result<Vec<f32>> {
+    use rubato::{FftFixedIn, Resampler};
+
+    const CHUNK: usize = 1024;
+
+    let mut resampler = FftFixedIn::<f32>::new(from_rate as usize, to_rate as usize, CHUNK, 2, 1)?;
+
+    let ratio = to_rate as f64 / from_rate as f64;
+    let mut output = Vec::with_capacity((samples.len() as f64 * ratio) as usize + CHUNK);
+    let mut pos = 0;
+
+    while pos + CHUNK <= samples.len() {
+        let waves_in = vec![samples[pos..pos + CHUNK].to_vec()];
+        let waves_out = resampler.process(&waves_in, None)?;
+        output.extend_from_slice(&waves_out[0]);
+        pos += CHUNK;
+    }
+
+    if pos < samples.len() {
+        let mut tail = samples[pos..].to_vec();
+        tail.resize(CHUNK, 0.0);
+        let waves_in = vec![tail];
+        let waves_out = resampler.process_partial(Some(&waves_in), None)?;
+        output.extend_from_slice(&waves_out[0]);
+    }
+
+    Ok(output)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -1217,33 +1240,4 @@ mod tests {
         assert_eq!(load_count.load(Ordering::SeqCst), 1);
         assert_eq!(t.current_model_path(), PathBuf::from("/model-b.bin"));
     }
-}
-
-fn resample(samples: Vec<f32>, from_rate: u32, to_rate: u32) -> anyhow::Result<Vec<f32>> {
-    use rubato::{FftFixedIn, Resampler};
-
-    const CHUNK: usize = 1024;
-
-    let mut resampler = FftFixedIn::<f32>::new(from_rate as usize, to_rate as usize, CHUNK, 2, 1)?;
-
-    let ratio = to_rate as f64 / from_rate as f64;
-    let mut output = Vec::with_capacity((samples.len() as f64 * ratio) as usize + CHUNK);
-    let mut pos = 0;
-
-    while pos + CHUNK <= samples.len() {
-        let waves_in = vec![samples[pos..pos + CHUNK].to_vec()];
-        let waves_out = resampler.process(&waves_in, None)?;
-        output.extend_from_slice(&waves_out[0]);
-        pos += CHUNK;
-    }
-
-    if pos < samples.len() {
-        let mut tail = samples[pos..].to_vec();
-        tail.resize(CHUNK, 0.0);
-        let waves_in = vec![tail];
-        let waves_out = resampler.process_partial(Some(&waves_in), None)?;
-        output.extend_from_slice(&waves_out[0]);
-    }
-
-    Ok(output)
 }

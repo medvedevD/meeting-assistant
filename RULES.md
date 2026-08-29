@@ -89,6 +89,16 @@ When creating commits, do not add AI-agent attribution. Commit messages must not
 
 See `packaging/` for OS-specific build/sign/notarize scripts (handled outside the dev loop).
 
+### Release Gate
+
+Release packaging must be gated by CI, not just triggered by a tag. Before any
+installer build starts, the release workflow must pass the protocol-version
+check, `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+`cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings`,
+and `cargo test --manifest-path rust/Cargo.toml --workspace`.
+Regular PR/push CI should run the same Rust quality gate so release failures are
+caught before tagging.
+
 ## Architecture
 
 ### Rust (`/rust`) — Clean Architecture
@@ -107,6 +117,16 @@ Layers: **Entities → Ports (traits) → Use Cases → Adapters → Binaries**.
 Key domain flow: `StartRecording` → audio captured via `AudioCapture` port → `StopRecording` → async job queued → `TranscribeAudio` (Whisper) → `GenerateProtocol` (Anthropic API via `LLMProvider` port).
 
 **Database**: SQLite via rusqlite, migrations in `/rust/migrations/`.
+
+### Result persistence invariant
+
+Worker jobs may transition to `done` only after the generated transcript or
+protocol text is persisted in SQLite. The per-meeting `transcript.md` and
+`protocol.md` files are secondary, best-effort copies: a filesystem failure is
+logged but does not discard a result already stored in the database. If result
+persistence, chained-job enqueue, or `mark_done` fails, the job follows the
+retry path. A retried job reuses an already-persisted canonical result instead
+of repeating Whisper inference or issuing another paid LLM request.
 
 ### Qt UI (`/qt-app`) — QML + C++ shell
 

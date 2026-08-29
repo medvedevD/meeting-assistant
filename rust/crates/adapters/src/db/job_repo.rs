@@ -16,8 +16,8 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     Ok(Job {
         id: row.get(0)?,
         meeting_id: row.get(1)?,
-        kind: JobKind::from_str(&kind_str).unwrap_or(JobKind::Transcribe),
-        status: JobStatus::from_str(&status_str).unwrap_or(JobStatus::Pending),
+        kind: JobKind::parse(&kind_str).unwrap_or(JobKind::Transcribe),
+        status: JobStatus::parse(&status_str).unwrap_or(JobStatus::Pending),
         attempts: row.get::<_, i64>(4)? as u32,
         last_error: row.get(5)?,
         retry_after: row.get(6)?,
@@ -28,7 +28,7 @@ fn row_to_job(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         error_class: row
             .get::<_, Option<String>>(10)?
             .as_deref()
-            .and_then(ErrorClass::from_str),
+            .and_then(ErrorClass::parse),
         then_protocol: row.get::<_, i64>(11)? != 0,
     })
 }

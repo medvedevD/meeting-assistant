@@ -30,11 +30,11 @@ pub type DefaultTemplateFn = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 pub fn no_default_template() -> DefaultTemplateFn {
     Arc::new(|| None)
 }
+pub use crate::routes::audio::AudioApi;
 use crate::routes::{
     audio, health, jobs, meetings, protocols, recordings, settings, templates,
     transcription_models, version,
 };
-pub use crate::routes::audio::AudioApi;
 use crate::settings_service::SettingsService;
 use crate::template_service::TemplateService;
 use crate::transcription_model_service::TranscriptionModelService;

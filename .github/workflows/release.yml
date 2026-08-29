@@ -61,7 +61,11 @@ jobs:
           entry() { # entry <key> → one matrix include object
             case "$1" in
               linux)   echo '{"os":"ubuntu-latest","container":"ubuntu:20.04","installer_glob":"dist/linux/*.AppImage"}' ;;
-              macos)   echo '{"os":"macos-latest","container":"","installer_glob":"dist/macos/*.dmg"}' ;;
+              # macos-14 (not macos-latest): aqt's Qt 6.7 prebuilt hard-links
+              # -framework AGL, removed from the macos-15+/Xcode 26 SDK on
+              # macos-latest. macos-14 keeps the AGL stub and is arm64 (the
+              # .dmg's target arch). See qt-ci.yml for the same pin.
+              macos)   echo '{"os":"macos-14","container":"","installer_glob":"dist/macos/*.dmg"}' ;;
               windows) echo '{"os":"windows-latest","container":"","installer_glob":"dist/windows/*.exe"}' ;;
               *) echo "::error::unknown target '$1'" >&2; exit 1 ;;
             esac
@@ -77,9 +81,46 @@ jobs:
           done
           echo "matrix={\"include\":[$inc]}" >> "$GITHUB_OUTPUT"
 
+  quality-gate:
+    name: release quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: release-quality-${{ runner.os }}
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang libclang-dev \
+            libasound2-dev pkg-config libssl-dev libdbus-1-dev
+
+      - name: Enforce protocol-version single source of truth
+        run: bash .github/scripts/check-protocol-version.sh
+
+      - name: Rust format check
+        run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
+
+      - name: Rust clippy
+        run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
+
+      - name: Rust workspace tests
+        run: cargo test --manifest-path rust/Cargo.toml --workspace
+
   package:
     name: package (${{ matrix.os }})
-    needs: setup
+    needs: [setup, quality-gate]
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
     strategy:
