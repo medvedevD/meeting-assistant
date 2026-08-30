@@ -16,7 +16,13 @@
 // the shipped file. The six pushable screens are stubbed (they only need to
 // resolve — each lives inside a lazy Component the test never instantiates),
 // and `api.configured` stays false so the store never issues a request.
+//
+// The store is then driven to "empty" so the screen renders its first-run body.
+// That body is where the second loop lived (`font.letterSpacing` reading
+// `font.pixelSize`, which re-notifies the whole font group), and it is
+// unreachable while the store sits in "loading".
 
+#include <QCoreApplication>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -82,10 +88,10 @@ class AppShellWiringTest : public QObject {
     Q_OBJECT
 
 private slots:
-    void welcomeScreenReceivesStore();
+    void welcomeScreenReceivesStoreAndRendersFirstRun();
 };
 
-void AppShellWiringTest::welcomeScreenReceivesStore() {
+void AppShellWiringTest::welcomeScreenReceivesStoreAndRendersFirstRun() {
     QQmlEngine engine;
     engine.addImportPath(QStringLiteral(MA_APP_SHELL_QML_IMPORT_DIR));
 
@@ -97,31 +103,48 @@ void AppShellWiringTest::welcomeScreenReceivesStore() {
 
     g_messages.clear();
     g_previous = qInstallMessageHandler(captureMessages);
+
     QQmlComponent component(
         &engine, QUrl::fromLocalFile(QStringLiteral(MA_APP_SHELL_QML_FILE)));
     const std::unique_ptr<QObject> shell(component.create());
+
+    QObject *welcome = nullptr;
+    QObject *store = nullptr;
+    if (shell) {
+        welcome =
+            findByClassPrefix(shell.get(), QStringLiteral("WelcomeScreen"));
+        if (welcome)
+            store = welcome->property("store").value<QObject *>();
+        // A store left in "loading" only ever renders the busy placeholder, so
+        // the first-run body — and any binding loop inside it — would stay out
+        // of reach. Drive the list to "empty" to instantiate it.
+        if (store)
+            store->setProperty("status", QStringLiteral("empty"));
+        QCoreApplication::processEvents();
+    }
+
     qInstallMessageHandler(g_previous);
     g_previous = nullptr;
 
     QVERIFY2(shell != nullptr, qPrintable(component.errorString()));
-
-    // Fails on the pre-fix `store: store`.
-    const QStringList loops = g_messages.filter(QStringLiteral("Binding loop"));
-    QVERIFY2(loops.isEmpty(), qPrintable(loops.join(QLatin1Char('\n'))));
-
-    QObject *welcome =
-        findByClassPrefix(shell.get(), QStringLiteral("WelcomeScreen"));
     QVERIFY2(welcome != nullptr,
              "StackView did not create its initialItem (WelcomeScreen)");
 
-    // The contract the binding loop broke: the screen must hold AppShell's
+    // The contract the self-binding broke: the screen must hold AppShell's
     // MeetingStore, not an undefined self-binding.
-    const QVariant store = welcome->property("store");
-    QVERIFY2(store.isValid(),
+    QVERIFY2(welcome->property("store").isValid(),
              "WelcomeScreen has no `store` property — the screen's API changed");
-    QVERIFY2(store.value<QObject *>() != nullptr,
+    QVERIFY2(store != nullptr,
              "WelcomeScreen.store is unset: AppShell never passed its "
              "MeetingStore (bare `store:` self-binding?)");
+
+    // Proves the first-run body above was actually reached, so the loop check
+    // below covers it rather than passing vacuously on the placeholder.
+    QCOMPARE(welcome->property("viewState").toString(),
+             QStringLiteral("firstRun"));
+
+    const QStringList loops = g_messages.filter(QStringLiteral("Binding loop"));
+    QVERIFY2(loops.isEmpty(), qPrintable(loops.join(QLatin1Char('\n'))));
 }
 
 QTEST_MAIN(AppShellWiringTest)
