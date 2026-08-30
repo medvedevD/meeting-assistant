@@ -190,6 +190,61 @@ set_tests_properties(qt_first_run_screen_states PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     TIMEOUT 30)
 
+# ── AppShell → WelcomeScreen wiring (binding-loop regression) ────────────────
+# Loads the REAL AppShell.qml so the guard tracks the shipped file. The six
+# pushable screens are stubbed: each sits inside a lazy Component, so they only
+# need to resolve as types, and stubbing keeps the staged type graph small.
+# MeetingStore/Request resolve implicitly from AppShell.qml's own directory;
+# everything under components/, screens/ and theme/ comes from the module below.
+qt_add_executable(tst_app_shell_wiring tst_app_shell_wiring.cpp)
+
+target_compile_definitions(tst_app_shell_wiring PRIVATE
+    MA_APP_SHELL_QML_IMPORT_DIR="${CMAKE_CURRENT_BINARY_DIR}/app_shell_qml"
+    MA_APP_SHELL_QML_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../qml/AppShell.qml")
+
+foreach(_ma_component
+        MeetyButton MeetyDialog MeetyDialogActions MeetyField MeetyIcon
+        MeetyIconButton MeetySectionLabel MeetyToolTip MeetyWordmark)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/${_ma_component}.qml"
+        PROPERTIES QT_RESOURCE_ALIAS "qml/components/${_ma_component}.qml")
+endforeach()
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/screens/WelcomeScreen.qml"
+    PROPERTIES QT_RESOURCE_ALIAS "qml/screens/WelcomeScreen.qml")
+
+qt_add_qml_module(tst_app_shell_wiring
+    URI MeetingAssistant
+    VERSION 1.0
+    NO_CACHEGEN
+    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/app_shell_qml/MeetingAssistant"
+    QML_FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyButton.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyDialog.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyDialogActions.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyField.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIconButton.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetySectionLabel.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyToolTip.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyWordmark.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/screens/WelcomeScreen.qml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
+        stubs/DiagnosticsScreen.qml
+        stubs/GenerateProtocolScreen.qml
+        stubs/MeetingDetailScreen.qml
+        stubs/MeetingNoProtocolScreen.qml
+        stubs/NewRecordingScreen.qml
+        stubs/SettingsScreen.qml)
+
+target_link_libraries(tst_app_shell_wiring PRIVATE
+    Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2)
+
+add_test(NAME qt_app_shell_welcome_wiring COMMAND tst_app_shell_wiring)
+set_tests_properties(qt_app_shell_welcome_wiring PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 30)
+
 qt_add_executable(tst_smoke
     tst_smoke.cpp
     ../src/SidecarManager.h ../src/SidecarManager.cpp
@@ -238,5 +293,6 @@ add_test(NAME qt_no_sync_transcribe_in_qml
 if(QT6_IS_SHARED_LIBS_BUILD)
     set_target_properties(
         tst_pipeline_progress tst_protocol_document tst_meety_menu tst_first_run
+        tst_app_shell_wiring
         PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN ON)
 endif()
