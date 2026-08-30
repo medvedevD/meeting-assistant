@@ -15,7 +15,12 @@ Item {
     property string selectedId: ""
     property string query: ""
     property bool sidebarCompact: false
+    // A bare `shell:`/`store:` inside the Components below binds to the
+    // *target's* own property of that name, which shadows these objects —
+    // a self-binding that loops and leaves the property undefined. Pass the
+    // aliases instead, never the ids directly.
     readonly property var shellRef: shell
+    readonly property var storeRef: store
 
     // AppShell is instantiated eagerly by the StackLayout in Main.qml — well
     // before the sidecar finishes its handshake/health gate. Refreshing on
@@ -109,7 +114,7 @@ Item {
         id: welcomeComp
         WelcomeScreen {
             shell: shellRef
-            store: store
+            store: storeRef
             preferences: appPreferences
         }
     }
