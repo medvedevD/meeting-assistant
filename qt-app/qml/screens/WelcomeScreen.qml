@@ -253,6 +253,12 @@ Page {
                     }
 
                     Text {
+                        // Reading font.pixelSize from a font.* binding loops:
+                        // writing any font sub-property notifies the whole
+                        // group, which re-evaluates this binding. Size the two
+                        // from one source instead.
+                        readonly property int titleSize: scr.width >= 760 ? 32 : 26
+
                         Layout.fillWidth: true
                         Layout.leftMargin: scr.width >= 760 ? 44 : 32
                         Layout.rightMargin: scr.width >= 760 ? 44 : 32
@@ -260,9 +266,9 @@ Page {
                         wrapMode: Text.WordWrap
                         lineHeight: 1.05
                         font.family: Theme.fontSerif
-                        font.pixelSize: scr.width >= 760 ? 32 : 26
+                        font.pixelSize: titleSize
                         font.weight: Theme.wMedium
-                        font.letterSpacing: Theme.tracking(font.pixelSize, -0.02)
+                        font.letterSpacing: Theme.tracking(titleSize, -0.02)
                         color: Theme.ink
                     }
 
