@@ -3,10 +3,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use meeting_adapters::settings_store::PersistedSettings;
 use meeting_adapters::{
-    build_llm, probe_llm, resolve_transcription_model_path, whisper_backend, JsonSettingsStore,
-    ProviderKind, SecretStatus, TranscriberPrefs, VaultState,
+    build_llm, list_llm_models, probe_llm, resolve_transcription_model_path, whisper_backend,
+    JsonSettingsStore, LlmConfig, ProviderKind, SecretStatus, TranscriberPrefs, VaultState,
 };
 use meeting_api::SettingsService;
+use meeting_core::CoreError;
 use serde_json::{json, Value};
 
 use crate::container::SettingsHandles;
@@ -25,6 +26,19 @@ impl AppSettingsService {
 
     fn store(&self) -> &Arc<JsonSettingsStore> {
         &self.handles.settings_store
+    }
+
+    /// `provider`'s saved config with its effective key, for the settings
+    /// screen's key check and model listing; fails if it needs a key and has
+    /// none.
+    fn provider_config(&self, provider: &str) -> Result<LlmConfig, CoreError> {
+        let kind = ProviderKind::parse(provider)
+            .ok_or_else(|| CoreError::Validation(format!("unknown provider: {provider}")))?;
+        let key = self.handles.secrets.effective_key(kind.as_str());
+        if kind.needs_key() && key.is_empty() {
+            return Err(CoreError::ApiAuth("no API key configured".to_string()));
+        }
+        Ok(self.store().load().llm.resolve(kind, key))
     }
 
     /// Rebuild the active LLM from the given settings + effective key.
@@ -207,16 +221,23 @@ impl SettingsService for AppSettingsService {
         Ok(())
     }
 
-    async fn test_provider(&self, provider: String) -> Result<(), String> {
-        let kind = ProviderKind::parse(&provider)
-            .ok_or_else(|| format!("unknown provider: {provider}"))?;
-        let settings = self.store().load();
-        let key = self.handles.secrets.effective_key(kind.as_str());
-        if kind.needs_key() && key.is_empty() {
-            return Err("no API key configured".to_string());
+    async fn test_provider(
+        &self,
+        provider: String,
+        model: Option<String>,
+    ) -> Result<(), CoreError> {
+        let mut cfg = self.provider_config(&provider)?;
+        if let Some(model) = model
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty())
+        {
+            cfg.model = model;
         }
-        let cfg = settings.llm.resolve(kind, key);
-        probe_llm(&cfg).await.map_err(|e| e.to_string())
+        probe_llm(&cfg).await
+    }
+
+    async fn list_models(&self, provider: String) -> Result<Vec<String>, CoreError> {
+        list_llm_models(&self.provider_config(&provider)?).await
     }
 
     async fn protect_secret_store(&self, passphrase: String) -> Result<(), String> {

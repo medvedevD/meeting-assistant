@@ -19,6 +19,9 @@ Page {
     // Persisted protocol, loaded from the backend (GET /api/v1/meetings/:id).
     property string protocol: ""
     property var structuredProtocol: null
+    // {input_tokens, output_tokens} the LLM spent on the protocol; null when the
+    // provider reported none or the protocol predates usage tracking.
+    property var protocolUsage: null
     readonly property bool hasProtocol: protocol.length > 0
 
     // Active reprocess job (transcribe / protocol) lives in ActiveJobsStore so it
@@ -40,6 +43,10 @@ Page {
 
     function loadProtocol() {
         protocolReq.get("/api/v1/meetings/" + meetingId)
+    }
+
+    function formatTokens(n) {
+        return Number(n).toLocaleString(Qt.locale(), "f", 0)
     }
 
     function reprocess(kind) {
@@ -70,6 +77,7 @@ Page {
             scr.protocol = (j && j.protocol) ? j.protocol : ""
             scr.structuredProtocol = (j && j.structured_protocol)
                                    ? j.structured_protocol : null
+            scr.protocolUsage = (j && j.protocol_usage) ? j.protocol_usage : null
             if (!scr.hasProtocol && scr.shell.selectedId === scr.meetingId
                     && !ActiveJobsStore.isActive(scr.meetingId))
                 scr.shell.showNoProtocol({
@@ -232,6 +240,30 @@ Page {
                         font.family: Theme.fontUi
                         font.pixelSize: Theme.fsSmall
                         color: Theme.ink3
+                    }
+                    Rectangle {
+                        visible: scr.protocolUsage !== null
+                        width: 2.5; height: 2.5; radius: 1.25; color: Theme.ink4
+                    }
+                    Text {
+                        visible: scr.protocolUsage !== null
+                        text: scr.protocolUsage
+                              ? qsTr("токенов: %1").arg(scr.formatTokens(
+                                    scr.protocolUsage.input_tokens
+                                    + scr.protocolUsage.output_tokens))
+                              : ""
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsSmall
+                        color: Theme.ink3
+                        HoverHandler { id: tokensHover }
+                        MeetyToolTip {
+                            visible: tokensHover.hovered && scr.protocolUsage !== null
+                            text: scr.protocolUsage
+                                  ? qsTr("Вход: %1 · выход: %2")
+                                        .arg(scr.formatTokens(scr.protocolUsage.input_tokens))
+                                        .arg(scr.formatTokens(scr.protocolUsage.output_tokens))
+                                  : ""
+                        }
                     }
                 }
             }

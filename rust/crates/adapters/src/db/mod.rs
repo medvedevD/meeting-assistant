@@ -50,6 +50,11 @@ const MIGRATIONS: &[Migration] = &[
         up: include_str!("../../../../migrations/006_job_then_protocol.sql"),
         down: None,
     },
+    Migration {
+        version: 7,
+        up: include_str!("../../../../migrations/007_protocol_usage.sql"),
+        down: None,
+    },
 ];
 
 pub struct Db {

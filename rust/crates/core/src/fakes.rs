@@ -1,9 +1,10 @@
 use crate::{
-    entities::{Job, JobKind, JobStatus, Meeting, Segment, Transcript},
+    entities::{Job, JobKind, JobStatus, Meeting, Segment, TokenUsage, Transcript},
     ports::{
         AudioCapture, AudioDevice, AudioDeviceEnumerator, AudioDeviceList, AudioLevel,
-        AudioLevelMonitor, CaptureSource, CaptureSpec, JobRepo, LlmProvider, MeetingFileStore,
-        MeetingRepo, ResolvedDevices, TemplateBundle, TemplateLoader, Transcriber,
+        AudioLevelMonitor, CaptureSource, CaptureSpec, JobRepo, LlmCompletion, LlmProvider,
+        MeetingFileStore, MeetingRepo, ResolvedDevices, TemplateBundle, TemplateLoader,
+        Transcriber,
     },
     CoreError,
 };
@@ -105,7 +106,12 @@ impl MeetingRepo for FakeMeetingRepo {
         }
     }
 
-    async fn save_protocol(&self, id: &str, text: &str) -> Result<(), CoreError> {
+    async fn save_protocol(
+        &self,
+        id: &str,
+        text: &str,
+        usage: Option<TokenUsage>,
+    ) -> Result<(), CoreError> {
         if self.fail_protocol_saves.load(Ordering::SeqCst) {
             return Err(CoreError::Storage(
                 "injected protocol persistence failure".into(),
@@ -114,6 +120,7 @@ impl MeetingRepo for FakeMeetingRepo {
         let mut store = self.store.lock().unwrap();
         if let Some(m) = store.iter_mut().find(|m| m.id == id) {
             m.protocol_text = Some(text.to_string());
+            m.protocol_usage = usage;
             Ok(())
         } else {
             Err(CoreError::NotFound(id.to_string()))
@@ -197,6 +204,7 @@ impl MeetingRepo for FakeMeetingRepo {
         if let Some(m) = store.iter_mut().find(|m| m.id == id) {
             m.protocol_text = None;
             m.protocol_path = None;
+            m.protocol_usage = None;
             Ok(())
         } else {
             Err(CoreError::NotFound(id.to_string()))
@@ -472,12 +480,22 @@ impl JobRepo for FakeJobRepo {
 
 pub struct FakeLlmProvider {
     response: String,
+    usage: Option<TokenUsage>,
 }
 
 impl FakeLlmProvider {
     pub fn new(response: impl Into<String>) -> Arc<Self> {
         Arc::new(Self {
             response: response.into(),
+            usage: None,
+        })
+    }
+
+    /// A provider that also reports token usage for every response.
+    pub fn with_usage(response: impl Into<String>, usage: TokenUsage) -> Arc<Self> {
+        Arc::new(Self {
+            response: response.into(),
+            usage: Some(usage),
         })
     }
 }
@@ -488,8 +506,11 @@ impl LlmProvider for FakeLlmProvider {
         &self,
         _transcript: &str,
         _instructions: Option<&str>,
-    ) -> Result<String, CoreError> {
-        Ok(self.response.clone())
+    ) -> Result<LlmCompletion, CoreError> {
+        Ok(LlmCompletion {
+            text: self.response.clone(),
+            usage: self.usage,
+        })
     }
 }
 

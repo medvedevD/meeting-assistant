@@ -422,6 +422,23 @@ Page {
                 color: Theme.ink3
                 text: errBlock.err.hint
             }
+            // The provider's own reason (errors.js `detail`), e.g. "This model
+            // is not available in your subscription tier"; selectable to copy.
+            TextEdit {
+                objectName: "errorDetail"
+                Layout.fillWidth: true
+                visible: text.length > 0
+                horizontalAlignment: TextEdit.AlignHCenter
+                readOnly: true
+                selectByMouse: true
+                wrapMode: TextEdit.Wrap
+                font.family: Theme.fontMono
+                font.pixelSize: Theme.fsSmall
+                color: Theme.ink3
+                selectionColor: Theme.accentTint
+                selectedTextColor: Theme.ink
+                text: errBlock.err.detail
+            }
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.topMargin: 4

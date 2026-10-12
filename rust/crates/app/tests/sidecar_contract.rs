@@ -533,7 +533,7 @@ fn settings_get_put_roundtrip_and_secret_flag() {
 
     // Store an OpenAI key; the snapshot's has_key flips without leaking the key.
     let secret_resp = c
-        .put(format!("{}/secret", url))
+        .put(format!("{url}/secret"))
         .bearer_auth(tok)
         .json(&serde_json::json!({"provider": "openai", "value": "sk-test"}))
         .send()

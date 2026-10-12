@@ -1,5 +1,13 @@
-use crate::CoreError;
+use crate::{entities::TokenUsage, CoreError};
 use async_trait::async_trait;
+
+/// One LLM response: the generated text plus the tokens it cost, when the
+/// provider reports them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LlmCompletion {
+    pub text: String,
+    pub usage: Option<TokenUsage>,
+}
 
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
@@ -8,5 +16,5 @@ pub trait LlmProvider: Send + Sync {
         &self,
         transcript: &str,
         instructions: Option<&str>,
-    ) -> Result<String, CoreError>;
+    ) -> Result<LlmCompletion, CoreError>;
 }

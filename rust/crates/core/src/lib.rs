@@ -32,6 +32,15 @@ pub enum CoreError {
     Recording(String),
     #[error("authentication failed: {0}")]
     ApiAuth(String),
+    /// The provider accepted the key but refused the configured model: not in
+    /// the subscription tier, a misspelled model id, or a wrong base URL.
+    #[error("model unavailable: {0}")]
+    LlmModelUnavailable(String),
+    /// The provider rejected the request itself (a 4xx other than auth, quota
+    /// or model access) — e.g. an out-of-range `max_tokens`. Retrying sends the
+    /// same request, so it fails identically.
+    #[error("request rejected: {0}")]
+    LlmRejected(String),
     #[error("rate limit or quota exceeded: {0}")]
     ApiQuota(String),
     #[error("request timed out: {0}")]

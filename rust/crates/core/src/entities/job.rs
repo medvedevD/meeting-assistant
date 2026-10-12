@@ -104,6 +104,10 @@ pub enum ErrorClass {
     AudioCorrupt,
     ApiQuota,
     ApiAuth,
+    /// The provider refused the configured LLM model (tier, id or base URL).
+    LlmModelUnavailable,
+    /// The provider rejected the LLM request itself (non-auth/quota 4xx).
+    LlmRejected,
     NetworkTimeout,
     WorkerKilled,
     ModelNotSelected,
@@ -121,6 +125,8 @@ impl ErrorClass {
             Self::AudioCorrupt => "audio_corrupt",
             Self::ApiQuota => "api_quota",
             Self::ApiAuth => "api_auth",
+            Self::LlmModelUnavailable => "llm_model_unavailable",
+            Self::LlmRejected => "llm_rejected",
             Self::NetworkTimeout => "network_timeout",
             Self::WorkerKilled => "worker_killed",
             Self::ModelNotSelected => "model_not_selected",
@@ -135,6 +141,8 @@ impl ErrorClass {
             "audio_corrupt" => Some(Self::AudioCorrupt),
             "api_quota" => Some(Self::ApiQuota),
             "api_auth" => Some(Self::ApiAuth),
+            "llm_model_unavailable" => Some(Self::LlmModelUnavailable),
+            "llm_rejected" => Some(Self::LlmRejected),
             "network_timeout" => Some(Self::NetworkTimeout),
             "worker_killed" => Some(Self::WorkerKilled),
             "model_not_selected" => Some(Self::ModelNotSelected),
@@ -165,6 +173,8 @@ impl ErrorClass {
         use crate::CoreError::*;
         match err {
             ApiAuth(_) => Self::ApiAuth,
+            LlmModelUnavailable(_) => Self::LlmModelUnavailable,
+            LlmRejected(_) => Self::LlmRejected,
             ApiQuota(_) => Self::ApiQuota,
             ApiTimeout(_) | Network(_) => Self::NetworkTimeout,
             AudioCorrupt(_) => Self::AudioCorrupt,
@@ -281,6 +291,8 @@ mod tests {
             ErrorClass::AudioCorrupt,
             ErrorClass::ApiQuota,
             ErrorClass::ApiAuth,
+            ErrorClass::LlmModelUnavailable,
+            ErrorClass::LlmRejected,
             ErrorClass::NetworkTimeout,
             ErrorClass::WorkerKilled,
             ErrorClass::ModelNotSelected,
@@ -302,6 +314,14 @@ mod tests {
         assert_eq!(
             ErrorClass::from_core_error(&CoreError::ApiQuota("x".into())),
             ErrorClass::ApiQuota
+        );
+        assert_eq!(
+            ErrorClass::from_core_error(&CoreError::LlmModelUnavailable("x".into())),
+            ErrorClass::LlmModelUnavailable
+        );
+        assert_eq!(
+            ErrorClass::from_core_error(&CoreError::LlmRejected("x".into())),
+            ErrorClass::LlmRejected
         );
         assert_eq!(
             ErrorClass::from_core_error(&CoreError::ApiTimeout("x".into())),
@@ -355,6 +375,8 @@ mod tests {
         // Permanent — re-running fails identically, so surface immediately.
         for c in [
             ErrorClass::ApiAuth,
+            ErrorClass::LlmModelUnavailable,
+            ErrorClass::LlmRejected,
             ErrorClass::AudioCorrupt,
             ErrorClass::ModelNotSelected,
             ErrorClass::ModelMissing,

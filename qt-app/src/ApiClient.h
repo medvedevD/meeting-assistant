@@ -48,8 +48,10 @@ signals:
     // `json` is the decoded response body (QVariantMap / QVariantList).
     void requestSucceeded(int requestId, const QString &path,
                           const QVariant &json);
+    // `body` is the decoded JSON error body when the server sent one (e.g.
+    // `{error_class, message}` from POST /settings/test), else invalid.
     void requestFailed(int requestId, const QString &path, int httpStatus,
-                       const QString &error);
+                       const QString &error, const QVariant &body);
 
 private:
     int send(const QByteArray &verb, const QString &path,

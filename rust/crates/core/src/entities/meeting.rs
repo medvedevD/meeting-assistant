@@ -1,3 +1,4 @@
+use super::TokenUsage;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -11,6 +12,9 @@ pub struct Meeting {
     pub protocol_path: Option<PathBuf>,
     pub transcript_text: Option<String>,
     pub protocol_text: Option<String>,
+    /// Tokens the LLM spent on `protocol_text`; `None` for protocols that
+    /// predate usage tracking or came from a provider that reports none.
+    pub protocol_usage: Option<TokenUsage>,
     pub created_at: i64,
 }
 
@@ -25,6 +29,7 @@ impl Meeting {
             protocol_path: None,
             transcript_text: None,
             protocol_text: None,
+            protocol_usage: None,
             created_at: now_unix(),
         }
     }

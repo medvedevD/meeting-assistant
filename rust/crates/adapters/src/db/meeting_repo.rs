@@ -1,6 +1,10 @@
 use super::Db;
 use async_trait::async_trait;
-use meeting_core::{entities::Meeting, ports::MeetingRepo, CoreError};
+use meeting_core::{
+    entities::{Meeting, TokenUsage},
+    ports::MeetingRepo,
+    CoreError,
+};
 use rusqlite::OptionalExtension;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -20,6 +24,13 @@ fn row_to_meeting(row: &rusqlite::Row) -> rusqlite::Result<Meeting> {
         transcript_path: row.get::<_, Option<String>>(5)?.map(PathBuf::from),
         protocol_path: row.get::<_, Option<String>>(6)?.map(PathBuf::from),
         created_at: row.get(7)?,
+        protocol_usage: match (row.get(8)?, row.get(9)?) {
+            (Some(input_tokens), Some(output_tokens)) => Some(TokenUsage {
+                input_tokens,
+                output_tokens,
+            }),
+            _ => None,
+        },
     })
 }
 
@@ -54,7 +65,8 @@ impl MeetingRepo for SqliteMeetingRepo {
             let conn = db.conn.lock().unwrap();
             conn.query_row(
                 "SELECT id, name, audio_path, transcript_text, protocol_text, \
-                        transcript_path, protocol_path, created_at \
+                        transcript_path, protocol_path, created_at, \
+                        protocol_input_tokens, protocol_output_tokens \
                    FROM meetings WHERE id=?1",
                 [&id],
                 row_to_meeting,
@@ -74,7 +86,8 @@ impl MeetingRepo for SqliteMeetingRepo {
             let conn = db.conn.lock().unwrap();
             conn.query_row(
                 "SELECT id, name, audio_path, transcript_text, protocol_text, \
-                        transcript_path, protocol_path, created_at \
+                        transcript_path, protocol_path, created_at, \
+                        protocol_input_tokens, protocol_output_tokens \
                    FROM meetings WHERE audio_path=?1 ORDER BY created_at DESC LIMIT 1",
                 [&path_str],
                 row_to_meeting,
@@ -106,17 +119,25 @@ impl MeetingRepo for SqliteMeetingRepo {
         ensure_meeting_updated(updated, &id)
     }
 
-    async fn save_protocol(&self, id: &str, text: &str) -> Result<(), CoreError> {
+    async fn save_protocol(
+        &self,
+        id: &str,
+        text: &str,
+        usage: Option<TokenUsage>,
+    ) -> Result<(), CoreError> {
         let db = Arc::clone(&self.0);
         let id = id.to_string();
         let query_id = id.clone();
         let text = text.to_string();
+        let input_tokens = usage.map(|u| u.input_tokens);
+        let output_tokens = usage.map(|u| u.output_tokens);
 
         let updated = tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().unwrap();
             conn.execute(
-                "UPDATE meetings SET protocol_text=?1 WHERE id=?2",
-                rusqlite::params![text, query_id],
+                "UPDATE meetings SET protocol_text=?1, protocol_input_tokens=?2, \
+                        protocol_output_tokens=?3 WHERE id=?4",
+                rusqlite::params![text, input_tokens, output_tokens, query_id],
             )
         })
         .await
@@ -237,7 +258,8 @@ impl MeetingRepo for SqliteMeetingRepo {
         tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().unwrap();
             conn.execute(
-                "UPDATE meetings SET protocol_text=NULL, protocol_path=NULL WHERE id=?1",
+                "UPDATE meetings SET protocol_text=NULL, protocol_path=NULL, \
+                        protocol_input_tokens=NULL, protocol_output_tokens=NULL WHERE id=?1",
                 rusqlite::params![id],
             )
         })
@@ -282,7 +304,8 @@ impl MeetingRepo for SqliteMeetingRepo {
                     "SELECT id, name, audio_path, \
                        CASE WHEN transcript_text IS NOT NULL THEN '' ELSE NULL END, \
                        CASE WHEN protocol_text IS NOT NULL THEN '' ELSE NULL END, \
-                       transcript_path, protocol_path, created_at \
+                       transcript_path, protocol_path, created_at, \
+                       protocol_input_tokens, protocol_output_tokens \
                      FROM meetings ORDER BY created_at DESC",
                 )
                 .map_err(|e| CoreError::Storage(e.to_string()))?;
@@ -381,6 +404,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn save_protocol_persists_token_usage() {
+        let repo = make_repo();
+        let m = Meeting::new("Встреча".to_string(), PathBuf::from("/audio/x.wav"));
+        repo.save(&m).await.unwrap();
+        let usage = TokenUsage {
+            input_tokens: 15_300,
+            output_tokens: 1_240,
+        };
+        repo.save_protocol(&m.id, "# Протокол", Some(usage))
+            .await
+            .unwrap();
+        // Writing the Markdown copy's path must not drop the usage.
+        repo.save_protocol_file(&m.id, "# Протокол", &PathBuf::from("/d/protocol.md"))
+            .await
+            .unwrap();
+
+        let found = repo.find_by_id(&m.id).await.unwrap().unwrap();
+        assert_eq!(found.protocol_usage, Some(usage));
+        let listed = repo.list_all().await.unwrap();
+        assert_eq!(listed[0].protocol_usage, Some(usage));
+
+        repo.clear_protocol(&m.id).await.unwrap();
+        let cleared = repo.find_by_id(&m.id).await.unwrap().unwrap();
+        assert_eq!(cleared.protocol_usage, None);
+    }
+
+    #[tokio::test]
     async fn result_updates_reject_unknown_meeting() {
         let repo = make_repo();
         let path = PathBuf::from("/meetings/missing/result.md");
@@ -390,7 +440,7 @@ mod tests {
             Err(CoreError::NotFound(_))
         ));
         assert!(matches!(
-            repo.save_protocol("missing", "text").await,
+            repo.save_protocol("missing", "text", None).await,
             Err(CoreError::NotFound(_))
         ));
         assert!(matches!(
@@ -442,7 +492,7 @@ mod tests {
         let m = Meeting::new("Встреча".to_string(), PathBuf::from("/audio/x.wav"));
         repo.save(&m).await.unwrap();
         repo.save_transcript(&m.id, "Текст").await.unwrap();
-        repo.save_protocol(&m.id, "# Протокол").await.unwrap();
+        repo.save_protocol(&m.id, "# Протокол", None).await.unwrap();
 
         repo.delete_audio_only(&m.id).await.unwrap();
 

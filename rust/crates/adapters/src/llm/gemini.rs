@@ -1,11 +1,15 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use meeting_core::{ports::LlmProvider, CoreError};
+use meeting_core::{
+    ports::{LlmCompletion, LlmProvider},
+    CoreError,
+};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
 use super::errors::{classify_http, classify_transport};
+use super::usage::token_usage;
 
 /// Google Gemini provider (Generative Language API). Distinct wire format from
 /// the OpenAI-compatible providers: model is in the URL path, key is a query
@@ -39,12 +43,26 @@ impl GeminiProvider {
         }
     }
 
-    /// Cheap credential check: list models for the key.
+    /// "Test key" check: a one-token `generateContent` against the configured
+    /// model, so a model the key can't use fails here rather than only at
+    /// protocol generation (listing models succeeds regardless).
     pub async fn probe(&self) -> Result<(), CoreError> {
-        let url = format!("{}/models?key={}", self.base_url, self.api_key);
+        let body = GenerateContentRequest {
+            contents: vec![Content {
+                parts: vec![Part { text: "ping" }],
+            }],
+            generation_config: GenerationConfig {
+                max_output_tokens: 1,
+            },
+        };
+        let url = format!(
+            "{}/models/{}:generateContent?key={}",
+            self.base_url, self.model, self.api_key
+        );
         let resp = self
             .client
-            .get(&url)
+            .post(&url)
+            .json(&body)
             .send()
             .await
             .map_err(|e| classify_transport("Gemini", &e))?;
@@ -56,6 +74,60 @@ impl GeminiProvider {
             Err(classify_http("Gemini", status, &text))
         }
     }
+
+    /// Text-generation model ids the key can use (`GET /models`), without the
+    /// `models/` prefix. Only `generateContent` models qualify, minus the
+    /// speech/image/live variants that support it but can't write a protocol.
+    pub async fn list_models(&self) -> Result<Vec<String>, CoreError> {
+        let url = format!(
+            "{}/models?pageSize=1000&key={}",
+            self.base_url, self.api_key
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .timeout(Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|e| classify_transport("Gemini", &e))?;
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(classify_http("Gemini", status, &text));
+        }
+        let parsed: ModelList = resp
+            .json()
+            .await
+            .map_err(|e| CoreError::Llm(format!("Gemini: unexpected /models response: {e}")))?;
+        Ok(parsed
+            .models
+            .into_iter()
+            .filter(|m| {
+                m.supported_generation_methods
+                    .iter()
+                    .any(|g| g == "generateContent")
+            })
+            .map(|m| m.name.trim_start_matches("models/").to_string())
+            .filter(|id| !NON_TEXT_MARKERS.iter().any(|x| id.contains(x)))
+            .collect())
+    }
+}
+
+/// Id fragments of `generateContent` models whose output isn't text.
+const NON_TEXT_MARKERS: &[&str] = &["tts", "image", "live", "native-audio"];
+
+#[derive(Deserialize)]
+struct ModelList {
+    #[serde(default)]
+    models: Vec<ModelEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelEntry {
+    name: String,
+    #[serde(default)]
+    supported_generation_methods: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -97,10 +169,22 @@ struct Candidate {
     content: Option<RespContent>,
 }
 
+/// `promptTokenCount` already includes cached content. Thinking models bill
+/// `thoughtsTokenCount` as output on top of `candidatesTokenCount`.
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UsageMetadata {
+    prompt_token_count: Option<u32>,
+    candidates_token_count: Option<u32>,
+    thoughts_token_count: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct GenerateContentResponse {
     #[serde(default)]
     candidates: Vec<Candidate>,
+    usage_metadata: Option<UsageMetadata>,
 }
 
 #[async_trait]
@@ -109,7 +193,7 @@ impl LlmProvider for GeminiProvider {
         &self,
         transcript: &str,
         instructions: Option<&str>,
-    ) -> Result<String, CoreError> {
+    ) -> Result<LlmCompletion, CoreError> {
         let mut parts = Vec::new();
         if let Some(instr) = instructions {
             parts.push(Part { text: instr });
@@ -153,15 +237,22 @@ impl LlmProvider for GeminiProvider {
             .filter_map(|p| p.text)
             .collect::<Vec<_>>()
             .join("");
-        Ok(text)
+        let usage = parsed.usage_metadata.and_then(|u| {
+            token_usage(
+                &[u.prompt_token_count],
+                &[u.candidates_token_count, u.thoughts_token_count],
+            )
+        });
+        Ok(LlmCompletion { text, usage })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use meeting_core::entities::TokenUsage;
     use serde_json::json;
-    use wiremock::matchers::{method, path_regex};
+    use wiremock::matchers::{body_partial_json, method, path, path_regex};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -180,11 +271,67 @@ mod tests {
             .generate("transcript", Some("be brief"))
             .await
             .unwrap();
-        assert_eq!(out, "# Protocol");
+        assert_eq!(out.text, "# Protocol");
+        assert_eq!(out.usage, None);
     }
 
     #[tokio::test]
-    async fn classifies_403_as_auth() {
+    async fn counts_thinking_tokens_as_output() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"/models/.*:generateContent"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "candidates": [{"content": {"parts": [{"text": "# Protocol"}]}}],
+                "usageMetadata": {
+                    "promptTokenCount": 5200,
+                    "candidatesTokenCount": 800,
+                    "thoughtsTokenCount": 1500,
+                    "totalTokenCount": 7500
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let provider = GeminiProvider::new("k", "gemini-2.5-pro", 4096, server.uri());
+        let out = provider.generate("transcript", None).await.unwrap();
+        assert_eq!(
+            out.usage,
+            Some(TokenUsage {
+                input_tokens: 5200,
+                output_tokens: 2300,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn list_models_keeps_text_generation_models_only() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "models": [
+                    {"name": "models/gemini-2.5-pro",
+                     "supportedGenerationMethods": ["generateContent", "countTokens"]},
+                    {"name": "models/text-embedding-004",
+                     "supportedGenerationMethods": ["embedContent"]},
+                    {"name": "models/gemini-2.5-flash-preview-tts",
+                     "supportedGenerationMethods": ["generateContent"]},
+                    {"name": "models/gemini-2.5-flash",
+                     "supportedGenerationMethods": ["generateContent"]}
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let provider = GeminiProvider::new("k", "gemini-2.5-pro", 4096, server.uri());
+        assert_eq!(
+            provider.list_models().await.unwrap(),
+            vec!["gemini-2.5-pro", "gemini-2.5-flash"]
+        );
+    }
+
+    #[tokio::test]
+    async fn classifies_403_as_model_unavailable() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path_regex(r"/models/.*:generateContent"))
@@ -194,6 +341,23 @@ mod tests {
 
         let provider = GeminiProvider::new("k", "gemini-2.5-pro", 4096, server.uri());
         let err = provider.generate("t", None).await.unwrap_err();
-        assert!(matches!(err, CoreError::ApiAuth(_)));
+        assert!(matches!(err, CoreError::LlmModelUnavailable(_)));
+    }
+
+    #[tokio::test]
+    async fn probe_requests_one_token_from_the_configured_model() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path_regex(r"/models/gemini-2\.5-flash:generateContent"))
+            .and(body_partial_json(
+                json!({"generationConfig": {"maxOutputTokens": 1}}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"candidates": []})))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider = GeminiProvider::new("k", "gemini-2.5-flash", 4096, server.uri());
+        provider.probe().await.unwrap();
     }
 }

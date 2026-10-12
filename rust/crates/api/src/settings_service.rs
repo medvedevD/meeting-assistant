@@ -21,8 +21,18 @@ pub trait SettingsService: Send + Sync {
     /// Store (`Some`) or delete (`None`) a provider's API key.
     async fn set_secret(&self, provider: String, value: Option<String>) -> Result<(), String>;
 
-    /// Cheap credential/connectivity probe for the "Test key" button.
-    async fn test_provider(&self, provider: String) -> Result<(), String>;
+    /// "Test key" probe: a minimal request to `provider` with its stored key,
+    /// against `model` when given (the unsaved choice on screen) or else the
+    /// configured one. The classified error lets the UI explain the cause.
+    async fn test_provider(
+        &self,
+        provider: String,
+        model: Option<String>,
+    ) -> Result<(), meeting_core::CoreError>;
+
+    /// Models `provider`'s stored key can use, for the settings model picker
+    /// (the provider's own listing, narrowed to protocol-capable models).
+    async fn list_models(&self, provider: String) -> Result<Vec<String>, meeting_core::CoreError>;
 
     /// Encrypt the plaintext fallback into a passphrase vault (and unlock it).
     /// Only meaningful when the store is in the plaintext fallback.

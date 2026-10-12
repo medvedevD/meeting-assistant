@@ -64,10 +64,34 @@ QtObject {
                     { "provider": provider, "value": value })
     }
 
-    // Probe a provider's credentials. `onDone(success, error)`.
-    function testProvider(provider, onDone) {
+    // Probe `provider` against `model` (the choice on screen, saved or not;
+    // empty = the saved one). `onDone(ok, errorClass, message)` — on failure
+    // `errorClass` is the server's classification (errors.js) or "" if the
+    // server sent none.
+    function testProvider(provider, model, onDone) {
         store._testCb = onDone || null
-        _test.post("/api/v1/settings/test", { "provider": provider })
+        var body = { "provider": provider }
+        if (model && model.length > 0)
+            body.model = model
+        _test.post("/api/v1/settings/test", body)
+    }
+
+    // Models `provider`'s stored key can use, from the provider itself.
+    // `onDone(ok, models, errorClass, message)`; a newer call supersedes an
+    // older one still in flight (only the latest callback fires).
+    function listModels(provider, onDone) {
+        store._modelsCb = onDone || null
+        _models.get("/api/v1/settings/models?provider=" + encodeURIComponent(provider))
+    }
+
+    // `{cls, msg}` out of a failed provider call: the server's classification
+    // (errors.js) when it sent one, else the transport error.
+    function _providerFailure(s, e, body) {
+        return {
+            cls: (body && body.error_class) ? body.error_class : "",
+            msg: (body && body.message) ? body.message
+               : (s > 0 ? qsTr("HTTP %1: %2").arg(s).arg(e) : e)
+        }
     }
 
     // ── secret-store lifecycle (passphrase vault) ───────────────────────────
@@ -144,11 +168,26 @@ QtObject {
 
     property Request _test: Request {
         onOk: function (json) {
-            if (store._testCb) { store._testCb(true, ""); store._testCb = null }
+            if (store._testCb) { store._testCb(true, "", ""); store._testCb = null }
         }
-        onFail: function (s, e) {
-            var msg = s > 0 ? qsTr("HTTP %1: %2").arg(s).arg(e) : e
-            if (store._testCb) { store._testCb(false, msg); store._testCb = null }
+        onFail: function (s, e, body) {
+            var f = store._providerFailure(s, e, body)
+            if (store._testCb) { store._testCb(false, f.cls, f.msg); store._testCb = null }
+        }
+    }
+
+    property var _modelsCb: null
+    property Request _models: Request {
+        onOk: function (json) {
+            var cb = store._modelsCb
+            store._modelsCb = null
+            if (cb) cb(true, (json && json.models) ? json.models : [], "", "")
+        }
+        onFail: function (s, e, body) {
+            var cb = store._modelsCb
+            store._modelsCb = null
+            var f = store._providerFailure(s, e, body)
+            if (cb) cb(false, [], f.cls, f.msg)
         }
     }
 

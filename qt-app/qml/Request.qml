@@ -14,7 +14,8 @@ QtObject {
     property bool busy: false
 
     signal ok(var json)
-    signal fail(int status, string error)
+    // `body`: decoded JSON error body if the server sent one, else undefined.
+    signal fail(int status, string error, var body)
 
     function get(path) {
         busy = true
@@ -45,12 +46,12 @@ QtObject {
             req.busy = false
             req.ok(json)
         }
-        function onRequestFailed(requestId, path, httpStatus, error) {
+        function onRequestFailed(requestId, path, httpStatus, error, body) {
             if (requestId !== req._id)
                 return
             req._id = -1
             req.busy = false
-            req.fail(httpStatus, error)
+            req.fail(httpStatus, error, body)
         }
     }
 }

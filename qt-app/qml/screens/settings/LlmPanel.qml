@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import MeetingAssistant
+import "../../i18n/errors.js" as Errors
 
 ScrollView {
     id: panel
@@ -23,6 +24,69 @@ ScrollView {
     // Transient message for a failed secret-store operation (unlock/protect/…).
     property string vaultMsg: ""
 
+    // Outcome under a check/save button: a status line (red on failure) and,
+    // when the provider gave one, its own reason — selectable so it can be
+    // copied (e.g. "This model is not available in your subscription tier").
+    component ProbeResult: ColumnLayout {
+        id: probe
+        property string message: ""
+        property string detail: ""
+        property bool failed: false
+
+        function show(msg) { message = msg; detail = ""; failed = false }
+        function showError(msg) { message = msg; detail = ""; failed = true }
+        // Render a SettingsStore.testProvider outcome with the same copy as a
+        // failed job (errors.js), so the check explains *why* — a bad key, a
+        // model outside the tier, quota — instead of dumping the raw response.
+        function showProbe(ok, okText, errorClass, errMessage) {
+            if (ok) { show(okText); return }
+            if (!errorClass || errorClass === "unknown") {
+                showError(qsTr("Проверка не прошла: %1").arg(errMessage))
+                return
+            }
+            var d = Errors.describe(errorClass, errMessage)
+            message = d.title + ". " + d.hint
+            detail = d.detail
+            failed = true
+        }
+
+        Layout.fillWidth: true
+        spacing: 4
+        visible: message.length > 0
+        Text {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            color: probe.failed ? Theme.rec : Theme.ink3
+            text: probe.message
+        }
+        TextEdit {
+            Layout.fillWidth: true
+            visible: text.length > 0
+            readOnly: true
+            selectByMouse: true
+            wrapMode: TextEdit.Wrap
+            font.family: Theme.fontMono
+            font.pixelSize: Theme.fsSmall
+            color: Theme.ink3
+            selectionColor: Theme.accentTint
+            selectedTextColor: Theme.ink
+            text: probe.detail
+        }
+    }
+
+    // Probe the provider against the model on screen (saved or not).
+    function testProvider(result, okText) {
+        var model = modelBox.editText.trim()
+        var okLine = model.length > 0 ? okText.arg(model) : qsTr("Проверка пройдена")
+        result.show(qsTr("Проверка…"))
+        SettingsStore.testProvider(panel.provider, model,
+            function (ok, errorClass, message) {
+                result.showProbe(ok, okLine, errorClass, message)
+            })
+    }
+
     readonly property var providers: [
         { id: "anthropic", label: "Anthropic (Claude)" },
         { id: "openai",    label: "OpenAI (ChatGPT)" },
@@ -30,11 +94,13 @@ ScrollView {
         { id: "mistral",   label: "Mistral" },
         { id: "ollama",    label: "Ollama (локально)" }
     ]
+    // Built-in suggestions: shown until the provider's own list for the stored
+    // key arrives (refreshModels), and kept if it can't be fetched.
     readonly property var commonModels: ({
         "anthropic": ["claude-sonnet-4-6", "claude-opus-4-7", "claude-haiku-4-5"],
         "openai":    ["gpt-4o", "gpt-4o-mini", "o3"],
         "gemini":    ["gemini-2.5-pro", "gemini-2.5-flash"],
-        "mistral":   ["mistral-large-latest", "mistral-small-latest"],
+        "mistral":   ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"],
         "ollama":    ["llama3.1:8b", "qwen2.5:14b", "mistral"]
     })
 
@@ -47,15 +113,75 @@ ScrollView {
 
     function loadProvider() {
         var c = cfg()
-        var list = (commonModels[provider] || []).slice()
-        if (c.model && list.indexOf(c.model) === -1) list.unshift(c.model)
-        modelBox.model = list
-        modelBox.editText = c.model || ""
+        setModelList(commonModels[provider] || [], c.model || "")
         maxTokensSpin.value = c.max_tokens || 4096
         baseUrlField.text = c.base_url || ""
         keyField.text = ""
         keyVisible = false
-        if (keyless) fetchOllamaTags()
+        keyResult.show("")
+        ollamaResult.show("")
+        refreshModels()
+    }
+
+    // Where the model list came from: "loading" | "provider" | "fallback".
+    property string modelsSource: "fallback"
+    property int modelsCount: 0
+    // Why the provider's list isn't shown (fallback only; "" = no key yet).
+    property string modelsNote: ""
+    // True while the list is replaced programmatically, so the combo's text
+    // change isn't taken for the user editing the model.
+    property bool _syncingModels: false
+
+    function setModelList(list, current) {
+        var l = list.slice()
+        if (current && l.indexOf(current) === -1) l.unshift(current)
+        _syncingModels = true
+        modelBox.model = l
+        modelBox.editText = current
+        _syncingModels = false
+    }
+
+    // Swap the suggestions for the models the stored key can use, asking the
+    // provider through the sidecar. On failure keep the built-in list and say
+    // why in the row's help text.
+    function refreshModels() {
+        var p = provider
+        modelsSource = "loading"
+        modelsNote = ""
+        SettingsStore.listModels(p, function (ok, models, errorClass, message) {
+            if (p !== panel.provider)
+                return // switched provider while the listing was in flight
+            if (ok && models.length > 0) {
+                var cur = modelBox.editText.trim()
+                setModelList(models, cur)
+                if (cur.length === 0)
+                    modelBox.editText = models[0] // a default pick: saved like a user choice
+                modelsCount = models.length
+                modelsSource = "provider"
+                return
+            }
+            modelsSource = "fallback"
+            if (ok)
+                modelsNote = qsTr("провайдер не вернул подходящих моделей")
+            else if (errorClass === "api_auth" && !panel.keyless && !panel.hasProviderKey)
+                modelsNote = ""
+            else if (errorClass && errorClass !== "unknown")
+                modelsNote = Errors.describe(errorClass, message).title
+            else
+                modelsNote = message.length > 120 ? message.slice(0, 120) + "…" : message
+        })
+    }
+
+    function modelsHelp() {
+        if (modelsSource === "loading")
+            return qsTr("Загружаю модели, доступные вашему ключу…")
+        if (modelsSource === "provider")
+            return qsTr("Модели, доступные вашему ключу у провайдера (%1). Можно ввести название вручную.")
+                   .arg(modelsCount)
+        if (modelsNote.length === 0)
+            return qsTr("Популярные модели. Сохраните API-ключ, чтобы увидеть модели, доступные именно вам.")
+        return qsTr("Популярные модели — список у провайдера получить не удалось (%1). Можно ввести название вручную.")
+               .arg(modelsNote)
     }
 
     // Non-secret fingerprint of the stored key from the snapshot: { last4, len }.
@@ -114,26 +240,6 @@ ScrollView {
     }
     Component.onCompleted: load()
     Connections { target: scr; function onReseeded() { panel.load() } }
-
-    function fetchOllamaTags() {
-        var base = (cfg().base_url || "http://localhost:11434/v1")
-        var host = base.replace(/\/v1\/?$/, "").replace(/\/$/, "")
-        var xhr = new XMLHttpRequest()
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== XMLHttpRequest.DONE || xhr.status !== 200) return
-            try {
-                var data = JSON.parse(xhr.responseText)
-                var names = (data.models || []).map(function (m) { return m.name })
-                if (names.length === 0) return
-                var cur = cfg().model || ""
-                if (cur && names.indexOf(cur) === -1) names.unshift(cur)
-                modelBox.model = names
-                modelBox.editText = cur || names[0]
-            } catch (e) {}
-        }
-        xhr.open("GET", host + "/api/tags")
-        xhr.send()
-    }
 
     ColumnLayout {
         width: panel.availableWidth
@@ -374,14 +480,32 @@ ScrollView {
 
         SettingsRow {
             title: qsTr("Модель")
-            help: qsTr("Можно выбрать популярную модель или ввести название вручную.")
+            help: panel.modelsHelp()
             MeetyComboBox {
                 id: modelBox
                 Layout.fillWidth: true
                 editable: true
                 onAccepted: { panel.cfg().model = editText; scr.touch() }
                 onActivated: { panel.cfg().model = currentText; scr.touch() }
-                onEditTextChanged: { panel.cfg().model = editText; scr.touch() }
+                onEditTextChanged: {
+                    if (panel._syncingModels)
+                        return
+                    panel.cfg().model = editText
+                    scr.touch()
+                    // A check result is about the model it ran against.
+                    keyResult.show("")
+                    ollamaResult.show("")
+                }
+            }
+            MeetyIconButton {
+                iconName: "refresh"
+                iconSize: 15
+                enabled: panel.modelsSource !== "loading"
+                onClicked: panel.refreshModels()
+                MeetyToolTip {
+                    text: qsTr("Обновить список моделей у провайдера")
+                    visible: parent.hovered
+                }
             }
         }
 
@@ -492,11 +616,14 @@ ScrollView {
                     onClicked: SettingsStore.setSecret(
                         panel.provider, keyField.text.trim(),
                         function (ok, e) {
-                            keyResult.text = ok ? qsTr("Ключ сохранён")
-                                                : qsTr("Ошибка: %1").arg(e)
+                            if (ok)
+                                keyResult.show(qsTr("Ключ сохранён"))
+                            else
+                                keyResult.showError(qsTr("Ошибка: %1").arg(e))
                             if (ok) {
                                 keyField.text = ""
                                 panel.keyVisible = false
+                                panel.refreshModels() // the new key may see other models
                             }
                         })
                 }
@@ -505,41 +632,41 @@ ScrollView {
 
         SettingsRow {
             visible: !panel.keyless
-            title: qsTr("Проверка ключа")
-            help: qsTr("Быстрый запрос к выбранному провайдеру.")
+            title: qsTr("Проверка доступа")
+            help: qsTr("Короткий запрос к выбранной модели: проверяет и ключ, и доступ к модели на вашем тарифе.")
             dividerVisible: false
-            MeetyButton {
-                text: qsTr("Проверить ключ")
-                enabled: panel.hasProviderKey || keyField.text.trim().length > 0
-                onClicked: {
-                    keyResult.text = qsTr("Проверка…")
-                    SettingsStore.testProvider(
-                        panel.provider,
-                        function (ok, e) {
-                            keyResult.text = ok
-                                ? qsTr("Ключ работает")
-                                : qsTr("%1").arg(e)
-                        })
-                }
-            }
-            MeetyButton {
-                variant: "ghost"
-                text: qsTr("Удалить")
-                enabled: panel.hasProviderKey
-                onClicked: SettingsStore.setSecret(
-                    panel.provider, null,
-                    function (ok, e) {
-                        keyResult.text = ok ? qsTr("Ключ удалён")
-                                            : qsTr("Ошибка: %1").arg(e)
-                    })
-            }
-            Text {
-                id: keyResult
+            ColumnLayout {
                 Layout.fillWidth: true
-                wrapMode: Text.WordWrap
-                font.family: Theme.fontUi
-                font.pixelSize: Theme.fsBody
-                color: Theme.ink3
+                spacing: 8
+                RowLayout {
+                    spacing: 10
+                    MeetyButton {
+                        objectName: "testKeyButton"
+                        text: qsTr("Проверить")
+                        enabled: panel.hasProviderKey || keyField.text.trim().length > 0
+                        onClicked: panel.testProvider(
+                            keyResult, qsTr("Ключ работает, модель «%1» отвечает"))
+                    }
+                    MeetyButton {
+                        variant: "ghost"
+                        text: qsTr("Удалить ключ")
+                        enabled: panel.hasProviderKey
+                        onClicked: SettingsStore.setSecret(
+                            panel.provider, null,
+                            function (ok, e) {
+                                if (ok) {
+                                    keyResult.show(qsTr("Ключ удалён"))
+                                    panel.refreshModels()
+                                } else {
+                                    keyResult.showError(qsTr("Ошибка: %1").arg(e))
+                                }
+                            })
+                    }
+                }
+                ProbeResult {
+                    id: keyResult
+                    objectName: "keyResult"
+                }
             }
         }
 
@@ -548,25 +675,17 @@ ScrollView {
             title: qsTr("Подключение")
             help: qsTr("Ollama работает локально и не требует API-ключа.")
             dividerVisible: false
-            MeetyButton {
-                text: qsTr("Проверить подключение")
-                onClicked: {
-                    ollamaResult.text = qsTr("Проверка…")
-                    SettingsStore.testProvider(
-                        "ollama",
-                        function (ok, e) {
-                            ollamaResult.text = ok
-                                ? qsTr("Ollama доступна")
-                                : qsTr("%1").arg(e)
-                        })
-                }
-            }
-            Text {
-                id: ollamaResult
+            ColumnLayout {
                 Layout.fillWidth: true
-                font.family: Theme.fontUi
-                font.pixelSize: Theme.fsBody
-                color: Theme.ink3
+                spacing: 8
+                MeetyButton {
+                    text: qsTr("Проверить подключение")
+                    onClicked: panel.testProvider(
+                        ollamaResult, qsTr("Ollama доступна, модель «%1» отвечает"))
+                }
+                ProbeResult {
+                    id: ollamaResult
+                }
             }
         }
     }

@@ -1,7 +1,10 @@
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use meeting_core::{ports::LlmProvider, CoreError};
+use meeting_core::{
+    ports::{LlmCompletion, LlmProvider},
+    CoreError,
+};
 
 /// An [`LlmProvider`] whose backing implementation can be replaced at runtime
 /// (when the user saves new LLM settings) without rebuilding the router or
@@ -33,7 +36,7 @@ impl LlmProvider for SwappableLlm {
         &self,
         transcript: &str,
         instructions: Option<&str>,
-    ) -> Result<String, CoreError> {
+    ) -> Result<LlmCompletion, CoreError> {
         // Clone the Arc and drop the guard before awaiting (the guard is not Send).
         let provider = { self.current.read().unwrap().clone() };
         provider.generate(transcript, instructions).await

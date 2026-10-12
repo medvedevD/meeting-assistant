@@ -160,11 +160,11 @@ Settings and secrets deliberately live **outside** the clean-architecture core �
 
 ### Adding a new LLM provider
 
-The `LlmProvider` port is intentionally minimal (`generate(transcript, instructions) -> String`). To add a provider:
+The `LlmProvider` port is intentionally minimal (`generate(transcript, instructions) -> LlmCompletion`, i.e. the text plus optional `TokenUsage`). To add a provider:
 
 1. **`ProviderKind`** ([llm/config.rs](rust/crates/adapters/src/llm/config.rs)) — add the variant plus its `as_str`/`parse` aliases, `default_model`, `default_base_url`, and `needs_key`.
-2. **Adapter** — if it speaks the OpenAI Chat Completions wire format, reuse `OpenAiCompatProvider` (as OpenAI/Mistral/Ollama do); otherwise add a new file modeled on `anthropic.rs`/`gemini.rs` with a `generate` and a cheap `probe` (the "Test key" button). Map HTTP errors through `errors.rs` (`classify_http`/`classify_transport`) so the pipeline error classes stay consistent.
-3. **Factory** ([llm/factory.rs](rust/crates/adapters/src/llm/factory.rs)) — wire `build_llm` and `probe_llm` for the new kind.
+2. **Adapter** — if it speaks the OpenAI Chat Completions wire format, reuse `OpenAiCompatProvider` (as OpenAI/Mistral/Ollama do); otherwise add a new file modeled on `anthropic.rs`/`gemini.rs` with a `generate` and a cheap `probe` (the "Test key" button). Map HTTP errors through `errors.rs` (`classify_http`/`classify_transport`) so the pipeline error classes stay consistent. Parse the response's token counters through `usage.rs` (`token_usage`) so a missing or null usage block never fails a finished generation.
+3. **Factory** ([llm/factory.rs](rust/crates/adapters/src/llm/factory.rs)) — wire `build_llm`, `probe_llm` and `list_llm_models` for the new kind. `probe_llm` must send a minimal real request to the configured model (a listing endpoint succeeds even when the subscription tier excludes the model). `list_llm_models` feeds the settings model picker (`GET /api/v1/settings/models`): call the provider's listing endpoint and keep only models that can write a protocol; the GUI falls back to its built-in suggestions when it fails.
 4. **Settings** — add a `ProviderCfg` field on `LlmPrefs` in [settings_store.rs](rust/crates/adapters/src/settings_store.rs) and expose it in the `snapshot()`/`provider_view` in [app/src/settings_service.rs](rust/crates/app/src/settings_service.rs). Add the env-var mapping in `secret_store.rs` if it authenticates with a key.
 5. **Tests** — add a `wiremock` test for the new wire path (see existing tests in `llm/`).
 
