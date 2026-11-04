@@ -1,93 +1,100 @@
 # Meeting Assistant
 
-Десктопное приложение для записи встреч, локальной расшифровки речи и
-подготовки протоколов с помощью LLM.
+**English** | [Русский](README.ru.md)
 
-> Проект находится на стадии alpha. Сборки предназначены для тестирования и
-> пока не подписаны коммерческими сертификатами Apple и Microsoft.
+Meeting Assistant is a desktop app for macOS, Windows, and Linux that records
+meetings, transcribes speech locally with Whisper, and generates meeting minutes
+with an LLM. It is built with Rust (core and local HTTP sidecar) and Qt 6 with
+QML and C++ (desktop UI).
 
-## Возможности
+> This project is in alpha. Builds are intended for testing and are not yet
+> signed with commercial Apple or Microsoft certificates.
 
-- запись микрофона, системного звука или смешанного источника;
-- локальная транскрипция через Whisper;
-- генерация протокола по редактируемым шаблонам;
-- Anthropic, OpenAI, Gemini, Mistral и локальная Ollama;
-- история встреч, повторная обработка и встроенное воспроизведение записей;
-- хранение данных и настроек на компьютере пользователя.
+## Features
 
-## Установка
+- Record the microphone, system audio, or a mix of both.
+- Transcribe locally with Whisper.
+- Generate minutes from editable templates.
+- Use Anthropic, OpenAI, Gemini, Mistral, or local Ollama as the LLM provider.
+- Browse meeting history, reprocess meetings, and play recordings in the app.
+- Keep data and settings on your own computer.
 
-Готовые сборки находятся в
+The interface and built-in templates are currently in Russian.
+
+## Installation
+
+Prebuilt packages are available on
 [GitHub Releases](https://github.com/medvedevD/meeting-assistant/releases).
 
 ### macOS
 
-Рекомендуемый бесплатный канал:
+Recommended free channel:
 
 ```bash
 brew tap medvedevd/meeting-assistant
 brew install --cask meeting-assistant
 ```
 
-Если Homebrew попросит доверять стороннему tap, выполните указанную им команду
-`brew trust`, затем повторите установку.
+If Homebrew asks you to trust the third-party tap, run the `brew trust` command
+it shows, then repeat the installation.
 
-Обновление:
+To update:
 
 ```bash
 brew upgrade --cask meeting-assistant
 ```
 
-Также можно скачать `MeetingAssistant-*.dmg` из Releases:
+You can also download `MeetingAssistant-*.dmg` from Releases:
 
-1. Откройте DMG и перетащите MeetingAssistant в Applications.
-2. Запустите приложение из Applications.
-3. Если macOS заблокирует первый запуск, откройте
-   **System Settings → Privacy & Security** и нажмите **Open Anyway**.
+1. Open the DMG and drag MeetingAssistant to Applications.
+2. Launch the app from Applications.
+3. If macOS blocks the first launch, open
+   **System Settings → Privacy & Security** and click **Open Anyway**.
 
-DMG подписан ad-hoc, но пока не нотарифицирован Apple. Полностью убрать
-Gatekeeper-предупреждение можно только после перехода на Developer ID и
-notarization.
+The DMG is ad-hoc signed but not yet notarized by Apple. The Gatekeeper warning
+can only be removed completely after moving to a Developer ID and notarization.
 
 ### Windows
 
-Скачайте `MeetingAssistant-Setup-*.exe` из Releases и запустите установщик.
-Поскольку alpha-сборка пока не подписана, SmartScreen может потребовать выбрать
+Download `MeetingAssistant-Setup-*.exe` from Releases and run the installer.
+Because the alpha build is not yet signed, SmartScreen may require you to choose
 **More info → Run anyway**.
 
 ### Linux
 
-Скачайте AppImage и сделайте его исполняемым:
+Download the AppImage and make it executable:
 
 ```bash
 chmod +x MeetingAssistant-*.AppImage
 ./MeetingAssistant-*.AppImage
 ```
 
-## Первый запуск
+## First run
 
-1. Разрешите приложению доступ к микрофону. На macOS для записи системного
-   звука также потребуется разрешение Screen Recording.
-2. Выберите или добавьте модель Whisper в настройках.
-3. Настройте LLM-провайдера. Для облачных провайдеров нужен собственный
-   API-ключ; Ollama работает локально без ключа.
-4. Создайте запись, дождитесь транскрипции и сформируйте протокол.
+1. Allow the app to access the microphone. On macOS, recording system audio also
+   requires the Screen Recording permission.
+2. Select or add a Whisper model in the settings.
+3. Configure an LLM provider. Cloud providers require your own API key; Ollama
+   runs locally without a key.
+4. Create a recording, wait for the transcription to finish, and generate the
+   minutes.
 
-Аудио обрабатывается Whisper локально и не отправляется в облако. Текст
-транскрипции передаётся наружу только выбранному пользователем LLM-провайдеру
-при генерации протокола.
+Whisper processes audio locally, and audio is not sent to the cloud. Transcript
+text is sent out only to the LLM provider you selected, and only when generating
+minutes.
 
-## Разработка
+## Development
 
-Требуются Rust, CMake и Qt 6.7+ с модулями Quick, Network, Multimedia и Svg.
+Requires Rust, CMake, and Qt 6.7+ with the Quick, Network, Multimedia, and Svg
+modules.
 
-Основной dev workflow:
+Main dev workflow:
 
 ```bash
 ./run-qt.sh
 ```
 
-Полезные варианты:
+Useful variants:
 
 ```bash
 ./run-qt.sh --debug
@@ -95,26 +102,26 @@ chmod +x MeetingAssistant-*.AppImage
 FIRST_RUN=1 ./run-qt.sh
 ```
 
-Тесты:
+Tests:
 
 ```bash
 cargo test --manifest-path rust/Cargo.toml
 ctest --test-dir qt-app/build
 ```
 
-## Архитектура
+## Architecture
 
-- `rust/` — Rust core, адаптеры, HTTP API и sidecar `meeting-server`;
-- `qt-app/` — Qt 6 / QML интерфейс;
-- `prompts/` — встроенные шаблоны протоколов;
-- `packaging/` — сборка установочных артефактов для macOS, Linux и Windows.
+- `rust/`: Rust core, adapters, HTTP API, and the `meeting-server` sidecar.
+- `qt-app/`: Qt 6 desktop UI in QML and C++.
+- `prompts/`: built-in minutes templates.
+- `packaging/`: builds installation artifacts for macOS, Linux, and Windows.
 
-GUI запускает sidecar рядом со своим executable и взаимодействует с ним по
-локальному HTTP с одноразовым токеном.
+The GUI launches the sidecar from next to its own executable and talks to it over
+loopback HTTP, using a bearer token generated at each launch.
 
-## Диагностика
+## Diagnostics
 
-Логи приложения:
+Application logs:
 
 - macOS: `~/Library/Application Support/meeting-assistant/logs/meeting-assistant.log`
 - Linux: `~/.local/share/meeting-assistant/logs/meeting-assistant.log`
