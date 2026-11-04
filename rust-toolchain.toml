@@ -1,0 +1,8 @@
+# Must stay at the repo root: rustup looks for this file from the working
+# directory upward, and every cargo command in this repo (CI, run-qt, packaging)
+# runs from the root via `--manifest-path rust/Cargo.toml`. A copy under rust/
+# is ignored by all of them.
+[toolchain]
+channel = "1.99.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

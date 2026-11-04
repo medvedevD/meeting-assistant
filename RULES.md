@@ -99,6 +99,11 @@ and `cargo test --manifest-path rust/Cargo.toml --workspace`.
 Regular PR/push CI should run the same Rust quality gate so release failures are
 caught before tagging.
 
+The Rust version is pinned in the repo-root `rust-toolchain.toml`, so a new
+`stable` cannot break the gate without a code change. It must stay at the root:
+rustup resolves the file from the working directory, and every cargo command here
+runs from the root via `--manifest-path`. Bump the version in its own commit.
+
 ## Architecture
 
 ### Rust (`/rust`) — Clean Architecture
