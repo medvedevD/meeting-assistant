@@ -1,4 +1,10 @@
-# Meeting Assistant
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/brand/logo-light.svg">
+    <img alt="Meeting Assistant" src="docs/brand/logo-light.svg" width="520">
+  </picture>
+</h1>
 
 [English](README.md) | **Русский**
 
