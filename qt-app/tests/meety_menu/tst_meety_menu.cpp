@@ -1,3 +1,5 @@
+#include "EmbeddedQmldirGuard.h"
+
 #include <QGuiApplication>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -7,6 +9,7 @@ class MeetyMenuTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase();
     void longItemsExpandMenuWidth();
     void popupFromButtonOffsetsMenu();
 };
@@ -67,6 +70,10 @@ static std::unique_ptr<QObject> createWindow(QQmlEngine &engine, QQmlComponent &
     if (!component.isReady())
         return nullptr;
     return std::unique_ptr<QObject>(component.create());
+}
+
+void MeetyMenuTest::initTestCase() {
+    verifyEmbeddedQmldir(QStringLiteral(MA_MENU_QML_IMPORT_DIR));
 }
 
 void MeetyMenuTest::longItemsExpandMenuWidth() {

@@ -1,4 +1,5 @@
 #include "AppPreferences.h"
+#include "EmbeddedQmldirGuard.h"
 
 #include <QGuiApplication>
 #include <QQmlComponent>
@@ -77,6 +78,7 @@ class FirstRunTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase();
     void preferencesPersistCompletion();
     void previewDoesNotPersistCompletion();
     void previewEnvironmentRequiresValueOne();
@@ -116,6 +118,10 @@ FirstRunTest::createWelcome(FakeMeetingStore &store,
         qWarning().noquote() << component.errorString();
 
     return std::unique_ptr<QObject>(object);
+}
+
+void FirstRunTest::initTestCase() {
+    verifyEmbeddedQmldir(QStringLiteral(MA_FIRST_RUN_QML_IMPORT_DIR));
 }
 
 void FirstRunTest::preferencesPersistCompletion() {
