@@ -35,15 +35,20 @@ pub async fn generate_protocol(
         },
     };
 
-    let markdown = llm.generate(&message, None).await?;
+    let completion = llm.generate(&message, None).await?;
 
-    Ok(Protocol::new(markdown))
+    Ok(Protocol {
+        usage: completion.usage,
+        ..Protocol::new(completion.text)
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entities::TokenUsage;
     use crate::fakes::{FakeLlmProvider, FakeTemplateLoader};
+    use crate::ports::LlmCompletion;
 
     #[tokio::test]
     async fn returns_protocol_without_template() {
@@ -77,6 +82,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn carries_the_token_usage_the_provider_reported() {
+        let usage = TokenUsage {
+            input_tokens: 1200,
+            output_tokens: 340,
+        };
+        let llm = FakeLlmProvider::with_usage("# Протокол", usage);
+        let templates = FakeTemplateLoader::empty();
+
+        let result = generate_protocol(llm, templates, "текст", None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(result.usage, Some(usage));
+    }
+
+    #[tokio::test]
+    async fn usage_is_none_when_the_provider_reports_none() {
+        let llm = FakeLlmProvider::new("# Протокол");
+        let templates = FakeTemplateLoader::empty();
+
+        let result = generate_protocol(llm, templates, "текст", None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(result.usage, None);
+    }
+
+    #[tokio::test]
     async fn error_on_missing_template() {
         let llm = FakeLlmProvider::new("irrelevant");
         let templates = FakeTemplateLoader::empty();
@@ -95,7 +128,7 @@ mod tests {
         struct FailingLlm;
         #[async_trait]
         impl LlmProvider for FailingLlm {
-            async fn generate(&self, _: &str, _: Option<&str>) -> Result<String, CoreError> {
+            async fn generate(&self, _: &str, _: Option<&str>) -> Result<LlmCompletion, CoreError> {
                 Err(CoreError::Llm("service unavailable".into()))
             }
         }

@@ -4,14 +4,36 @@
 //   import "../i18n/errors.js" as Errors
 .pragma library
 
-// Returns { title, hint, settings } for an error_class. Falls back to the raw
-// server message for unknown / null classes.
+// Returns { title, hint, settings, detail } for an error_class. `detail` is the
+// raw server message (for LLM errors, the provider's own reason, e.g. "This
+// model is not available in your subscription tier") shown under the hint so
+// the user sees the actual cause. Unknown / null classes have no localized
+// copy, so the raw message becomes the hint itself and `detail` stays empty.
 function describe(errorClass, rawMessage) {
+    var d = _describe(errorClass, rawMessage)
+    var known = errorClass && errorClass !== "unknown" && d.neutral !== true
+    d.detail = known && rawMessage ? String(rawMessage) : ""
+    return d
+}
+
+function _describe(errorClass, rawMessage) {
     switch (errorClass) {
     case "api_auth":
         return {
             title: "LLM не настроена",
             hint: "API-ключ не задан или неверен. Укажите ключ выбранного провайдера в настройках.",
+            settings: true
+        }
+    case "llm_model_unavailable":
+        return {
+            title: "Модель недоступна",
+            hint: "Провайдер отказал в доступе к выбранной модели — обычно её нет в вашем тарифе, название указано с ошибкой или неверен базовый URL. Выберите другую модель в настройках.",
+            settings: true
+        }
+    case "llm_rejected":
+        return {
+            title: "Провайдер отклонил запрос",
+            hint: "Проверьте параметры модели в настройках — например, максимум токенов ответа.",
             settings: true
         }
     case "api_quota":

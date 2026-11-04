@@ -9,3 +9,6 @@ pub use job::{ErrorClass, Job, JobKind, JobProgress, JobStatus, PipelineStage};
 
 mod protocol;
 pub use protocol::{Protocol, ProtocolAction, ProtocolTopic, StructuredProtocol};
+
+mod token_usage;
+pub use token_usage::TokenUsage;

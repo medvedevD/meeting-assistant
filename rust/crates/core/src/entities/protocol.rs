@@ -1,9 +1,13 @@
+use super::TokenUsage;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Protocol {
     pub markdown: String,
     pub structured: StructuredProtocol,
+    /// Tokens the LLM spent on this protocol; `None` when the provider did not
+    /// report usage.
+    pub usage: Option<TokenUsage>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +40,7 @@ impl Protocol {
         Self {
             markdown,
             structured,
+            usage: None,
         }
     }
 }

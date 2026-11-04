@@ -1,4 +1,7 @@
-use crate::{entities::Meeting, CoreError};
+use crate::{
+    entities::{Meeting, TokenUsage},
+    CoreError,
+};
 use async_trait::async_trait;
 use std::path::Path;
 
@@ -8,7 +11,13 @@ pub trait MeetingRepo: Send + Sync {
     async fn find_by_id(&self, id: &str) -> Result<Option<Meeting>, CoreError>;
     async fn find_by_audio_path(&self, path: &Path) -> Result<Option<Meeting>, CoreError>;
     async fn save_transcript(&self, id: &str, text: &str) -> Result<(), CoreError>;
-    async fn save_protocol(&self, id: &str, text: &str) -> Result<(), CoreError>;
+    /// Persist the protocol text together with the tokens spent on it.
+    async fn save_protocol(
+        &self,
+        id: &str,
+        text: &str,
+        usage: Option<TokenUsage>,
+    ) -> Result<(), CoreError>;
     async fn save_transcript_file(
         &self,
         id: &str,
@@ -23,7 +32,7 @@ pub trait MeetingRepo: Send + Sync {
     async fn delete_audio_only(&self, id: &str) -> Result<(), CoreError>;
     /// Clear transcript text + path (used before re-transcribing).
     async fn clear_transcript(&self, id: &str) -> Result<(), CoreError>;
-    /// Clear protocol text + path (used before regenerating).
+    /// Clear protocol text, path and token usage (used before regenerating).
     async fn clear_protocol(&self, id: &str) -> Result<(), CoreError>;
     /// Permanently remove the meeting row (and any of its jobs).
     async fn delete(&self, id: &str) -> Result<(), CoreError>;

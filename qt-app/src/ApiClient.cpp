@@ -60,7 +60,8 @@ int ApiClient::send(const QByteArray &verb, const QString &path,
             [this, id, path]() {
                 emit requestFailed(id, path, 0,
                                    QStringLiteral("ApiClient not configured "
-                                                  "(sidecar not ready)"));
+                                                  "(sidecar not ready)"),
+                                   QVariant());
             },
             Qt::QueuedConnection);
         return id;
@@ -90,7 +91,9 @@ int ApiClient::send(const QByteArray &verb, const QString &path,
             QString msg = reply->errorString();
             if (!raw.isEmpty())
                 msg += QStringLiteral(" — ") + QString::fromUtf8(raw);
-            emit requestFailed(id, path, httpStatus, msg);
+            const QJsonDocument errDoc = QJsonDocument::fromJson(raw);
+            emit requestFailed(id, path, httpStatus, msg,
+                               errDoc.isNull() ? QVariant() : errDoc.toVariant());
             return;
         }
 
@@ -99,7 +102,8 @@ int ApiClient::send(const QByteArray &verb, const QString &path,
         if (!raw.isEmpty() && perr.error != QJsonParseError::NoError) {
             emit requestFailed(id, path, httpStatus,
                                QStringLiteral("invalid JSON: %1")
-                                   .arg(perr.errorString()));
+                                   .arg(perr.errorString()),
+                               QVariant());
             return;
         }
         emit requestSucceeded(id, path, doc.toVariant());

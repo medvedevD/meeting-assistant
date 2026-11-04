@@ -199,6 +199,7 @@ fn settings_routes() -> Router<Arc<dyn SettingsService>> {
         .route("/api/v1/settings", get(settings::get).put(settings::put))
         .route("/api/v1/settings/secret", put(settings::put_secret))
         .route("/api/v1/settings/test", post(settings::test))
+        .route("/api/v1/settings/models", get(settings::models))
         .route(
             "/api/v1/settings/secret-store/protect",
             post(settings::protect_secret_store),
@@ -333,8 +334,30 @@ mod tests {
         ) -> Result<(), String> {
             Ok(())
         }
-        async fn test_provider(&self, _provider: String) -> Result<(), String> {
-            Ok(())
+        async fn test_provider(
+            &self,
+            _provider: String,
+            model: Option<String>,
+        ) -> Result<(), meeting_core::CoreError> {
+            // A model outside the key's tier fails like the real Mistral probe.
+            match model.as_deref() {
+                Some("mistral-large-latest") => Err(meeting_core::CoreError::LlmModelUnavailable(
+                    "mistral API error 403: This model is not available in your subscription tier"
+                        .into(),
+                )),
+                _ => Ok(()),
+            }
+        }
+        async fn list_models(
+            &self,
+            provider: String,
+        ) -> Result<Vec<String>, meeting_core::CoreError> {
+            match provider.as_str() {
+                "openai" => Ok(vec!["gpt-5".into(), "gpt-4o".into()]),
+                _ => Err(meeting_core::CoreError::ApiAuth(
+                    "no API key configured".into(),
+                )),
+            }
         }
         async fn protect_secret_store(&self, _passphrase: String) -> Result<(), String> {
             Ok(())
@@ -462,6 +485,7 @@ mod tests {
         ("PUT", "/api/v1/settings"),
         ("PUT", "/api/v1/settings/secret"),
         ("POST", "/api/v1/settings/test"),
+        ("GET", "/api/v1/settings/models?provider=openai"),
         ("GET", "/api/v1/templates"),
         ("GET", "/api/v1/templates/foo"),
         ("PUT", "/api/v1/templates/foo"),
@@ -626,5 +650,87 @@ mod tests {
         assert_eq!(v["build"], "0.1.0-test");
         assert_eq!(v["protocol"], crate::PROTOCOL_VERSION);
         assert_eq!(v["min_protocol"], crate::MIN_PROTOCOL_VERSION);
+    }
+
+    async fn post_settings_test(body: serde_json::Value) -> (StatusCode, Vec<u8>) {
+        let resp = server()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/settings/test")
+                    .header("Authorization", format!("Bearer {TOKEN}"))
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = resp.status();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        (status, bytes.to_vec())
+    }
+
+    #[tokio::test]
+    async fn settings_test_failure_carries_error_class_and_provider_message() {
+        let (status, bytes) = post_settings_test(serde_json::json!({
+            "provider": "mistral",
+            "model": "mistral-large-latest",
+        }))
+        .await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(v["error_class"], "llm_model_unavailable");
+        assert!(v["message"]
+            .as_str()
+            .unwrap()
+            .contains("This model is not available in your subscription tier"));
+    }
+
+    #[tokio::test]
+    async fn settings_test_probes_the_model_from_the_request() {
+        let (status, _) = post_settings_test(serde_json::json!({
+            "provider": "mistral",
+            "model": "mistral-small-latest",
+        }))
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+
+        // `model` is optional: older clients send only the provider.
+        let (status, _) = post_settings_test(serde_json::json!({"provider": "mistral"})).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+    async fn get_settings_models(provider: &str) -> (StatusCode, serde_json::Value) {
+        let resp = server()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/settings/models?provider={provider}"))
+                    .header("Authorization", format!("Bearer {TOKEN}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = resp.status();
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        (status, serde_json::from_slice(&bytes).unwrap())
+    }
+
+    #[tokio::test]
+    async fn settings_models_lists_what_the_key_can_use() {
+        let (status, v) = get_settings_models("openai").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(v["provider"], "openai");
+        assert_eq!(v["models"], serde_json::json!(["gpt-5", "gpt-4o"]));
+    }
+
+    #[tokio::test]
+    async fn settings_models_failure_is_classified() {
+        let (status, v) = get_settings_models("gemini").await;
+        assert_eq!(status, StatusCode::BAD_GATEWAY);
+        assert_eq!(v["error_class"], "api_auth");
+        assert!(v["message"]
+            .as_str()
+            .unwrap()
+            .contains("no API key configured"));
     }
 }

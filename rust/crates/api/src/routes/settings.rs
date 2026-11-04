@@ -1,8 +1,13 @@
 use std::sync::Arc;
 
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{
+    extract::{Query, State},
+    http::StatusCode,
+    Json,
+};
+use meeting_core::{entities::ErrorClass, CoreError};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::settings_service::SettingsService;
 
@@ -45,17 +50,56 @@ pub async fn put_secret(
 #[derive(Deserialize)]
 pub struct TestRequest {
     pub provider: String,
+    /// Model to probe instead of the saved one (the unsaved choice on screen).
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
-/// `POST /api/v1/settings/test` — probe a provider's credentials.
+/// `POST /api/v1/settings/test` — probe a provider's key against a model.
+/// A failure carries `{error_class, message}` (the same classes as a failed
+/// job) so the UI can say *why*: a bad key, a model outside the tier, quota…
 pub async fn test(
     State(svc): State<Svc>,
     Json(req): Json<TestRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    svc.test_provider(req.provider)
+) -> Result<StatusCode, (StatusCode, Json<Value>)> {
+    svc.test_provider(req.provider, req.model)
         .await
         .map(|_| StatusCode::NO_CONTENT)
-        .map_err(|e| (StatusCode::BAD_GATEWAY, e))
+        .map_err(provider_error)
+}
+
+#[derive(Deserialize)]
+pub struct ModelsQuery {
+    pub provider: String,
+}
+
+/// `GET /api/v1/settings/models?provider=…` — models the stored key can use,
+/// as `{provider, models: [id…]}`. Fails like `/settings/test` (classified
+/// `{error_class, message}`), so the UI can say why it fell back to its
+/// built-in suggestions.
+pub async fn models(
+    State(svc): State<Svc>,
+    Query(q): Query<ModelsQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let models = svc
+        .list_models(q.provider.clone())
+        .await
+        .map_err(provider_error)?;
+    Ok(Json(json!({ "provider": q.provider, "models": models })))
+}
+
+/// A failed provider call as `{error_class, message}`: 400 for a bad request
+/// from the GUI, 502 for anything the provider (or its absence) caused.
+fn provider_error(e: CoreError) -> (StatusCode, Json<Value>) {
+    let status = match e {
+        CoreError::Validation(_) => StatusCode::BAD_REQUEST,
+        _ => StatusCode::BAD_GATEWAY,
+    };
+    let body = json!({
+        "error_class": ErrorClass::from_core_error(&e).as_str(),
+        "message": e.to_string(),
+    });
+    (status, Json(body))
 }
 
 #[derive(Deserialize)]

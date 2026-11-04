@@ -163,7 +163,7 @@ impl Cli {
             } => {
                 let transcript = tokio::fs::read_to_string(&transcript_path)
                     .await
-                    .map_err(|e| anyhow::anyhow!("cannot read {:?}: {e}", transcript_path))?;
+                    .map_err(|e| anyhow::anyhow!("cannot read {transcript_path:?}: {e}"))?;
                 let protocol = generate_protocol(
                     Arc::clone(&container.llm),
                     Arc::clone(&container.templates),
@@ -173,6 +173,15 @@ impl Cli {
                 )
                 .await?;
                 print!("{}", protocol.markdown);
+                // stderr keeps stdout a clean Markdown document for redirection.
+                if let Some(usage) = protocol.usage {
+                    eprintln!(
+                        "\ntokens: {} (input {}, output {})",
+                        usage.total(),
+                        usage.input_tokens,
+                        usage.output_tokens
+                    );
+                }
             }
 
             Command::RecordStart {

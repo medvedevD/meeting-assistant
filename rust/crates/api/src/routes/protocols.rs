@@ -1,6 +1,9 @@
 use crate::router::AppState;
 use axum::{extract::State, http::StatusCode, Json};
-use meeting_core::{entities::StructuredProtocol, usecases::generate_protocol};
+use meeting_core::{
+    entities::{StructuredProtocol, TokenUsage},
+    usecases::generate_protocol,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -15,6 +18,7 @@ pub struct GenerateRequest {
 pub struct GenerateResponse {
     pub markdown: String,
     pub structured: StructuredProtocol,
+    pub usage: Option<TokenUsage>,
 }
 
 pub async fn generate(
@@ -42,6 +46,7 @@ pub async fn generate(
         Json(GenerateResponse {
             markdown: protocol.markdown,
             structured: protocol.structured,
+            usage: protocol.usage,
         }),
     ))
 }

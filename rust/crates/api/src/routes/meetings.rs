@@ -5,7 +5,7 @@ use axum::{
     Json,
 };
 use meeting_core::{
-    entities::StructuredProtocol,
+    entities::{StructuredProtocol, TokenUsage},
     usecases::{
         delete_meeting, import_audio, list_meetings, regenerate_protocol, reprocess_transcribe,
         scan_recordings_dir, DeleteMode, ScanCandidate, DEFAULT_MAX_DEPTH,
@@ -62,6 +62,9 @@ pub struct MeetingDetail {
     /// Structured view derived from `protocol`. It lets clients render stable
     /// sections while keeping Markdown as the persisted compatibility format.
     pub structured_protocol: Option<StructuredProtocol>,
+    /// Tokens the LLM spent on `protocol`; null for protocols generated before
+    /// usage tracking or by a provider that reports none.
+    pub protocol_usage: Option<TokenUsage>,
 }
 
 pub async fn get(
@@ -77,11 +80,13 @@ pub async fn get(
 
     let protocol = meeting.protocol_text.filter(|t| !t.is_empty());
     let structured_protocol = protocol.as_deref().map(StructuredProtocol::from_markdown);
+    let protocol_usage = meeting.protocol_usage.filter(|_| protocol.is_some());
 
     Ok(Json(MeetingDetail {
         has_transcript: meeting.transcript_text.is_some(),
         protocol,
         structured_protocol,
+        protocol_usage,
         id: meeting.id,
         name: meeting.name,
         audio_path: meeting.audio_path.display().to_string(),
@@ -323,7 +328,7 @@ mod tests {
     };
     use http_body_util::BodyExt;
     use meeting_core::{
-        entities::Meeting,
+        entities::{Meeting, TokenUsage},
         fakes::{
             FakeAudioCapture, FakeJobRepo, FakeLlmProvider, FakeMeetingFileStore, FakeMeetingRepo,
             FakeTemplateLoader, FakeTranscriber,
@@ -429,9 +434,16 @@ mod tests {
         let m = Meeting::new("Ретро".to_string(), PathBuf::from("/c.wav"));
         repo.save(&m).await.unwrap();
         repo.save_transcript(&m.id, "текст").await.unwrap();
-        repo.save_protocol(&m.id, "# Протокол\n\n## Решения\n- Продолжаем MVP.")
-            .await
-            .unwrap();
+        repo.save_protocol(
+            &m.id,
+            "# Протокол\n\n## Решения\n- Продолжаем MVP.",
+            Some(TokenUsage {
+                input_tokens: 2_400,
+                output_tokens: 310,
+            }),
+        )
+        .await
+        .unwrap();
         let app = make_app(std::sync::Arc::clone(&repo));
 
         let response = app
@@ -456,6 +468,8 @@ mod tests {
             json["structured_protocol"]["decisions"][0],
             "Продолжаем MVP."
         );
+        assert_eq!(json["protocol_usage"]["input_tokens"], 2_400);
+        assert_eq!(json["protocol_usage"]["output_tokens"], 310);
         assert_eq!(json["has_transcript"], true);
     }
 
@@ -481,6 +495,7 @@ mod tests {
         let json = body_json(response).await;
         assert!(json["protocol"].is_null());
         assert!(json["structured_protocol"].is_null());
+        assert!(json["protocol_usage"].is_null());
     }
 
     #[tokio::test]

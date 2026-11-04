@@ -28,9 +28,14 @@
 //! the true payload length is `file_size - data_off` floored to a whole
 //! sample frame; the crash-friendly format is explicitly fast-follow and out
 //! of scope here.
+//!
+//! The same parser backs [`open_wav_lenient`], which the transcriber uses to
+//! decode WAVs whose header lengths were never finalized (crash artifacts and
+//! imported files written by streaming tools such as ffmpeg) without
+//! modifying them.
 
-use std::fs::OpenOptions;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use meeting_core::entities::Meeting;
@@ -186,6 +191,83 @@ pub fn reconstruct_wav(path: &Path) -> Result<WavRecovery, String> {
     Ok(WavRecovery::Reconstructed { frames })
 }
 
+/// Header bytes up to the `data` payload (patched if needed) chained with the
+/// payload streamed from disk — the source [`open_wav_lenient`] hands `hound`.
+pub(crate) type LenientWavSource = io::Chain<io::Cursor<Vec<u8>>, io::BufReader<File>>;
+
+/// Open a WAV for decoding, tolerating a header whose lengths were never
+/// finalized.
+///
+/// Streaming writers leave the RIFF/`data` `ckSize` fields as placeholders:
+/// ffmpeg writing to a non-seekable output uses `0xFFFFFFFF`, `hound` before
+/// `finalize()` uses `0`. The samples are all on disk, but `hound` rejects the
+/// first ("data chunk length is not a multiple of sample size") and reads the
+/// second as empty. When the declared `data` length is such a placeholder (or
+/// overruns the file), the payload is taken to be everything after the `data`
+/// header floored to whole frames, as in [`reconstruct_wav`]. The header is
+/// patched **in memory** only: the file may be a user's original import, so it
+/// is never modified.
+pub(crate) fn open_wav_lenient(path: &Path) -> Result<hound::WavReader<LenientWavSource>, String> {
+    let mut f = File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+    let file_size = f.metadata().map_err(|e| e.to_string())?.len();
+
+    let layout = parse_wav_layout(&mut f, file_size)?;
+
+    let header_len = usize::try_from(layout.data_off).map_err(|e| e.to_string())?;
+    let mut header = vec![0u8; header_len];
+    f.seek(SeekFrom::Start(0)).map_err(|e| e.to_string())?;
+    f.read_exact(&mut header).map_err(|e| e.to_string())?;
+    // `f` now sits at `data_off`: the payload streams straight after `header`.
+
+    let avail = file_size.saturating_sub(layout.data_off);
+    let declared = u64::from(layout.declared_data_size);
+    if declared == 0 || declared > avail {
+        let frame = u64::from(layout.frame_bytes);
+        let payload = avail.min(u64::from(u32::MAX)) / frame * frame;
+        let data_size = u32::try_from(payload).unwrap_or(u32::MAX);
+        let riff_size =
+            u32::try_from((layout.data_off + payload).saturating_sub(8)).unwrap_or(u32::MAX);
+
+        let at = layout.data_size_off as usize;
+        header[at..at + 4].copy_from_slice(&data_size.to_le_bytes());
+        header[4..8].copy_from_slice(&riff_size.to_le_bytes());
+    }
+
+    let source = io::Cursor::new(header).chain(io::BufReader::new(f));
+    hound::WavReader::new(source).map_err(|e| e.to_string())
+}
+
+/// Byte-for-byte replica of the header ffmpeg (`Lavf59.27.100`) writes when
+/// its WAV output is not seekable: 16 kHz mono s16le, a `LIST/INFO` chunk,
+/// and both RIFF and `data` `ckSize` left as the `0xFFFFFFFF` placeholder.
+#[cfg(test)]
+pub(crate) fn ffmpeg_streaming_wav(samples: &[i16]) -> Vec<u8> {
+    let mut b = Vec::with_capacity(78 + samples.len() * 2);
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&u32::MAX.to_le_bytes());
+    b.extend_from_slice(b"WAVE");
+    b.extend_from_slice(b"fmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    b.extend_from_slice(&1u16.to_le_bytes()); // mono
+    b.extend_from_slice(&16_000u32.to_le_bytes());
+    b.extend_from_slice(&32_000u32.to_le_bytes()); // byte rate
+    b.extend_from_slice(&2u16.to_le_bytes()); // block align
+    b.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+    b.extend_from_slice(b"LIST");
+    b.extend_from_slice(&26u32.to_le_bytes());
+    b.extend_from_slice(b"INFOISFT");
+    b.extend_from_slice(&14u32.to_le_bytes());
+    b.extend_from_slice(b"Lavf59.27.100\0");
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&u32::MAX.to_le_bytes());
+    assert_eq!(b.len(), 78, "header must match ffmpeg's 78-byte layout");
+    for s in samples {
+        b.extend_from_slice(&s.to_le_bytes());
+    }
+    b
+}
+
 /// Tally of what the startup pass did (for logging / tests).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RecoveryReport {
@@ -309,6 +391,7 @@ fn meeting_from_slug(dir: &Path, audio_path: &Path) -> Meeting {
         protocol_path: None,
         transcript_text: None,
         protocol_text: None,
+        protocol_usage: None,
         created_at,
     }
 }
@@ -568,6 +651,7 @@ mod tests {
             protocol_path: None,
             transcript_text: None,
             protocol_text: None,
+            protocol_usage: None,
             created_at: 1,
         };
         repo.save(&existing).await.unwrap();
@@ -617,5 +701,80 @@ mod tests {
         let repo = SqliteMeetingRepo(Db::open_in_memory().unwrap());
         let report = run_recovery(Path::new("/no/such/dir"), &repo).await;
         assert_eq!(report, RecoveryReport::default());
+    }
+
+    // ── open_wav_lenient ─────────────────────────────────────────────────────
+
+    #[test]
+    fn lenient_reader_decodes_ffmpeg_streaming_header_without_modifying_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("recording.wav");
+        let samples: Vec<i16> = (0..1001).map(|i| (i * 7 - 3000) as i16).collect();
+        let bytes = ffmpeg_streaming_wav(&samples);
+        std::fs::write(&path, &bytes).unwrap();
+
+        // The observed failure: hound rejects the 0xFFFFFFFF placeholder.
+        let err = hound::WavReader::open(&path)
+            .err()
+            .expect("hound must reject");
+        assert!(
+            err.to_string().contains("not a multiple of sample size"),
+            "unexpected hound error: {err}"
+        );
+
+        let r = open_wav_lenient(&path).unwrap();
+        assert_eq!(r.spec().sample_rate, 16_000);
+        assert_eq!(r.spec().channels, 1);
+        assert_eq!(r.duration(), 1001);
+        let read: Vec<i16> = r.into_samples().collect::<Result<_, _>>().unwrap();
+        assert_eq!(read, samples);
+
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            bytes,
+            "file must be untouched"
+        );
+    }
+
+    #[test]
+    fn lenient_reader_decodes_unfinalized_hound_header_and_floors_partial_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("recording.wav");
+        write_unfinalized(&path, 2, 1000);
+        {
+            let f = OpenOptions::new().write(true).open(&path).unwrap();
+            let len = f.metadata().unwrap().len();
+            f.set_len(len - 3).unwrap();
+        }
+        let before = std::fs::read(&path).unwrap();
+
+        let r = open_wav_lenient(&path).unwrap();
+        assert_eq!(r.duration(), 999);
+        assert_eq!(r.into_samples::<f32>().count(), 999 * 2);
+
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            before,
+            "file must be untouched"
+        );
+    }
+
+    #[test]
+    fn lenient_reader_matches_hound_on_finalized_wav() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("recording.wav");
+        write_finalized(&path, 2, 500);
+
+        let expected: Vec<f32> = hound::WavReader::open(&path)
+            .unwrap()
+            .into_samples()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let actual: Vec<f32> = open_wav_lenient(&path)
+            .unwrap()
+            .into_samples()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(actual, expected);
     }
 }

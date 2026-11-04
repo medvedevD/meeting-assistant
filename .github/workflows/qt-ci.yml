@@ -27,10 +27,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Only bootstraps rustup: cargo then installs the version pinned in
+      # rust-toolchain.toml (with rustfmt and clippy) on first use.
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
@@ -99,6 +99,8 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # Only bootstraps rustup: cargo then installs the version pinned in
+      # rust-toolchain.toml on first use.
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 

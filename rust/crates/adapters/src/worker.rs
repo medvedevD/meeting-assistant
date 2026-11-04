@@ -427,7 +427,7 @@ impl Worker {
         // This prevents a filesystem problem from turning a paid LLM response
         // into a silently successful but missing result.
         self.meeting_repo
-            .save_protocol(&meeting.id, &protocol.markdown)
+            .save_protocol(&meeting.id, &protocol.markdown, protocol.usage)
             .await?;
 
         match self
@@ -574,7 +574,7 @@ mod tests {
                 &self,
                 _transcript: &str,
                 _instructions: Option<&str>,
-            ) -> Result<String, meeting_core::CoreError> {
+            ) -> Result<meeting_core::ports::LlmCompletion, meeting_core::CoreError> {
                 Err(meeting_core::CoreError::ApiAuth(
                     "no API key configured".into(),
                 ))
@@ -733,6 +733,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn protocol_job_persists_the_tokens_the_llm_spent() {
+        let usage = meeting_core::entities::TokenUsage {
+            input_tokens: 9_800,
+            output_tokens: 1_150,
+        };
+        let mr = FakeMeetingRepo::new();
+        let jr = FakeJobRepo::new();
+        let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
+        mr.save(&m).await.unwrap();
+        mr.save_transcript(&m.id, "transcript body").await.unwrap();
+
+        let job = Job::new_regenerate_protocol(m.id.clone(), None);
+        jr.enqueue(&job).await.unwrap();
+        let worker = Worker::new(
+            Arc::clone(&jr) as Arc<dyn JobRepo>,
+            Arc::clone(&mr) as Arc<dyn MeetingRepo>,
+            FakeTranscriber::new("ok"),
+            FakeMeetingFileStore::new(),
+            FakeLlmProvider::with_usage("# Протокол", usage),
+            FakeTemplateLoader::empty(),
+            meeting_core::LiveProgress::new(),
+            PROTOCOL_KINDS,
+            1,
+            "protocol",
+        );
+
+        let claimed = jr.claim_pending(i64::MAX).await.unwrap().unwrap();
+        worker.execute(claimed, CancellationToken::new()).await;
+
+        assert_eq!(
+            jr.find_by_id(&job.id).await.unwrap().unwrap().status,
+            JobStatus::Done
+        );
+        let saved = mr.find_by_id(&m.id).await.unwrap().unwrap();
+        assert_eq!(saved.protocol_text.as_deref(), Some("# Протокол"));
+        assert_eq!(saved.protocol_usage, Some(usage));
+    }
+
+    #[tokio::test]
     async fn protocol_db_failure_requeues_job_instead_of_marking_done() {
         let mr = FakeMeetingRepo::new();
         let jr = FakeJobRepo::new();
@@ -857,9 +896,12 @@ mod tests {
                 &self,
                 _transcript: &str,
                 _instructions: Option<&str>,
-            ) -> Result<String, CoreError> {
+            ) -> Result<meeting_core::ports::LlmCompletion, CoreError> {
                 self.calls.fetch_add(1, Ordering::SeqCst);
-                Ok("# duplicate".into())
+                Ok(meeting_core::ports::LlmCompletion {
+                    text: "# duplicate".into(),
+                    usage: None,
+                })
             }
         }
 
@@ -868,7 +910,7 @@ mod tests {
         let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
         mr.save(&m).await.unwrap();
         mr.save_transcript(&m.id, "transcript body").await.unwrap();
-        mr.save_protocol(&m.id, "# already persisted")
+        mr.save_protocol(&m.id, "# already persisted", None)
             .await
             .unwrap();
 
@@ -1339,10 +1381,13 @@ mod tests {
                 &self,
                 _transcript: &str,
                 _instructions: Option<&str>,
-            ) -> Result<String, CoreError> {
+            ) -> Result<meeting_core::ports::LlmCompletion, CoreError> {
                 self.entered.notify_one();
                 self.gate.notified().await;
-                Ok("# Протокол".into())
+                Ok(meeting_core::ports::LlmCompletion {
+                    text: "# Протокол".into(),
+                    usage: None,
+                })
             }
         }
 

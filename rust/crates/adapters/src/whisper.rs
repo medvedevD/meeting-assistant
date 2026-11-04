@@ -235,8 +235,7 @@ fn run_whisper(
 
     on_progress(PipelineStage::DecodingAudio, 0);
     let t = std::time::Instant::now();
-    let samples =
-        load_wav_as_mono_f32(audio_path).map_err(|e| CoreError::Transcription(e.to_string()))?;
+    let samples = load_audio(audio_path)?;
     let audio_duration_s = samples.len() as f64 / WHISPER_SAMPLE_RATE as f64;
     bench_log(&format!(
         "audio_loaded  duration_s={audio_duration_s:.1} load_ms={}",
@@ -397,8 +396,16 @@ fn run_whisper(
 const WHISPER_SAMPLE_RATE: u32 = 16000;
 const IDLE_UNLOAD_SECS: u64 = 300; // 5 minutes
 
+/// Decode `audio_path` for Whisper. A file that can't be decoded fails the same
+/// way on every attempt, so it is reported as `AudioCorrupt` (non-retryable)
+/// rather than a generic transcription error the worker would back off and
+/// retry for minutes before surfacing.
+fn load_audio(audio_path: &Path) -> Result<Vec<f32>, CoreError> {
+    load_wav_as_mono_f32(audio_path).map_err(|e| CoreError::AudioCorrupt(e.to_string()))
+}
+
 fn load_wav_as_mono_f32(path: &Path) -> anyhow::Result<Vec<f32>> {
-    let mut reader = hound::WavReader::open(path)?;
+    let mut reader = crate::audio::recovery::open_wav_lenient(path).map_err(anyhow::Error::msg)?;
     let spec = reader.spec();
 
     let samples_f32: Vec<f32> = match spec.sample_format {
@@ -1239,5 +1246,38 @@ mod tests {
 
         assert_eq!(load_count.load(Ordering::SeqCst), 1);
         assert_eq!(t.current_model_path(), PathBuf::from("/model-b.bin"));
+    }
+
+    // --- Audio loading ---
+
+    #[test]
+    fn load_audio_decodes_wav_with_unfinalized_ffmpeg_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("recording.wav");
+        let samples: Vec<i16> = (0..16_000).map(|i| (i % 2000 - 1000) as i16).collect();
+        std::fs::write(
+            &path,
+            crate::audio::recovery::ffmpeg_streaming_wav(&samples),
+        )
+        .unwrap();
+
+        let decoded = load_audio(&path).unwrap();
+
+        assert_eq!(decoded.len(), samples.len());
+        assert_eq!(decoded[0], samples[0] as f32 / 32768.0);
+    }
+
+    #[test]
+    fn load_audio_reports_undecodable_file_as_non_retryable_audio_corrupt() {
+        use meeting_core::entities::ErrorClass;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("recording.wav");
+        std::fs::write(&path, b"definitely not a RIFF/WAVE file").unwrap();
+
+        let err = load_audio(&path).unwrap_err();
+
+        assert!(matches!(err, CoreError::AudioCorrupt(_)), "got {err:?}");
+        assert!(!ErrorClass::from_core_error(&err).is_retryable());
     }
 }

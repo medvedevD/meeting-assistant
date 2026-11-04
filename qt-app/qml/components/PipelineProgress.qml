@@ -297,6 +297,22 @@ ColumnLayout {
             color: Theme.ink2
             text: failureBlock._err.hint
         }
+        // The provider's / decoder's own reason (errors.js `detail`), selectable
+        // so it can be copied into a bug report or a provider support ticket.
+        TextEdit {
+            objectName: "failureDetail"
+            Layout.fillWidth: true
+            visible: text.length > 0
+            readOnly: true
+            selectByMouse: true
+            wrapMode: TextEdit.Wrap
+            font.family: Theme.fontMono
+            font.pixelSize: Theme.fsSmall
+            color: Theme.ink3
+            selectionColor: Theme.accentTint
+            selectedTextColor: Theme.ink
+            text: failureBlock._err.detail
+        }
         Rectangle {
             visible: failureBlock._err.settings
             Layout.alignment: Qt.AlignLeft

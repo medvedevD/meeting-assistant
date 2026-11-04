@@ -54,7 +54,7 @@ mod tests {
         let m = Meeting::new("M".into(), PathBuf::from("/a.wav"));
         mr.save(&m).await.unwrap();
         mr.save_transcript(&m.id, "old").await.unwrap();
-        mr.save_protocol(&m.id, "old proto").await.unwrap();
+        mr.save_protocol(&m.id, "old proto", None).await.unwrap();
 
         let job = reprocess_transcribe(
             Arc::clone(&mr) as Arc<dyn MeetingRepo>,

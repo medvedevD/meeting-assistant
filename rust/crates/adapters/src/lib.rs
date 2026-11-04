@@ -27,8 +27,8 @@ pub use worker::{LiveJobs, Worker, PROTOCOL_KINDS, TRANSCRIBE_KINDS};
 
 pub mod llm;
 pub use llm::{
-    build_llm, probe_llm, AnthropicProvider, GeminiProvider, LlmConfig, OpenAiCompatProvider,
-    ProviderKind, SwappableLlm,
+    build_llm, list_llm_models, probe_llm, AnthropicProvider, GeminiProvider, LlmConfig,
+    OpenAiCompatProvider, ProviderKind, SwappableLlm,
 };
 
 pub mod templates;
