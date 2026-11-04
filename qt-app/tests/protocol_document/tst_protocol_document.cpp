@@ -1,3 +1,5 @@
+#include "EmbeddedQmldirGuard.h"
+
 #include <QGuiApplication>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -7,6 +9,7 @@ class ProtocolDocumentTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase();
     void parsesEditorialMarkdownBlocks();
     void parsesDeepHeadingsWithoutVisibleHashes();
     void prefersStructuredProtocolBlocks();
@@ -20,6 +23,10 @@ static std::unique_ptr<QObject> createDocument(QQmlEngine &engine, QQmlComponent
     if (!component.isReady())
         return nullptr;
     return std::unique_ptr<QObject>(component.create());
+}
+
+void ProtocolDocumentTest::initTestCase() {
+    verifyEmbeddedQmldir(QStringLiteral(MA_PROTOCOL_QML_IMPORT_DIR));
 }
 
 void ProtocolDocumentTest::parsesEditorialMarkdownBlocks() {

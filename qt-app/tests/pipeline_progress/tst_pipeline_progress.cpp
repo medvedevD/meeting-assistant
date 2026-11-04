@@ -1,4 +1,5 @@
 #include "ApiClient.h"
+#include "EmbeddedQmldirGuard.h"
 #include "JobPoller.h"
 
 #include <QGuiApplication>
@@ -51,6 +52,7 @@ bool anyTextEquals(QObject *root, const QString &needle) {
 } // namespace
 
 void PipelineProgressTest::initTestCase() {
+    verifyEmbeddedQmldir(QStringLiteral(MA_PIPELINE_QML_IMPORT_DIR));
     qmlRegisterType<JobPoller>("MeetingAssistant", 1, 0, "JobPoller");
 }
 

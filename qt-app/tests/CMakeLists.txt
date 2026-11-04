@@ -19,231 +19,65 @@ add_test(NAME qt_job_poller_terminal_done COMMAND tst_job_poller)
 set_tests_properties(qt_job_poller_terminal_done PROPERTIES
     TIMEOUT 30)
 
-qt_add_executable(tst_pipeline_progress
-    tst_pipeline_progress.cpp
-    ../src/ApiClient.h   ../src/ApiClient.cpp
-    ../src/JobPoller.h   ../src/JobPoller.cpp)
+# ── QML tests ────────────────────────────────────────────────────────────────
+# Each one bundles its own cut of the real module, which has to keep the URI
+# MeetingAssistant because the shipped files `import MeetingAssistant`.
+# qt_add_qml_module() names the module's generated resource after the URI
+# (.qt/rcc/qmake_MeetingAssistant.qrc under the current binary dir), so two such
+# targets in one CMake directory share that file and both embed the last
+# target's qmldir. Hence one directory per target; EmbeddedQmldirGuard.h is what
+# catches a target that ends up sharing one anyway.
+#
+# Usage, from the target's own directory:
+#   ma_add_test_qml_module(<target>
+#       APP_QML   <paths relative to qt-app/qml>
+#       LOCAL_QML <test-only QML files relative to the calling directory>)
+#
+# It must run in that directory, not here: source-file properties are
+# directory-scoped, and the executable's finalizer, which reads
+# QT_QML_MODULE_NO_IMPORT_SCAN, runs when that directory ends.
+function(ma_add_test_qml_module target)
+    cmake_parse_arguments(PARSE_ARGV 1 arg "" "" "APP_QML;LOCAL_QML")
 
-target_include_directories(tst_pipeline_progress PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../src")
-target_compile_definitions(tst_pipeline_progress PRIVATE
-    MA_PIPELINE_QML_IMPORT_DIR="${CMAKE_CURRENT_BINARY_DIR}/pipeline_qml"
-    MA_PIPELINE_QML_FILE="${CMAKE_CURRENT_BINARY_DIR}/pipeline_qml/MeetingAssistant/qml/components/PipelineProgress.qml")
+    set(_app_qml_dir "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../qml")
+    set_source_files_properties("${_app_qml_dir}/theme/Theme.qml"
+        PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
-    PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/PipelineProgress.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/components/PipelineProgress.qml")
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyButton.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyButton.qml")
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyIcon.qml")
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/theme/Theme.qml")
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/i18n/errors.js"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/i18n/errors.js")
+    set(_app_qml)
+    foreach(_file IN LISTS arg_APP_QML)
+        set_source_files_properties("${_app_qml_dir}/${_file}"
+            PROPERTIES QT_RESOURCE_ALIAS "qml/${_file}")
+        list(APPEND _app_qml "${_app_qml_dir}/${_file}")
+    endforeach()
 
-qt_add_qml_module(tst_pipeline_progress
-    URI MeetingAssistant
-    VERSION 1.0
-    NO_CACHEGEN
-    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/pipeline_qml/MeetingAssistant"
-    QML_FILES
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/PipelineProgress.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyButton.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/i18n/errors.js")
+    qt_add_qml_module(${target}
+        URI MeetingAssistant
+        VERSION 1.0
+        NO_CACHEGEN
+        OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/imports/MeetingAssistant"
+        QML_FILES ${_app_qml} ${arg_LOCAL_QML})
 
-target_link_libraries(tst_pipeline_progress PRIVATE
-    Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Network)
+    target_include_directories(${target} PRIVATE
+        "${CMAKE_CURRENT_FUNCTION_LIST_DIR}")
+    target_link_libraries(${target} PRIVATE
+        Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2)
 
-add_test(NAME qt_pipeline_progress_pending_done COMMAND tst_pipeline_progress)
-set_tests_properties(qt_pipeline_progress_pending_done PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-    TIMEOUT 30)
+    # Same rationale as the main GUI target (see ../CMakeLists.txt): the
+    # finalizer's static plugin-import scan warns that style-impl plugin targets
+    # (Fusion/Basic/Material/Shapes/…) don't exist in scope — noise for a shared
+    # Qt that loads plugins at runtime. Skip the scan for shared Qt; keep it for
+    # a static build where they must be linked.
+    if(QT6_IS_SHARED_LIBS_BUILD)
+        set_target_properties(${target} PROPERTIES
+            QT_QML_MODULE_NO_IMPORT_SCAN ON)
+    endif()
+endfunction()
 
-qt_add_executable(tst_protocol_document
-    tst_protocol_document.cpp)
-
-target_compile_definitions(tst_protocol_document PRIVATE
-    MA_PROTOCOL_QML_IMPORT_DIR="${CMAKE_CURRENT_BINARY_DIR}/protocol_qml"
-    MA_PROTOCOL_QML_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/ProtocolDocument.qml")
-
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
-    PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/ProtocolDocument.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/components/ProtocolDocument.qml")
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyIcon.qml")
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/theme/Theme.qml")
-
-qt_add_qml_module(tst_protocol_document
-    URI MeetingAssistant
-    VERSION 1.0
-    NO_CACHEGEN
-    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/protocol_qml/MeetingAssistant"
-    QML_FILES
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/ProtocolDocument.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml")
-
-target_link_libraries(tst_protocol_document PRIVATE
-    Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2)
-
-add_test(NAME qt_protocol_document_markdown_blocks COMMAND tst_protocol_document)
-set_tests_properties(qt_protocol_document_markdown_blocks PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-    TIMEOUT 30)
-
-qt_add_executable(tst_meety_menu
-    tst_meety_menu.cpp)
-
-target_compile_definitions(tst_meety_menu PRIVATE
-    MA_MENU_QML_IMPORT_DIR="${CMAKE_CURRENT_BINARY_DIR}/menu_qml")
-
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyMenu.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyMenu.qml")
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyMenuItem.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyMenuItem.qml")
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyIcon.qml")
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/theme/Theme.qml")
-
-qt_add_qml_module(tst_meety_menu
-    URI MeetingAssistant
-    VERSION 1.0
-    NO_CACHEGEN
-    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/menu_qml/MeetingAssistant"
-    QML_FILES
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyMenu.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyMenuItem.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml")
-
-target_link_libraries(tst_meety_menu PRIVATE
-    Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2)
-
-add_test(NAME qt_meety_menu_long_items_expand COMMAND tst_meety_menu)
-set_tests_properties(qt_meety_menu_long_items_expand PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-    TIMEOUT 30)
-
-qt_add_executable(tst_first_run
-    tst_first_run.cpp
-    ../src/AppPreferences.h ../src/AppPreferences.cpp)
-
-target_include_directories(tst_first_run PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../src")
-target_compile_definitions(tst_first_run PRIVATE
-    MA_FIRST_RUN_QML_IMPORT_DIR="${CMAKE_CURRENT_BINARY_DIR}/first_run_qml"
-    MA_WELCOME_QML_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../qml/screens/WelcomeScreen.qml")
-
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
-    PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyButton.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyButton.qml")
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyIcon.qml")
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyWordmark.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/components/MeetyWordmark.qml")
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/theme/Theme.qml")
-
-qt_add_qml_module(tst_first_run
-    URI MeetingAssistant
-    VERSION 1.0
-    NO_CACHEGEN
-    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/first_run_qml/MeetingAssistant"
-    QML_FILES
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyButton.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyWordmark.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml")
-
-target_link_libraries(tst_first_run PRIVATE
-    Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2)
-
-add_test(NAME qt_first_run_screen_states COMMAND tst_first_run)
-set_tests_properties(qt_first_run_screen_states PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-    TIMEOUT 30)
-
-# ── AppShell → WelcomeScreen wiring (binding-loop regression) ────────────────
-# Loads the REAL AppShell.qml so the guard tracks the shipped file. The six
-# pushable screens are stubbed: each sits inside a lazy Component, so they only
-# need to resolve as types, and stubbing keeps the staged type graph small.
-# MeetingStore/Request resolve implicitly from AppShell.qml's own directory;
-# everything under components/, screens/ and theme/ comes from the module below.
-qt_add_executable(tst_app_shell_wiring tst_app_shell_wiring.cpp)
-
-target_compile_definitions(tst_app_shell_wiring PRIVATE
-    MA_APP_SHELL_QML_IMPORT_DIR="${CMAKE_CURRENT_BINARY_DIR}/app_shell_qml"
-    MA_APP_SHELL_QML_FILE="${CMAKE_CURRENT_SOURCE_DIR}/../qml/AppShell.qml")
-
-foreach(_ma_component
-        MeetyButton MeetyDialog MeetyDialogActions MeetyField MeetyIcon
-        MeetyIconButton MeetySectionLabel MeetyToolTip MeetyWordmark)
-    set_source_files_properties(
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/${_ma_component}.qml"
-        PROPERTIES QT_RESOURCE_ALIAS "qml/components/${_ma_component}.qml")
-endforeach()
-set_source_files_properties(
-    "${CMAKE_CURRENT_SOURCE_DIR}/../qml/screens/WelcomeScreen.qml"
-    PROPERTIES QT_RESOURCE_ALIAS "qml/screens/WelcomeScreen.qml")
-
-qt_add_qml_module(tst_app_shell_wiring
-    URI MeetingAssistant
-    VERSION 1.0
-    NO_CACHEGEN
-    OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/app_shell_qml/MeetingAssistant"
-    QML_FILES
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyButton.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyDialog.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyDialogActions.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyField.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIcon.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyIconButton.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetySectionLabel.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyToolTip.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/components/MeetyWordmark.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/screens/WelcomeScreen.qml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../qml/theme/Theme.qml"
-        stubs/DiagnosticsScreen.qml
-        stubs/GenerateProtocolScreen.qml
-        stubs/MeetingDetailScreen.qml
-        stubs/MeetingNoProtocolScreen.qml
-        stubs/NewRecordingScreen.qml
-        stubs/SettingsScreen.qml)
-
-target_link_libraries(tst_app_shell_wiring PRIVATE
-    Qt6::Test Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2)
-
-add_test(NAME qt_app_shell_welcome_wiring COMMAND tst_app_shell_wiring)
-set_tests_properties(qt_app_shell_welcome_wiring PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
-    TIMEOUT 30)
+add_subdirectory(pipeline_progress)
+add_subdirectory(protocol_document)
+add_subdirectory(meety_menu)
+add_subdirectory(first_run)
+add_subdirectory(app_shell_wiring)
 
 qt_add_executable(tst_smoke
     tst_smoke.cpp
@@ -284,15 +118,3 @@ set_tests_properties(qt_offscreen_smoke PROPERTIES
 add_test(NAME qt_no_sync_transcribe_in_qml
     COMMAND ${CMAKE_COMMAND} -DSEARCH_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../qml
                              -P ${CMAKE_CURRENT_SOURCE_DIR}/no_sync_transcribe.cmake)
-
-# Same rationale as the main GUI target (see ../CMakeLists.txt): these test
-# executables bundle a QML module, so the finalizer's static plugin-import scan
-# warns that style-impl plugin targets (Fusion/Basic/Material/Shapes/…) don't
-# exist in scope — noise for a shared Qt that loads plugins at runtime. Skip
-# the scan for shared Qt; keep it for a static build where they must be linked.
-if(QT6_IS_SHARED_LIBS_BUILD)
-    set_target_properties(
-        tst_pipeline_progress tst_protocol_document tst_meety_menu tst_first_run
-        tst_app_shell_wiring
-        PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN ON)
-endif()
