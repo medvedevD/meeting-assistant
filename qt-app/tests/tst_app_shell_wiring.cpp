@@ -22,6 +22,8 @@
 // `font.pixelSize`, which re-notifies the whole font group), and it is
 // unreachable while the store sits in "loading".
 
+#include "EmbeddedQmldirGuard.h"
+
 #include <QCoreApplication>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -88,8 +90,13 @@ class AppShellWiringTest : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase();
     void welcomeScreenReceivesStoreAndRendersFirstRun();
 };
+
+void AppShellWiringTest::initTestCase() {
+    verifyEmbeddedQmldir(QStringLiteral(MA_APP_SHELL_QML_IMPORT_DIR));
+}
 
 void AppShellWiringTest::welcomeScreenReceivesStoreAndRendersFirstRun() {
     QQmlEngine engine;
