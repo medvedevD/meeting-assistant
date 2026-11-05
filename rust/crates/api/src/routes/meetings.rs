@@ -428,6 +428,43 @@ mod tests {
         assert_eq!(json[0]["has_transcript"], true);
     }
 
+    /// The GUI reads these JSON names in `ProtocolDocument.qml`.
+    #[tokio::test]
+    async fn get_returns_other_protocol_sections() {
+        let repo = FakeMeetingRepo::new();
+        let m = Meeting::new("Дейлик".to_string(), PathBuf::from("/c.wav"));
+        repo.save(&m).await.unwrap();
+        repo.save_protocol(
+            &m.id,
+            "## Статус по участникам\n### Мария\n- Релиз\n\n## Открытые вопросы\n- Когда?",
+            None,
+        )
+        .await
+        .unwrap();
+        let app = make_app(std::sync::Arc::clone(&repo));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/v1/meetings/{}", m.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let json = body_json(response).await;
+        assert_eq!(
+            json["structured_protocol"]["other_sections"],
+            serde_json::json!([{
+                "title": "Статус по участникам",
+                "markdown": "### Мария\n- Релиз",
+                "before": "open_questions",
+            }])
+        );
+    }
+
     #[tokio::test]
     async fn get_returns_persisted_protocol() {
         let repo = FakeMeetingRepo::new();

@@ -242,7 +242,8 @@ ColumnLayout {
             || _cleanTopics(s.topics).length > 0
             || _cleanItems(s.decisions).length > 0
             || _cleanActions(s.actions).length > 0
-            || _cleanItems(s.open_questions).length > 0)
+            || _cleanItems(s.open_questions).length > 0
+            || (s.other_sections && s.other_sections.length > 0))
     }
     function _emptyMarker(v) {
         var t = ((v || "") + "").trim().replace(/^[\s—-]+|[\s.—-]+$/g, "").toLowerCase()
@@ -295,6 +296,19 @@ ColumnLayout {
         out.push({ "type": "h2", "text": title })
         out.push({ "type": "ul", "items": cleaned })
     }
+    // Sections outside the fixed set, placed before the fixed section they
+    // precede in the document ("" for those that come after all of them).
+    function _otherSections(out, s, before) {
+        var sections = s.other_sections || []
+        for (var i = 0; i < sections.length; ++i) {
+            if ((sections[i].before || "") !== before)
+                continue
+            out.push({ "type": "h2", "text": sections[i].title })
+            var body = doc._parse(sections[i].markdown)
+            for (var j = 0; j < body.length; ++j)
+                out.push(body[j])
+        }
+    }
     function _structuredBlocks(s) {
         var out = []
         if (!doc._hasStructured(s))
@@ -303,6 +317,7 @@ ColumnLayout {
         if (s.title)
             out.push({ "type": "h1", "text": s.title })
 
+        doc._otherSections(out, s, "summary")
         var summary = doc._cleanItems(s.summary)
         if (summary.length > 0) {
             out.push({ "type": "h2", "text": qsTr("Краткое резюме") })
@@ -310,6 +325,7 @@ ColumnLayout {
                 out.push({ "type": "p", "text": summary[i] })
         }
 
+        doc._otherSections(out, s, "topics")
         var topics = doc._cleanTopics(s.topics)
         if (topics.length > 0) {
             out.push({ "type": "h2", "text": qsTr("Темы") })
@@ -321,8 +337,10 @@ ColumnLayout {
             }
         }
 
+        doc._otherSections(out, s, "decisions")
         doc._section(out, qsTr("Решения"), s.decisions)
 
+        doc._otherSections(out, s, "actions")
         var actions = doc._cleanActions(s.actions)
         if (actions.length > 0) {
             out.push({ "type": "h2", "text": qsTr("Дальнейшие действия") })
@@ -360,7 +378,10 @@ ColumnLayout {
             }
         }
 
+        doc._otherSections(out, s, "open_questions")
         doc._section(out, qsTr("Открытые вопросы"), s.open_questions)
+
+        doc._otherSections(out, s, "")
         return out
     }
 

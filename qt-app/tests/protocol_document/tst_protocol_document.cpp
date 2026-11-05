@@ -3,6 +3,7 @@
 #include <QGuiApplication>
 #include <QQmlComponent>
 #include <QQmlEngine>
+#include <QQuickItem>
 #include <QtTest>
 
 class ProtocolDocumentTest : public QObject {
@@ -14,8 +15,28 @@ private slots:
     void parsesDeepHeadingsWithoutVisibleHashes();
     void prefersStructuredProtocolBlocks();
     void hidesEmptyStructuredSections();
+    void showsOtherSectionsInDocumentOrder();
+    void otherSectionsAloneCountAsStructured();
     void escapesInlineHtml();
 };
+
+static QVariantMap otherSection(const QString &title, const QString &markdown, const QVariant &before) {
+    QVariantMap section;
+    section.insert(QStringLiteral("title"), title);
+    section.insert(QStringLiteral("markdown"), markdown);
+    section.insert(QStringLiteral("before"), before);
+    return section;
+}
+
+// Every Text the document actually shows, in visual order.
+static void collectTexts(const QQuickItem *item, QStringList &out) {
+    for (const QQuickItem *child : item->childItems()) {
+        const QString text = child->property("text").toString();
+        if (!text.isEmpty())
+            out.append(text);
+        collectTexts(child, out);
+    }
+}
 
 static std::unique_ptr<QObject> createDocument(QQmlEngine &engine, QQmlComponent &component) {
     component.loadUrl(QUrl::fromLocalFile(QStringLiteral(MA_PROTOCOL_QML_FILE)));
@@ -174,6 +195,92 @@ void ProtocolDocumentTest::hidesEmptyStructuredSections() {
         QVERIFY(text != QStringLiteral("Открытые вопросы"));
         QVERIFY(map.value(QStringLiteral("type")).toString() != QStringLiteral("table"));
     }
+}
+
+void ProtocolDocumentTest::showsOtherSectionsInDocumentOrder() {
+    QQmlEngine engine;
+    engine.addImportPath(QStringLiteral(MA_PROTOCOL_QML_IMPORT_DIR));
+
+    QQmlComponent component(&engine);
+    std::unique_ptr<QObject> root = createDocument(engine, component);
+    QVERIFY2(root != nullptr, qPrintable(component.errorString()));
+
+    QVariantMap action;
+    action.insert(QStringLiteral("title"), QStringLiteral("Подготовить сборку"));
+    action.insert(QStringLiteral("owner"), QStringLiteral("Дима"));
+
+    QVariantMap structured;
+    structured.insert(QStringLiteral("summary"), QVariantList { QStringLiteral("Короткий итог") });
+    structured.insert(QStringLiteral("decisions"), QVariantList { QStringLiteral("Выпускать") });
+    structured.insert(QStringLiteral("actions"), QVariantList { action });
+    structured.insert(QStringLiteral("other_sections"), QVariantList {
+        otherSection(QStringLiteral("Цель встречи"), QStringLiteral("Договориться о релизе."),
+                     QStringLiteral("summary")),
+        otherSection(QStringLiteral("Статус по участникам"),
+                     QStringLiteral("### Артем\n- **Сделано:** тикет\n\n### Мария\n- План"),
+                     QStringLiteral("decisions")),
+        otherSection(QStringLiteral("Обратная связь"), QStringLiteral("Всё хорошо."), QVariant()),
+    });
+
+    root->setProperty("structured", structured);
+
+    QStringList outline;
+    const QVariantList blocks = root->property("blocks").toList();
+    for (const QVariant &block : blocks) {
+        const QVariantMap map = block.toMap();
+        const QString type = map.value(QStringLiteral("type")).toString();
+        outline.append(map.contains(QStringLiteral("text"))
+                           ? type + QLatin1Char(':') + map.value(QStringLiteral("text")).toString()
+                           : type);
+    }
+    QCOMPARE(outline, QStringList({
+        QStringLiteral("h2:Цель встречи"),
+        QStringLiteral("p:Договориться о релизе."),
+        QStringLiteral("h2:Краткое резюме"),
+        QStringLiteral("p:Короткий итог"),
+        QStringLiteral("h2:Статус по участникам"),
+        QStringLiteral("h3:Артем"),
+        QStringLiteral("ul"),
+        QStringLiteral("h3:Мария"),
+        QStringLiteral("ul"),
+        QStringLiteral("h2:Решения"),
+        QStringLiteral("ul"),
+        QStringLiteral("h2:Дальнейшие действия"),
+        QStringLiteral("table"),
+        QStringLiteral("h2:Обратная связь"),
+        QStringLiteral("p:Всё хорошо."),
+    }));
+
+    const auto *item = qobject_cast<QQuickItem *>(root.get());
+    QVERIFY(item != nullptr);
+    QStringList shown;
+    collectTexts(item, shown);
+    QVERIFY2(shown.contains(QStringLiteral("СТАТУС ПО УЧАСТНИКАМ")), qPrintable(shown.join(u'|')));
+    QVERIFY2(shown.contains(QStringLiteral("Артем")), qPrintable(shown.join(u'|')));
+    QVERIFY2(shown.contains(QStringLiteral("<b>Сделано:</b> тикет")), qPrintable(shown.join(u'|')));
+}
+
+void ProtocolDocumentTest::otherSectionsAloneCountAsStructured() {
+    QQmlEngine engine;
+    engine.addImportPath(QStringLiteral(MA_PROTOCOL_QML_IMPORT_DIR));
+
+    QQmlComponent component(&engine);
+    std::unique_ptr<QObject> root = createDocument(engine, component);
+    QVERIFY2(root != nullptr, qPrintable(component.errorString()));
+
+    QVariantMap structured;
+    structured.insert(QStringLiteral("other_sections"), QVariantList {
+        otherSection(QStringLiteral("Обратная связь"), QStringLiteral("Всё хорошо."), QVariant()),
+    });
+
+    root->setProperty("markdown", QStringLiteral("# Markdown fallback"));
+    root->setProperty("structured", structured);
+
+    const QVariantList blocks = root->property("blocks").toList();
+    QCOMPARE(blocks.size(), 2);
+    QCOMPARE(blocks.at(0).toMap().value(QStringLiteral("type")).toString(), QStringLiteral("h2"));
+    QCOMPARE(blocks.at(0).toMap().value(QStringLiteral("text")).toString(),
+             QStringLiteral("Обратная связь"));
 }
 
 void ProtocolDocumentTest::escapesInlineHtml() {

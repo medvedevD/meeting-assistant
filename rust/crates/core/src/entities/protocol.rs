@@ -18,6 +18,21 @@ pub struct StructuredProtocol {
     pub decisions: Vec<String>,
     pub actions: Vec<ProtocolAction>,
     pub open_questions: Vec<String>,
+    /// Sections that fit none of the fields above, in document order.
+    #[serde(default)]
+    pub other_sections: Vec<ProtocolSection>,
+}
+
+/// A section outside the fixed set, such as "Статус по участникам".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProtocolSection {
+    pub title: String,
+    /// The section body as written: paragraphs, lists, tables, and `###`
+    /// subsections. The GUI's Markdown renderer shows it directly.
+    pub markdown: String,
+    /// The `StructuredProtocol` field of the next fixed section in the document,
+    /// so the GUI can keep this section in place. `None` when none follows.
+    pub before: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,29 +70,65 @@ enum Section {
     OpenQuestions,
 }
 
+impl Section {
+    /// The `StructuredProtocol` field this section fills.
+    fn field_name(self) -> Option<&'static str> {
+        match self {
+            Section::None => None,
+            Section::Summary => Some("summary"),
+            Section::Topics => Some("topics"),
+            Section::Decisions => Some("decisions"),
+            Section::Actions => Some("actions"),
+            Section::OpenQuestions => Some("open_questions"),
+        }
+    }
+}
+
 impl StructuredProtocol {
     pub fn from_markdown(markdown: &str) -> Self {
         let mut out = StructuredProtocol::default();
         let mut section = Section::None;
+        // Level of the heading that opened `section`.
+        let mut section_level = 0;
         let mut current_topic: Option<ProtocolTopic> = None;
+        let mut current_other: Option<ProtocolSection> = None;
+        let mut action_columns: Option<ActionColumns> = None;
 
-        for raw in markdown.lines() {
+        let mut lines = markdown.lines().peekable();
+        while let Some(raw) = lines.next() {
             let line = raw.trim();
+            if !line.contains('|') {
+                action_columns = None;
+            }
             if line.is_empty() || is_rule(line) {
+                if let Some(other) = current_other.as_mut() {
+                    other.markdown.push('\n');
+                }
                 continue;
             }
 
             if let Some((level, heading)) = heading_text(line) {
+                // A deeper heading is a subsection, whatever it says: "### Артем"
+                // under "Статус по участникам" is a person, not a topic ("тем").
+                if let Some(other) = current_other.as_mut().filter(|_| level > section_level) {
+                    push_body_line(other, raw);
+                    continue;
+                }
                 flush_topic(&mut out, &mut current_topic);
+                flush_other_section(&mut out, &mut current_other);
                 // Only a top-level `#` heading is a document title. Section
                 // labels are `##` (e.g. "## Тип встречи"), and promoting one to
                 // the title rendered it as a giant headline that duplicated the
                 // meeting name already shown in the header chrome.
-                if level == 1 && out.title.is_none() {
+                let is_title = level == 1 && out.title.is_none();
+                if is_title {
                     out.title = Some(heading.clone());
                 }
                 let next_section = classify_section(&heading);
-                if section == Section::Topics && next_section == Section::None {
+                if section == Section::Topics
+                    && next_section == Section::None
+                    && level > section_level
+                {
                     current_topic = Some(ProtocolTopic {
                         title: heading,
                         bullets: Vec::new(),
@@ -85,11 +136,30 @@ impl StructuredProtocol {
                     continue;
                 }
                 section = next_section;
+                section_level = level;
+                if let Some(field) = section.field_name() {
+                    for other in &mut out.other_sections {
+                        other.before.get_or_insert_with(|| field.to_string());
+                    }
+                }
                 if section == Section::Topics && !is_generic_topic_heading(&heading) {
                     current_topic = Some(ProtocolTopic {
                         title: heading,
                         bullets: Vec::new(),
                     });
+                } else if section == Section::None && !is_title {
+                    current_other = Some(ProtocolSection {
+                        title: heading,
+                        markdown: String::new(),
+                        before: None,
+                    });
+                }
+                continue;
+            }
+
+            if let Some(other) = current_other.as_mut() {
+                if !is_empty_placeholder(&clean_line(line)) {
+                    push_body_line(other, raw);
                 }
                 continue;
             }
@@ -99,11 +169,24 @@ impl StructuredProtocol {
             }
 
             if line.contains('|') {
-                let row = table_cells(line);
-                if section == Section::Actions && !looks_like_table_header(&row) {
-                    if let Some(action) = action_from_cells(&row) {
-                        out.actions.push(action);
+                if section == Section::Actions {
+                    let is_header = lines.peek().is_some_and(|next| is_table_separator(next));
+                    if is_header {
+                        action_columns = ActionColumns::from_header(&table_row(line));
                     }
+                    let action = match action_columns {
+                        Some(_) if is_header => None,
+                        Some(columns) => columns.action(&table_row(line)),
+                        None => {
+                            let row = table_cells(line);
+                            if looks_like_table_header(&row) {
+                                None
+                            } else {
+                                action_from_cells(&row)
+                            }
+                        }
+                    };
+                    out.actions.extend(action);
                 }
                 continue;
             }
@@ -128,8 +211,10 @@ impl StructuredProtocol {
                         topic.bullets.push(item);
                     }
                 }
+                // Text before the first section: anything under a heading went
+                // to `current_other` above.
                 Section::None => {
-                    if out.summary.is_empty() && !is_probably_metadata(&item) {
+                    if !is_probably_metadata(&item) {
                         out.summary.push(item);
                     }
                 }
@@ -137,6 +222,7 @@ impl StructuredProtocol {
         }
 
         flush_topic(&mut out, &mut current_topic);
+        flush_other_section(&mut out, &mut current_other);
         out
     }
 }
@@ -145,6 +231,20 @@ fn flush_topic(out: &mut StructuredProtocol, current: &mut Option<ProtocolTopic>
     if let Some(topic) = current.take() {
         if !topic.title.is_empty() || !topic.bullets.is_empty() {
             out.topics.push(topic);
+        }
+    }
+}
+
+fn push_body_line(section: &mut ProtocolSection, line: &str) {
+    section.markdown.push_str(line);
+    section.markdown.push('\n');
+}
+
+fn flush_other_section(out: &mut StructuredProtocol, current: &mut Option<ProtocolSection>) {
+    if let Some(mut section) = current.take() {
+        section.markdown = section.markdown.trim().to_string();
+        if !section.markdown.is_empty() {
+            out.other_sections.push(section);
         }
     }
 }
@@ -249,12 +349,17 @@ fn is_table_separator(line: &str) -> bool {
             .all(|c| c.trim_matches(':').chars().all(|ch| ch == '-') && c.contains('-'))
 }
 
+/// Every cell of a table row, empty ones included, so positions match the header.
+fn table_row(line: &str) -> Vec<String> {
+    let line = line.trim();
+    let line = line.strip_prefix('|').unwrap_or(line);
+    let line = line.strip_suffix('|').unwrap_or(line);
+    line.split('|').map(clean_inline).collect()
+}
+
 fn table_cells(line: &str) -> Vec<String> {
-    let mut cells: Vec<String> = line
-        .trim()
-        .trim_matches('|')
-        .split('|')
-        .map(clean_inline)
+    let mut cells: Vec<String> = table_row(line)
+        .into_iter()
         .filter(|c| !c.is_empty())
         .collect();
     if cells.len() == 1 && cells[0].is_empty() {
@@ -273,6 +378,82 @@ fn looks_like_table_header(cells: &[String]) -> bool {
             || lower.contains("срок")
             || lower.contains("due")
     })
+}
+
+/// Column positions of an action table, read from its header row.
+#[derive(Clone, Copy)]
+struct ActionColumns {
+    title: usize,
+    owner: Option<usize>,
+    due: Option<usize>,
+}
+
+impl ActionColumns {
+    /// `None` when the header names no task column. A column takes one role
+    /// only, and owner and due choose first: "Срок задачи" is a due date.
+    fn from_header(header: &[String]) -> Option<Self> {
+        let column = |stems: &[&str], taken: &[Option<usize>]| {
+            header.iter().enumerate().position(|(index, cell)| {
+                let lower = cell.to_lowercase();
+                !taken.contains(&Some(index)) && stems.iter().any(|stem| lower.contains(stem))
+            })
+        };
+        let owner = column(
+            &[
+                "ответ",
+                "исполн",
+                "кто",
+                "owner",
+                "assignee",
+                "responsible",
+                "who",
+            ],
+            &[],
+        );
+        let due = column(
+            &[
+                "срок",
+                "дедлайн",
+                "когда",
+                "дата",
+                "due",
+                "deadline",
+                "date",
+                "when",
+            ],
+            &[owner],
+        );
+        let title = column(
+            &[
+                "задач",
+                "действ",
+                "поручен",
+                "описан",
+                "что",
+                "task",
+                "action",
+                "item",
+                "descr",
+                "what",
+            ],
+            &[owner, due],
+        )?;
+        Some(Self { title, owner, due })
+    }
+
+    fn action(self, row: &[String]) -> Option<ProtocolAction> {
+        let cell = |index: Option<usize>| {
+            index
+                .and_then(|i| row.get(i))
+                .filter(|c| !is_empty_placeholder(c))
+                .cloned()
+        };
+        Some(ProtocolAction {
+            title: cell(Some(self.title))?,
+            owner: cell(self.owner),
+            due: cell(self.due),
+        })
+    }
 }
 
 fn action_from_cells(cells: &[String]) -> Option<ProtocolAction> {
@@ -449,10 +630,345 @@ mod tests {
         let structured = StructuredProtocol::from_markdown(md);
 
         assert_eq!(structured.title, None);
+        assert_eq!(structured.summary, vec!["Спорили о жанре."]);
         assert_eq!(
-            structured.summary,
-            vec!["Неформальный разговор / дискуссия", "Спорили о жанре."]
+            structured.other_sections,
+            vec![ProtocolSection {
+                title: "Тип встречи".into(),
+                markdown: "Неформальный разговор / дискуссия".into(),
+                before: Some("summary".into()),
+            }]
         );
+    }
+
+    /// The text of every `##` section of the bundled templates has to reach the
+    /// model, in both languages, so a heading of a new template cannot lose it.
+    #[test]
+    fn no_template_section_loses_its_text() {
+        const TEMPLATES: [&str; 8] = [
+            include_str!("../../../../../prompts/en/1-on-1.md"),
+            include_str!("../../../../../prompts/en/Daily stand-up.md"),
+            include_str!("../../../../../prompts/en/Team meeting.md"),
+            include_str!("../../../../../prompts/en/Simple minutes.md"),
+            include_str!("../../../../../prompts/ru/1-на-1.md"),
+            include_str!("../../../../../prompts/ru/Дейлик.md"),
+            include_str!("../../../../../prompts/ru/Командная встреча.md"),
+            include_str!("../../../../../prompts/ru/Простой протокол.md"),
+        ];
+
+        for template in TEMPLATES {
+            let headings: Vec<&str> = template
+                .lines()
+                .filter_map(|l| l.strip_prefix("## "))
+                .collect();
+            assert!(headings.len() >= 4, "too few headings: {headings:?}");
+            let md: String = headings
+                .iter()
+                .enumerate()
+                .map(|(i, heading)| format!("## {heading}\nmarker{i};\n\n"))
+                .collect();
+
+            let dump = format!("{:?}", StructuredProtocol::from_markdown(&md));
+
+            for (i, heading) in headings.iter().enumerate() {
+                assert!(dump.contains(&format!("marker{i};")), "{heading}: {dump}");
+            }
+        }
+    }
+
+    #[test]
+    fn keeps_the_stand_up_status_with_its_subsections() {
+        let md = "\
+## Статус по участникам
+
+### Артем
+- **Сделано:** закрыл тикет
+- **Блокеры:** нет доступа
+
+### Мария
+- **В работе / план:** релиз
+
+## Общие блокеры и риски
+Стенд падает.
+
+## Решения и договорённости
+- Выпускаем в пятницу.";
+
+        let structured = StructuredProtocol::from_markdown(md);
+
+        assert_eq!(
+            structured.other_sections,
+            vec![
+                ProtocolSection {
+                    title: "Статус по участникам".into(),
+                    markdown: "### Артем\n\
+                               - **Сделано:** закрыл тикет\n\
+                               - **Блокеры:** нет доступа\n\n\
+                               ### Мария\n\
+                               - **В работе / план:** релиз"
+                        .into(),
+                    before: Some("decisions".into()),
+                },
+                ProtocolSection {
+                    title: "Общие блокеры и риски".into(),
+                    markdown: "Стенд падает.".into(),
+                    before: Some("decisions".into()),
+                },
+            ]
+        );
+        assert!(structured.summary.is_empty());
+        assert!(structured.topics.is_empty(), "Артем is not a topic");
+        assert_eq!(structured.decisions, vec!["Выпускаем в пятницу."]);
+    }
+
+    #[test]
+    fn other_sections_keep_their_place_between_the_fixed_ones() {
+        let md = "\
+## Meeting goal
+Agree on the release date.
+
+## Participants
+- Dana
+- Lee
+
+## Summary
+The team reviewed the plan.
+
+## Topics discussed
+### Delivery
+The build is late.
+
+## Key decisions
+- Ship on Friday.
+
+## Risks and issues
+| Risk | Impact |
+|------|--------|
+| Unstable stage | High |
+
+## Action items
+- Dana: prepare the build
+
+## Open questions
+- Who runs the demo?
+
+## Appendix
+Notes.";
+
+        let structured = StructuredProtocol::from_markdown(md);
+
+        let places: Vec<(&str, Option<&str>)> = structured
+            .other_sections
+            .iter()
+            .map(|s| (s.title.as_str(), s.before.as_deref()))
+            .collect();
+        assert_eq!(
+            places,
+            vec![
+                ("Meeting goal", Some("summary")),
+                ("Participants", Some("summary")),
+                ("Risks and issues", Some("actions")),
+                ("Appendix", None),
+            ]
+        );
+        assert_eq!(structured.other_sections[1].markdown, "- Dana\n- Lee");
+        assert_eq!(
+            structured.other_sections[2].markdown,
+            "| Risk | Impact |\n|------|--------|\n| Unstable stage | High |"
+        );
+    }
+
+    #[test]
+    fn a_section_after_topics_is_not_another_topic() {
+        let md = "\
+## Обсуждённые темы
+### Поставка
+- Сборка опаздывает.
+
+## Риски и проблемы
+- Стенд падает.";
+
+        let structured = StructuredProtocol::from_markdown(md);
+
+        assert_eq!(structured.topics.len(), 1);
+        assert_eq!(structured.topics[0].title, "Поставка");
+        assert_eq!(structured.other_sections.len(), 1);
+        assert_eq!(structured.other_sections[0].title, "Риски и проблемы");
+        assert_eq!(structured.other_sections[0].markdown, "- Стенд падает.");
+    }
+
+    #[test]
+    fn skips_other_sections_with_nothing_to_show() {
+        let md = "\
+## Участники
+Не указано
+
+## Обратная связь
+
+## Feedback
+- Not discussed
+
+## Решения
+- Го.";
+
+        let structured = StructuredProtocol::from_markdown(md);
+
+        assert!(structured.other_sections.is_empty());
+        assert_eq!(structured.decisions, vec!["Го."]);
+    }
+
+    #[test]
+    fn text_before_the_first_section_goes_to_the_summary() {
+        let md = "\
+# Планёрка
+Дата: 5 ноября
+Первая мысль.
+
+Вторая мысль.
+
+## Решения
+- Го.";
+
+        let structured = StructuredProtocol::from_markdown(md);
+
+        assert_eq!(structured.title.as_deref(), Some("Планёрка"));
+        assert_eq!(structured.summary, vec!["Первая мысль.", "Вторая мысль."]);
+        assert!(structured.other_sections.is_empty());
+    }
+
+    fn action(title: &str, owner: Option<&str>, due: Option<&str>) -> ProtocolAction {
+        ProtocolAction {
+            title: title.into(),
+            owner: owner.map(Into::into),
+            due: due.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn reads_action_columns_from_the_table_header() {
+        for (header, row) in [
+            (
+                "| Задача | Ответственный | Срок |",
+                "| Подготовить сборку | Дима | пятница |",
+            ),
+            (
+                "| Task | Owner | Due |",
+                "| Подготовить сборку | Дима | пятница |",
+            ),
+            (
+                "| Owner | Task | Due |",
+                "| Дима | Подготовить сборку | пятница |",
+            ),
+            (
+                "| Ответственный | Действие | Срок |",
+                "| Дима | Подготовить сборку | пятница |",
+            ),
+            (
+                "| Срок | Исполнитель | Задача |",
+                "| пятница | Дима | Подготовить сборку |",
+            ),
+            (
+                "| # | Задача | Кто | Срок |",
+                "| 1 | Подготовить сборку | Дима | пятница |",
+            ),
+        ] {
+            let md = format!("## Action items\n{header}\n|---|---|---|\n{row}");
+
+            let structured = StructuredProtocol::from_markdown(&md);
+
+            assert_eq!(
+                structured.actions,
+                vec![action("Подготовить сборку", Some("Дима"), Some("пятница"))],
+                "{header}"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_cells_do_not_shift_action_columns() {
+        let md = "\
+## Action items
+| Задача | Ответственный | Срок |
+|--------|--------------|------|
+| Без срока | Дима | |
+| Без ответственного |  | пятница |
+| Прочерки | — | — |";
+
+        let structured = StructuredProtocol::from_markdown(md);
+
+        assert_eq!(
+            structured.actions,
+            vec![
+                action("Без срока", Some("Дима"), None),
+                action("Без ответственного", None, Some("пятница")),
+                action("Прочерки", None, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn action_rows_may_mention_header_words() {
+        let md = "\
+## Action items
+| Задача | Ответственный | Срок |
+|--------|--------------|------|
+| Подготовить ответ и уточнить срок | Дима | пятница |";
+
+        let structured = StructuredProtocol::from_markdown(md);
+
+        assert_eq!(
+            structured.actions,
+            vec![action(
+                "Подготовить ответ и уточнить срок",
+                Some("Дима"),
+                Some("пятница")
+            )]
+        );
+    }
+
+    #[test]
+    fn action_columns_apply_to_their_own_table_only() {
+        let md = "\
+## Action items
+| Task | Owner |
+|------|-------|
+| Prepare the build | Dana |
+
+| Owner | Task |
+|-------|------|
+| Lee | Run the demo |
+
+Plain text ends the table
+| Kim | Write the notes |";
+
+        let structured = StructuredProtocol::from_markdown(md);
+
+        assert_eq!(
+            structured.actions,
+            vec![
+                action("Prepare the build", Some("Dana"), None),
+                action("Run the demo", Some("Lee"), None),
+                action("Plain text ends the table", None, None),
+                action("Write the notes", Some("Kim"), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn action_columns_stay_positional_without_a_recognized_header() {
+        let positional = action("Подготовить сборку", Some("Дима"), Some("пятница"));
+        for md in [
+            // No header at all.
+            "## Action items\n| Дима | Подготовить сборку | пятница |",
+            // A header row with no separator under it is skipped, as before.
+            "## Action items\n| Задача | Ответственный | Срок |\n| Дима | Подготовить сборку | пятница |",
+            // A separator under a row that names no task column.
+            "## Action items\n| Ответственный | Срок |\n|---|---|\n| Дима | Подготовить сборку | пятница |",
+        ] {
+            let structured = StructuredProtocol::from_markdown(md);
+
+            assert_eq!(structured.actions, vec![positional.clone()], "{md}");
+        }
     }
 
     /// Every `##` heading of the bundled English templates, so a new heading
