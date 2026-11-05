@@ -1,7 +1,7 @@
 // Meety design tokens — single source of truth for the redesigned UI.
-// Port of design/meety/project/styles.css `:root` tokens. CSS uses oklch();
+// Port of the design's CSS `:root` tokens. CSS uses oklch();
 // QML is sRGB-only, so the palette below is the light+sienna set converted to
-// hex once (see .claude/plans/qt-redesign/). Screens reference `Theme.*`
+// hex once. Screens reference `Theme.*`
 // instead of `palette.*`.
 //
 // Scope (decided): light + sienna only. Dark / slate / moss / density variants

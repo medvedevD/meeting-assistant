@@ -52,7 +52,7 @@ pub struct PersistedTranscriberPrefs {
     #[serde(default)]
     pub n_threads: u32,
     /// Offload to the compiled GPU backend when available. No effect on CPU-only
-    /// builds. Default: true. See `whisper_backend()` / ADR-006.
+    /// builds. Default: true. See `whisper_backend()`.
     #[serde(default = "default_use_gpu")]
     pub use_gpu: bool,
     /// Managed catalog model or advanced custom path. Old `model_path` JSON is

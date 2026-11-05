@@ -8,8 +8,7 @@ use tokio_util::sync::CancellationToken;
 /// One entry in the live-jobs table: the in-flight `JobProgress` snapshot and
 /// the cancellation token the worker checks at every safe checkpoint. Both
 /// fields share an identical lifetime — created when the worker claims a job,
-/// dropped from the map when the worker reaches a terminal state. See
-/// `plans/done/job-cancellation` (Decision #2).
+/// dropped from the map when the worker reaches a terminal state.
 #[derive(Clone)]
 pub struct LiveEntry {
     pub progress: JobProgress,
@@ -20,7 +19,7 @@ pub struct LiveEntry {
 /// "dirty" signal) plus the kind of change. Subscribers read the *current*
 /// snapshot from the table (or the DB on terminal) rather than trusting the
 /// payload, so a coalesced or lagged notification can never produce a stale
-/// frame. See `plans/done/job-progress-sse` (ADR-001).
+/// frame.
 #[derive(Clone, Debug)]
 pub enum ProgressEvent {
     /// A progress snapshot was written for this job (it is claimed / running).

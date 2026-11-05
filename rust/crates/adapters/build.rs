@@ -9,7 +9,7 @@
 //!   * everything else is CPU-only.
 //!
 //! Keep this in sync with the `whisper-rs` dependency declarations in
-//! `Cargo.toml`. See ADR-006 in `plans/active/whisper-gpu-acceleration`.
+//! `Cargo.toml`. See "Whisper backends" in `docs/ARCHITECTURE.md`.
 
 use std::env;
 

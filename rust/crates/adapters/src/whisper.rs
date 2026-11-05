@@ -16,8 +16,7 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 /// Stable heap allocation passed to whisper.cpp as `abort_callback_user_data`.
 /// The only field is the atomic flag the C callback reads; no closures, no
 /// captures, no synchronisation primitives — so concurrent calls from
-/// whisper.cpp's inference threads are sound. See ADR-005 in
-/// `plans/active/job-cancellation`.
+/// whisper.cpp's inference threads are sound.
 #[repr(C)]
 struct AbortFlag {
     cancelled: AtomicBool,
@@ -301,7 +300,7 @@ fn run_whisper(
 
     // Cooperative abort via the unsafe FFI path (whisper-rs 0.16's
     // `set_abort_callback_safe` has a broken trampoline that deadlocks on
-    // concurrent invocation — see ADR-005). We pass our own extern "C"
+    // concurrent invocation). We pass our own extern "C"
     // callback + a stable `Arc<AbortFlag>` heap pointer. whisper.cpp calls
     // `abort_cb` between segments from multiple inference threads; the
     // callback does a single atomic load → race-free by construction.

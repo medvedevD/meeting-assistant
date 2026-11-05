@@ -163,7 +163,7 @@ struct Resolved {
 
 /// Resolve a [`CaptureSpec`] into the concrete devices that will be opened. A
 /// pinned device that has vanished resolves back to the OS default, so the UI
-/// always reflects what is truly live (ADR-1). Per-leg `None` means that leg is
+/// always reflects what is truly live. Per-leg `None` means that leg is
 /// not part of the source.
 fn resolve_devices(spec: &CaptureSpec) -> Result<Resolved, String> {
     let mic = match spec.source {

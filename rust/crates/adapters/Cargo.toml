@@ -2,6 +2,7 @@
 name = "meeting-adapters"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
 
 [dependencies]
 meeting-core = { path = "../core" }
@@ -9,7 +10,7 @@ meeting-core = { path = "../core" }
 # default to the Metal backend (a system framework — no extra runtime install,
 # notarization-safe) while every other target stays CPU-only by default. CUDA
 # and Vulkan are opt-in via the `whisper-cuda` / `whisper-vulkan` features so the
-# portable packaging build is unchanged. See build.rs and ADR-006.
+# portable packaging build is unchanged. See build.rs and docs/ARCHITECTURE.md.
 hound = "3"
 rubato = "0.15"
 cpal = "0.15"
@@ -31,7 +32,7 @@ dirs = { workspace = true }
 # on platforms without a backend, KeyringSecretStore falls back to a 0600 file.
 keyring = "3"
 # Passphrase-encrypted vault fallback (keyring unavailable). Pure-Rust crypto:
-# Argon2id KDF + XChaCha20-Poly1305 AEAD. See ADR-013.
+# Argon2id KDF + XChaCha20-Poly1305 AEAD. See docs/ARCHITECTURE.md.
 argon2 = "0.5"
 chacha20poly1305 = "0.10"
 base64 = "0.22"

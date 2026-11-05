@@ -40,8 +40,7 @@ fn stage_sub(stage: PipelineStage) -> &'static str {
 /// One half of the split worker pool. Two instances run side-by-side: the
 /// transcribe worker claims CPU-bound kinds (`Transcribe` / `ReprocessTranscribe`)
 /// bounded by `cpu_pool`; the protocol worker claims `RegenerateProtocol`
-/// bounded by `io_pool`. See `plans/active/worker-concurrency-pool` for the
-/// architecture decision.
+/// bounded by `io_pool`. See "Background jobs" in `docs/ARCHITECTURE.md`.
 pub struct Worker {
     job_repo: Arc<dyn JobRepo>,
     meeting_repo: Arc<dyn MeetingRepo>,
@@ -154,7 +153,7 @@ impl Worker {
                     // Allocate the cancellation token and publish a Queued
                     // live-progress entry *before* spawning the per-job task,
                     // so a DELETE /api/v1/jobs/:id arriving in the next tick
-                    // finds the token and can signal it. See ADR-002.
+                    // finds the token and can signal it.
                     let cancel = CancellationToken::new();
                     self.progress.seed(
                         job.id.clone(),

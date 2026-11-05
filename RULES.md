@@ -73,8 +73,8 @@ cargo test --manifest-path rust/Cargo.toml
 # Single Rust test
 cargo test --manifest-path rust/Cargo.toml -p <crate-name> <test_name>
 
-# Python legacy tests
-cd legacy && pytest
+# Qt tests (after the Qt app is built)
+ctest --test-dir qt-app/build
 ```
 
 ### Regression Tests
@@ -87,7 +87,7 @@ When creating commits, do not add AI-agent attribution. Commit messages must not
 
 ### Packaging
 
-See `packaging/` for OS-specific build/sign/notarize scripts (handled outside the dev loop).
+See `packaging/` for OS-specific build/sign/notarize scripts (handled outside the dev loop). Before each release, run the manual per-OS check in `packaging/SMOKE-CHECKLIST.md`.
 
 ### Release Gate
 
@@ -138,7 +138,7 @@ of repeating Whisper inference or issuing another paid LLM request.
 - `src/main.cpp` — Qt entry point; bootstraps the QML engine and singletons.
 - `src/SidecarManager.{h,cpp}` — locates and launches the `meeting-server` binary next to the GUI executable, manages its lifecycle.
 - `src/ApiClient.{h,cpp}` — typed wrapper over the loopback HTTP API.
-- `src/JobPoller.{h,cpp}` — polls async job state (transcription / protocol generation).
+- `src/JobPoller.{h,cpp}` — tracks async job state (transcription / protocol generation) over SSE, with polling as a fallback.
 - `qml/Main.qml`, `qml/AppShell.qml`, `qml/MeetingStore.qml`, `qml/screens/` — UI tree.
 
 ### Sidecar Bridge
@@ -158,7 +158,7 @@ On startup (sidecar `run()` and every CLI command) `backfill_templates` seeds th
 
 Settings and secrets deliberately live **outside** the clean-architecture core — there are no `SettingsStore`/`SecretStore` ports. They are adapters wired in the composition root and consumed only there and in the API layer.
 
-- **Persistence**: `JsonSettingsStore` ([settings_store.rs](rust/crates/adapters/src/settings_store.rs)) writes `PersistedSettings` to `settings.json`. Secrets never touch that file — `KeyringSecretStore` ([secret_store.rs](rust/crates/adapters/src/secret_store.rs)) stores per-provider API keys in the OS keyring, falling back to a `0600` JSON file (`~/.config/meeting-assistant/secrets.json`) when the keyring is unavailable (e.g. an unsigned macOS dev build). `MEETING_ASSISTANT_KEYRING_DISABLE=1` forces the file fallback (used by tests). Env vars (`ANTHROPIC_API_KEY`, etc.) always override stored keys via `effective_key`.
+- **Persistence**: `JsonSettingsStore` ([settings_store.rs](rust/crates/adapters/src/settings_store.rs)) writes `PersistedSettings` to `settings.json`. Secrets never touch that file — `KeyringSecretStore` ([secret_store.rs](rust/crates/adapters/src/secret_store.rs)) stores per-provider API keys in the OS keyring, falling back to a `0600` JSON file (`~/.config/meeting-assistant/secrets.json`) when the keyring is unavailable (e.g. an unsigned macOS dev build). The user can upgrade that file to a passphrase vault (Argon2id + XChaCha20-Poly1305). `MEETING_ASSISTANT_KEYRING_DISABLE=1` forces the file fallback (used by tests). The store deliberately ignores ambient env vars such as `ANTHROPIC_API_KEY`, so the desktop app uses exactly the key the user configured; only the legacy CLI's `generate` command reads that variable.
 - **HTTP surface**: `GET/PUT /api/v1/settings` (sanitized — secrets become `has_key: bool`, never values), `PUT /api/v1/settings/secret`, `POST /api/v1/settings/test`. Wired by `AppSettingsService` ([app/src/settings_service.rs](rust/crates/app/src/settings_service.rs)), which implements the `SettingsService` trait the `meeting-api` crate depends on.
 - **Hot-swap on `PUT`**: the active LLM is swapped via `SwappableLlm` (`ArcSwap<dyn LlmProvider>`); transcriber prefs/model and the prompts dir are applied in place. Only `db_path` and `recordings_dir` changes are **restart-required** (long-lived `Db`/repos/worker hold them) — surface a restart banner rather than trying to apply them live.
 - **`default_template` resolution (decision #3)**: the core `generate_protocol` use-case only ever receives a ready `template_name`. When a request omits one, the **API layer** resolves the configured default via the `AppState.default_template` resolver (`DefaultTemplateFn`, a closure over the live settings store) before calling the use-case — both in `routes/protocols.rs` and `routes/meetings.rs` (`reprocess` enqueues the resolved name). This keeps "settings" from leaking into the core. Tests and the legacy CLI use `no_default_template()`.
@@ -179,6 +179,8 @@ VAD is intentionally **not** wired into the Whisper transcriber. `whisper-rs` VA
 
 ## Key Files
 
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — public architecture overview and key decisions; keep it in step with this file
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — public setup, build, and test guide
 - [run-qt.sh](run-qt.sh) — main dev workflow script
 - [rust/Cargo.toml](rust/Cargo.toml) — workspace root
 - [rust/crates/core/src/lib.rs](rust/crates/core/src/lib.rs) — domain layer entry

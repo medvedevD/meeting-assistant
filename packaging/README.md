@@ -107,6 +107,7 @@ FFmpeg compliance mirrors Qt's (dynamic link + written offer + source URL) in
 ```
 packaging/
   README.md                     ← this file
+  SMOKE-CHECKLIST.md            manual per-OS check before each release
   assets/                       app icons + macOS DMG background
   LICENSES/                     Qt LGPLv3 written offer + license text (bundled)
   macos/   Info.plist.in  entitlements.plist  codesign-deep.sh  build-app.sh
