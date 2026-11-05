@@ -8,7 +8,7 @@ pub mod job;
 pub use job::{ErrorClass, Job, JobKind, JobProgress, JobStatus, PipelineStage};
 
 mod protocol;
-pub use protocol::{Protocol, ProtocolAction, ProtocolTopic, StructuredProtocol};
+pub use protocol::{Protocol, ProtocolAction, ProtocolSection, ProtocolTopic, StructuredProtocol};
 
 mod token_usage;
 pub use token_usage::TokenUsage;
