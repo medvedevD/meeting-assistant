@@ -103,7 +103,8 @@ Page {
                     Layout.topMargin: 4
                     horizontalAlignment: Text.AlignHCenter
                     text: qsTr("Выберите встречу")
-                    font.family: Theme.fontSerif
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
                     font.pixelSize: 28
                     font.weight: Theme.wMedium
                     font.letterSpacing: Theme.tracking(28, -0.015)
@@ -244,7 +245,8 @@ Page {
                         }
                         Text {
                             text: "Meeting Assistant"
-                            font.family: Theme.fontSerif
+                            font.family: Theme.serifFor(text)
+                            renderType: Theme.renderTypeFor(font.family)
                             font.pixelSize: 26
                             font.weight: Theme.wMedium
                             font.letterSpacing: Theme.tracking(26, -0.02)
@@ -265,7 +267,8 @@ Page {
                         text: qsTr("Тихий ассистент\nдля шумных встреч.")
                         wrapMode: Text.WordWrap
                         lineHeight: 1.05
-                        font.family: Theme.fontSerif
+                        font.family: Theme.serifFor(text)
+                        renderType: Theme.renderTypeFor(font.family)
                         font.pixelSize: titleSize
                         font.weight: Theme.wMedium
                         font.letterSpacing: Theme.tracking(titleSize, -0.02)
@@ -280,7 +283,8 @@ Page {
                         text: qsTr("Запиши, расшифруй, оформи в протокол.")
                         wrapMode: Text.WordWrap
                         lineHeight: 1.35
-                        font.family: Theme.fontSerif
+                        font.family: Theme.serifFor(text)
+                        renderType: Theme.renderTypeFor(font.family)
                         font.italic: true
                         font.pixelSize: scr.width >= 760 ? 16 : 14
                         color: Theme.ink2
@@ -435,7 +439,8 @@ Page {
                     text: qsTr("Платежный флоу — план релиза")
                     wrapMode: Text.WordWrap
                     lineHeight: 1.05
-                    font.family: Theme.fontSerif
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
                     font.pixelSize: 22
                     font.weight: Theme.wMedium
                     font.letterSpacing: Theme.tracking(22, -0.02)
@@ -461,7 +466,8 @@ Page {
                     text: qsTr("Команда обсудила интеграцию с банком и план выхода в прод следующей средой.")
                     wrapMode: Text.WordWrap
                     lineHeight: 1.4
-                    font.family: Theme.fontSerif
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
                     font.pixelSize: Theme.fsBody
                     color: Theme.ink2
                 }

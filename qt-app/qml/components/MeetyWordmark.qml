@@ -15,7 +15,8 @@ Item {
         id: mark
         anchors.verticalCenter: parent.verticalCenter
         text: "m"
-        font.family: Theme.fontSerif
+        font.family: Theme.serifFor(text)
+        renderType: Theme.renderTypeFor(font.family)
         font.italic: true
         font.weight: Theme.wMedium
         font.pixelSize: Math.round(root.size * 1.05)

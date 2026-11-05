@@ -59,7 +59,8 @@ ScrollView {
             Layout.rightMargin: 32
             Layout.topMargin: 32
             text: qsTr("Хранилище")
-            font.family: Theme.fontSerif
+            font.family: Theme.serifFor(text)
+            renderType: Theme.renderTypeFor(font.family)
             font.pixelSize: 26
             font.weight: Theme.wMedium
             font.letterSpacing: 0

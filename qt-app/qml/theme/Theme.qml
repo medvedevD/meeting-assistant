@@ -27,13 +27,40 @@ QtObject {
     readonly property FontLoader _serifItalic: FontLoader {
         source: "qrc:/fonts/Newsreader-Italic-Variable.ttf"
     }
+    readonly property FontLoader _serifCyrillic: FontLoader {
+        source: "qrc:/fonts/SourceSerif4-Variable.ttf"
+    }
+    readonly property FontLoader _serifCyrillicItalic: FontLoader {
+        source: "qrc:/fonts/SourceSerif4-Italic-Variable.ttf"
+    }
     readonly property FontLoader _mono: FontLoader {
         source: "qrc:/fonts/JetBrainsMono-Variable.ttf"
     }
 
     readonly property string fontUi: _ui.name.length > 0 ? _ui.name : "Geist"
-    readonly property string fontSerif: _serif.name.length > 0 ? _serif.name : "Newsreader"
     readonly property string fontMono: _mono.name.length > 0 ? _mono.name : "JetBrains Mono"
+
+    // The serif for a piece of text. Newsreader has no Cyrillic, and Qt would set
+    // the missing letters in a system font while digits and Latin words in the same
+    // line stay in Newsreader. So a string with Cyrillic uses Source Serif 4 whole,
+    // and Newsreader keeps everything else.
+    function serifFor(text) {
+        return /[\u0400-\u052F]/.test(text) ? _sourceSerifName : _newsreaderName
+    }
+    readonly property string _newsreaderName: _serif.name.length > 0 ? _serif.name : "Newsreader"
+    readonly property string _sourceSerifName: _serifCyrillic.name.length > 0 ? _serifCyrillic.name
+                                                                              : "Source Serif 4"
+
+    // How to draw serif text in `family`. Source Serif 4 has an optical size axis,
+    // and macOS picks the cut from the font size. Qt's default renderer takes every
+    // glyph from one large master, the display cut, but spaces it for the real size,
+    // which leaves thin letters with uneven gaps. Native rendering draws the cut the
+    // layout measured. Other systems don't pick a cut by size, so they stay on the
+    // default. Newsreader has the same axis and keeps its current look on purpose.
+    function renderTypeFor(family) {
+        return family === _sourceSerifName && Qt.platform.os === "osx"
+                ? Text.NativeRendering : Text.QtRendering
+    }
 
     // weights (variable fonts cover the range)
     readonly property int wRegular: Font.Normal      // 400

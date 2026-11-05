@@ -200,15 +200,24 @@ qt_add_translations(meeting-assistant-qt
     LUPDATE_OPTIONS -locations none)
 
 # Bundled design fonts (qt-redesign): variable TTFs registered as :/fonts/*,
-# loaded by Theme.qml's FontLoaders. All OFL-licensed (see fonts/OFL-*.txt);
-# packaging must ship the OFL notices and the binary grows accordingly.
+# loaded by Theme.qml's FontLoaders. All OFL-licensed: the license must travel
+# with the fonts, so the install rules below ship every file in MA_FONT_LICENSES.
+# tests/serif_typeface loads the same MA_FONT_FILES.
+set(MA_FONT_FILES
+    fonts/Geist-Variable.ttf
+    fonts/Newsreader-Variable.ttf
+    fonts/Newsreader-Italic-Variable.ttf
+    fonts/SourceSerif4-Variable.ttf
+    fonts/SourceSerif4-Italic-Variable.ttf
+    fonts/JetBrainsMono-Variable.ttf)
+set(MA_FONT_LICENSES
+    fonts/OFL-Geist.txt
+    fonts/OFL-Newsreader.txt
+    fonts/OFL-SourceSerif4.txt
+    fonts/OFL-JetBrainsMono.txt)
 qt_add_resources(meeting-assistant-qt "meety_fonts"
     PREFIX "/"
-    FILES
-        fonts/Geist-Variable.ttf
-        fonts/Newsreader-Variable.ttf
-        fonts/Newsreader-Italic-Variable.ttf
-        fonts/JetBrainsMono-Variable.ttf)
+    FILES ${MA_FONT_FILES})
 
 # Fusion fallback: compiled-in `:/qtquickcontrols2.conf`. Qt Quick Controls
 # reads this at startup; combined with QQuickStyle::setStyle("Fusion") in
@@ -260,11 +269,14 @@ if(APPLE AND MA_MACOS_APP_BUNDLE)
     # LGPLv3: written offer + relink notes travel inside the artefact.
     install(DIRECTORY "${_lic_dir}/"
         DESTINATION "MeetingAssistant.app/Contents/Resources/licenses")
+    install(FILES ${MA_FONT_LICENSES}
+        DESTINATION "MeetingAssistant.app/Contents/Resources/licenses")
 elseif(WIN32)
     install(TARGETS meeting-assistant-qt RUNTIME DESTINATION .)
     install(PROGRAMS "${MEETING_SERVER_BIN}" DESTINATION "."
         RENAME "${_sidecar_installed_name}")
     install(DIRECTORY "${_lic_dir}/" DESTINATION "licenses")
+    install(FILES ${MA_FONT_LICENSES} DESTINATION "licenses")
 else() # Linux (AppImage AppDir / generic prefix)
     install(TARGETS meeting-assistant-qt RUNTIME DESTINATION bin)
     install(PROGRAMS "${MEETING_SERVER_BIN}" DESTINATION bin
@@ -272,6 +284,7 @@ else() # Linux (AppImage AppDir / generic prefix)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/linux/meeting-assistant.desktop"
         DESTINATION share/applications)
     install(DIRECTORY "${_lic_dir}/" DESTINATION share/doc/meeting-assistant/licenses)
+    install(FILES ${MA_FONT_LICENSES} DESTINATION share/doc/meeting-assistant/licenses)
 endif()
 
 # ── Offscreen Qt smoke test (section-08) ─────────────────────────────────────

@@ -66,6 +66,13 @@ Qt 6 is used under **LGPLv3**. Compliance, identically in every artifact:
 
 Static linking would force releasing the app's source — we do not static-link.
 
+### Bundled fonts
+
+The fonts are compiled into the GUI binary and are under the **SIL Open Font
+License**, which requires the license to travel with them. CMake installs each
+`qt-app/fonts/OFL-*.txt` into the same `licenses` folder as above. A new font needs
+its license added to `MA_FONT_LICENSES` in `qt-app/CMakeLists.txt`.
+
 ### Qt Multimedia / FFmpeg backend
 
 The in-card audio player uses **Qt Multimedia**, whose Qt 6.7 backend bundles

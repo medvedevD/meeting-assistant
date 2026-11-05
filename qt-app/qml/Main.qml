@@ -59,7 +59,8 @@ ApplicationWindow {
                           : qsTr("Запуск ядра…")
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
-                    font.family: Theme.fontSerif
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
                     font.pixelSize: Theme.fsTitle
                     font.weight: Theme.wMedium
                     color: Theme.ink

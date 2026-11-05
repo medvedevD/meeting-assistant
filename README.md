@@ -69,4 +69,5 @@ Read more in the [architecture overview](docs/ARCHITECTURE.md). To build and run
 ## License
 
 [MIT](LICENSE). Packaged builds also include Qt and FFmpeg under the LGPL; see
-[`packaging/LICENSES`](packaging/LICENSES).
+[`packaging/LICENSES`](packaging/LICENSES). The bundled fonts are under the SIL Open
+Font License; see [`qt-app/fonts`](qt-app/fonts).

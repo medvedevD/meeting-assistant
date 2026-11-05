@@ -116,7 +116,8 @@ Page {
                 Layout.fillWidth: true
                 text: scr.meetingName
                 elide: Text.ElideRight
-                font.family: Theme.fontSerif
+                font.family: Theme.serifFor(text)
+                renderType: Theme.renderTypeFor(font.family)
                 font.pixelSize: Theme.fsTitle
                 font.weight: Theme.wMedium
                 font.letterSpacing: Theme.tracking(Theme.fsTitle, -0.02)
@@ -191,7 +192,8 @@ Page {
             Layout.fillWidth: true
             horizontalAlignment: Text.AlignHCenter
             text: qsTr("Протокол ещё не сгенерирован")
-            font.family: Theme.fontSerif
+            font.family: Theme.serifFor(text)
+            renderType: Theme.renderTypeFor(font.family)
             font.pixelSize: 28
             font.weight: Theme.wMedium
             font.letterSpacing: Theme.tracking(28, -0.015)
