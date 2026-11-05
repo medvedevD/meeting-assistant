@@ -2,6 +2,9 @@
 members = ["crates/core", "crates/adapters", "crates/api", "crates/app"]
 resolver = "2"
 
+[workspace.package]
+license = "MIT"
+
 [workspace.dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", default-features = false }

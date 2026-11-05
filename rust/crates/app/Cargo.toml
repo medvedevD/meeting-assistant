@@ -2,6 +2,7 @@
 name = "meeting-assistant"
 version = "0.1.0"
 edition = "2021"
+license.workspace = true
 
 [[bin]]
 name = "meeting-assistant"
@@ -19,7 +20,7 @@ path = "src/bin/meeting-server.rs"
 #   cargo build --bin meeting-server --release --features whisper-cuda
 # Requires the matching toolkit installed (CUDA Toolkit / Vulkan SDK). Off by
 # default — the portable build stays CPU-only (macOS still gets Metal). See
-# plans/.../whisper-gpu-acceleration and ADR-006.
+# docs/ARCHITECTURE.md.
 whisper-cuda = ["meeting-adapters/whisper-cuda"]
 whisper-vulkan = ["meeting-adapters/whisper-vulkan"]
 
