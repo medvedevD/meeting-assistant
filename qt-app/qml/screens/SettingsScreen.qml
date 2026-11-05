@@ -3,7 +3,9 @@
 // source of truth: the screen pulls the snapshot via the SettingsStore
 // singleton into an editable `draft`, the panels mutate it, and a single
 // "Сохранить" button PUTs the whole document. db_path / meetings_dir changes
-// are restart-required (decision #2) → a banner, applied on next launch.
+// are restart-required (decision #2) → a banner, applied on next launch. The
+// interface language is not a server setting: LanguagePanel stores it directly,
+// and it shares that banner.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -61,6 +63,7 @@ Page {
             append({ label: qsTr("Шаблоны"), iconName: "doc" })
             append({ label: qsTr("Хранилище"), iconName: "storage" })
             append({ label: qsTr("Запись"), iconName: "mic" })
+            append({ label: qsTr("Язык"), iconName: "globe" })
         }
     }
 
@@ -236,7 +239,7 @@ Page {
                 // restart-required banner
                 Rectangle {
                     Layout.fillWidth: true
-                    visible: scr.restartNeeded
+                    visible: scr.restartNeeded || appLanguage.restartRequired
                     implicitHeight: restartText.implicitHeight + 24
                     color: Theme.accentTint
                     Text {
@@ -247,8 +250,16 @@ Page {
                         font.family: Theme.fontUi
                         font.pixelSize: Theme.fsBody
                         color: Theme.ink2
-                        text: qsTr("Изменение пути к базе данных или каталога встреч " +
-                                   "вступит в силу после перезапуска приложения.")
+                        text: {
+                            var lines = []
+                            if (scr.restartNeeded)
+                                lines.push(qsTr("Изменение пути к базе данных или каталога встреч " +
+                                                "вступит в силу после перезапуска приложения."))
+                            if (appLanguage.restartRequired)
+                                lines.push(qsTr("Новый язык интерфейса начнёт работать после " +
+                                                "перезапуска приложения."))
+                            return lines.join("\n")
+                        }
                     }
                 }
                 // insecure-secrets banner (keyring unavailable → plaintext fallback).
@@ -283,6 +294,7 @@ Page {
                     TemplatesPanel { scr: scr }
                     StoragePanel   { scr: scr }
                     RecordingPanel { scr: scr }
+                    LanguagePanel  { }
                 }
             }
         }

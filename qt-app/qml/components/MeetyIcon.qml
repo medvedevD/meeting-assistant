@@ -22,6 +22,7 @@ Image {
 
     readonly property var _bodies: ({
         "mic": '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>',
+        "globe": '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.500 5.700 12 3z"/>',
         "play": '<path d="M7 5l12 7-12 7z" fill="currentColor"/>',
         "pause": '<rect x="7" y="5" width="3.5" height="14" rx="1" fill="currentColor"/><rect x="13.5" y="5" width="3.5" height="14" rx="1" fill="currentColor"/>',
         "stop": '<rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/>',

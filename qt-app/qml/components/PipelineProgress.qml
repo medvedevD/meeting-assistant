@@ -3,8 +3,9 @@
 // {stage, sub, percent} (in-memory) while active and a terminal `error_class`
 // on failure. Collapses the 7 backend PipelineStage values into 3 visible
 // steps (Подготовка → Транскрипция → Протокол) with the active step lit, a
-// percent bar, and a sub-status line. On failure, renders the localized
-// error (i18n/errors.js) and optionally an "Открыть настройки" button.
+// percent bar, and a sub-status line localized from the stage (the backend's
+// `sub` text is not shown). On failure, renders the localized error
+// (i18n/errors.js) and optionally an "Открыть настройки" button.
 import QtQuick
 import QtQuick.Layouts
 import MeetingAssistant
@@ -38,7 +39,6 @@ ColumnLayout {
     readonly property var progress: job.progress || null
     readonly property string stage: progress ? progress.stage : "queued"
     readonly property int percent: progress ? progress.percent : 0
-    readonly property string sub: progress ? progress.sub : ""
     readonly property string errorClass: job.error_class || ""
     readonly property bool failed: status === "failed"
     readonly property bool done: status === "done"
@@ -80,7 +80,6 @@ ColumnLayout {
 
     function statusSubline() {
         if (done) return qsTr("Протокол сохранён локально")
-        if (sub.length > 0) return sub
         switch (stage) {
         case "queued": return qsTr("В очереди…")
         case "loading_model": return qsTr("Загрузка модели…")

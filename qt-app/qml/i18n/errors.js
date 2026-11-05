@@ -2,6 +2,8 @@
 // to a localized, user-facing message + whether the error is fixable in
 // Settings (drives an "Открыть настройки" affordance). Imported as a JS library:
 //   import "../i18n/errors.js" as Errors
+// qsTr works here: in a .pragma library it takes its context from this file's
+// name, which is the context lupdate records ("errors").
 .pragma library
 
 // Returns { title, hint, settings, detail } for an error_class. `detail` is the
@@ -20,72 +22,72 @@ function _describe(errorClass, rawMessage) {
     switch (errorClass) {
     case "api_auth":
         return {
-            title: "LLM не настроена",
-            hint: "API-ключ не задан или неверен. Укажите ключ выбранного провайдера в настройках.",
+            title: qsTr("LLM не настроена"),
+            hint: qsTr("API-ключ не задан или неверен. Укажите ключ выбранного провайдера в настройках."),
             settings: true
         }
     case "llm_model_unavailable":
         return {
-            title: "Модель недоступна",
-            hint: "Провайдер отказал в доступе к выбранной модели — обычно её нет в вашем тарифе, название указано с ошибкой или неверен базовый URL. Выберите другую модель в настройках.",
+            title: qsTr("Модель недоступна"),
+            hint: qsTr("Провайдер отказал в доступе к выбранной модели — обычно её нет в вашем тарифе, название указано с ошибкой или неверен базовый URL. Выберите другую модель в настройках."),
             settings: true
         }
     case "llm_rejected":
         return {
-            title: "Провайдер отклонил запрос",
-            hint: "Проверьте параметры модели в настройках — например, максимум токенов ответа.",
+            title: qsTr("Провайдер отклонил запрос"),
+            hint: qsTr("Проверьте параметры модели в настройках — например, максимум токенов ответа."),
             settings: true
         }
     case "api_quota":
         return {
-            title: "Превышена квота API",
-            hint: "У провайдера закончились кредиты или достигнут лимит запросов. Проверьте баланс или смените провайдера в настройках.",
+            title: qsTr("Превышена квота API"),
+            hint: qsTr("У провайдера закончились кредиты или достигнут лимит запросов. Проверьте баланс или смените провайдера в настройках."),
             settings: true
         }
     case "network_timeout":
         return {
-            title: "Сетевая ошибка",
-            hint: "Не удалось связаться с провайдером. Проверьте подключение к интернету и базовый URL в настройках.",
+            title: qsTr("Сетевая ошибка"),
+            hint: qsTr("Не удалось связаться с провайдером. Проверьте подключение к интернету и базовый URL в настройках."),
             settings: true
         }
     case "audio_corrupt":
         return {
-            title: "Не удалось прочитать аудио",
-            hint: "Файл повреждён или имеет неподдерживаемый формат. Попробуйте другой файл.",
+            title: qsTr("Не удалось прочитать аудио"),
+            hint: qsTr("Файл повреждён или имеет неподдерживаемый формат. Попробуйте другой файл."),
             settings: false
         }
     case "model_missing":
         return {
-            title: "Модель Whisper не найдена",
-            hint: "Укажите корректный путь к файлу модели в настройках транскрайбера.",
+            title: qsTr("Модель Whisper не найдена"),
+            hint: qsTr("Укажите корректный путь к файлу модели в настройках транскрайбера."),
             settings: true
         }
     case "model_not_selected":
         return {
-            title: "Модель Whisper не выбрана",
-            hint: "Выберите модель транскрипции в настройках.",
+            title: qsTr("Модель Whisper не выбрана"),
+            hint: qsTr("Выберите модель транскрипции в настройках."),
             settings: true
         }
     case "worker_killed":
         return {
-            title: "Обработка прервана",
-            hint: "Процесс обработки был остановлен. Попробуйте ещё раз.",
+            title: qsTr("Обработка прервана"),
+            hint: qsTr("Процесс обработки был остановлен. Попробуйте ещё раз."),
             settings: false
         }
     case "cancelled":
         return {
-            title: "Отменено",
-            hint: "Задача прервана по вашему запросу. Запустите её снова, если нужно.",
+            title: qsTr("Отменено"),
+            hint: qsTr("Задача прервана по вашему запросу. Запустите её снова, если нужно."),
             settings: false,
             neutral: true
         }
     case "unknown":
     default:
         return {
-            title: "Не удалось обработать встречу",
+            title: qsTr("Не удалось обработать встречу"),
             hint: rawMessage && rawMessage.length > 0
                   ? rawMessage
-                  : "Произошла непредвиденная ошибка.",
+                  : qsTr("Произошла непредвиденная ошибка."),
             settings: false
         }
     }

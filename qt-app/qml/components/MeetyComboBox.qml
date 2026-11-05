@@ -1,5 +1,5 @@
 // Styled ComboBox for the redesign. Keeps the native ComboBox API while
-// replacing the Fusion visuals with the meety field/menu treatment.
+// replacing the Fusion visuals with the app's field/menu treatment.
 import QtQuick
 import QtQuick.Controls.Basic
 import MeetingAssistant

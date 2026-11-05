@@ -13,7 +13,9 @@ project(meeting-assistant-qt
 # Qt 6.7 it loads the ffmpeg media backend at runtime — the platform deploy
 # tools bundle it, but its plugins must be covered by macOS signing/notarization
 # and the AppImage/Windows layouts (see packaging/).
-find_package(Qt6 6.7 REQUIRED COMPONENTS Quick QuickControls2 Network Multimedia Svg)
+# LinguistTools provides lupdate/lrelease for the translations below.
+find_package(Qt6 6.7 REQUIRED COMPONENTS
+    Quick QuickControls2 Network Multimedia Svg LinguistTools)
 
 qt_standard_project_setup(REQUIRES 6.7)
 
@@ -60,6 +62,7 @@ endif()
 qt_add_executable(meeting-assistant-qt
     src/main.cpp
     src/AppPreferences.h src/AppPreferences.cpp
+    src/Language.h         src/Language.cpp
     src/Logging.h          src/Logging.cpp
     src/SidecarManager.h   src/SidecarManager.cpp
     src/ApiClient.h        src/ApiClient.cpp
@@ -160,6 +163,7 @@ qt_add_qml_module(meeting-assistant-qt
         qml/screens/settings/TemplatesPanel.qml
         qml/screens/settings/StoragePanel.qml
         qml/screens/settings/RecordingPanel.qml
+        qml/screens/settings/LanguagePanel.qml
         qml/components/PipelineProgress.qml
         qml/components/MeetyButton.qml
         qml/components/MeetyComboBox.qml
@@ -186,6 +190,14 @@ qt_add_qml_module(meeting-assistant-qt
         qml/theme/Theme.qml
         qml/theme/ThemeGallery.qml
         qml/i18n/errors.js)
+
+# Russian is the source language of the qsTr strings, so English is the only
+# translation. The .qm is embedded as :/i18n/meeting-assistant_en.qm (Language.cpp
+# loads it). Refresh the .ts with `cmake --build <dir> --target update_translations`.
+qt_add_translations(meeting-assistant-qt
+    TS_FILES i18n/meeting-assistant_en.ts
+    RESOURCE_PREFIX "/i18n"
+    LUPDATE_OPTIONS -locations none)
 
 # Bundled design fonts (qt-redesign): variable TTFs registered as :/fonts/*,
 # loaded by Theme.qml's FontLoaders. All OFL-licensed (see fonts/OFL-*.txt);

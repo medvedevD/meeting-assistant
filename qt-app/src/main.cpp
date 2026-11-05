@@ -1,6 +1,7 @@
 #include "ApiClient.h"
 #include "AppPreferences.h"
 #include "JobPoller.h"
+#include "Language.h"
 #include "Logging.h"
 #include "PathUtils.h"
 #include "SidecarManager.h"
@@ -22,6 +23,12 @@ int main(int argc, char *argv[]) {
     // Tee logs (incl. relayed sidecar stderr) to a file — a Finder/Explorer/
     // .desktop launch has no terminal, so this is the only diagnosable record.
     logging::installFileLogger();
+
+    // Before the QML engine: bindings translate when they first evaluate.
+    Language language(AppPreferences::firstRunPreviewFromEnvironment());
+    language.apply();
+    qInfo("Interface language: %s (choice: %s)", qPrintable(language.active()),
+          qPrintable(language.choice()));
 
     auto loadFont = [](const QString &path) -> QString {
         const int id = QFontDatabase::addApplicationFont(path);
@@ -54,6 +61,7 @@ int main(int argc, char *argv[]) {
     qInfo("Qt Quick Controls style: %s", qPrintable(QQuickStyle::name()));
 
     SidecarManager sidecar;
+    sidecar.setLanguage(language.active());
     ApiClient api;
     AppPreferences appPreferences(
         AppPreferences::firstRunPreviewFromEnvironment());
@@ -83,6 +91,8 @@ int main(int argc, char *argv[]) {
         QStringLiteral("appPreferences"), &appPreferences);
     engine.rootContext()->setContextProperty(QStringLiteral("pathUtils"),
                                              &pathUtils);
+    engine.rootContext()->setContextProperty(QStringLiteral("appLanguage"),
+                                             &language);
     engine.rootContext()->setContextProperty(QStringLiteral("controlsStyle"),
                                               QQuickStyle::name());
     // qt-redesign Phase-1 dev affordance: MEETY_THEME_GALLERY=1 swaps the root

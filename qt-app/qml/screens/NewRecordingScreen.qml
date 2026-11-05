@@ -429,7 +429,7 @@ Page {
                     Text {
                         Layout.fillWidth: true
                         Layout.bottomMargin: 28
-                        text: qsTr("Дайте встрече название — остальное meety сделает сам.")
+                        text: qsTr("Дайте встрече название — остальное Meeting Assistant сделает сам.")
                         font.family: Theme.fontSerif
                         font.pixelSize: 16
                         font.italic: true
@@ -533,7 +533,7 @@ Page {
                         Layout.fillWidth: true
                         Layout.topMargin: 8
                         Layout.bottomMargin: 18
-                        text: qsTr("Запись системного звука требует разрешения «Запись экрана» в macOS — meety записывает только звук.")
+                        text: qsTr("Запись системного звука требует разрешения «Запись экрана» в macOS — Meeting Assistant записывает только звук.")
                         font.family: Theme.fontUi
                         font.pixelSize: Theme.fsSmall
                         color: Theme.ink3
@@ -600,7 +600,7 @@ Page {
                             }
                             Text {
                                 Layout.fillWidth: true
-                                text: qsTr("wav · mp3 · m4a · flac · ogg — meety импортирует и поставит в очередь на транскрипцию")
+                                text: qsTr("wav · mp3 · m4a · flac · ogg — Meeting Assistant импортирует и поставит в очередь на транскрипцию")
                                 horizontalAlignment: Text.AlignHCenter
                                 wrapMode: Text.WordWrap
                                 font.family: Theme.fontUi

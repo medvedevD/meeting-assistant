@@ -117,7 +117,7 @@ Page {
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
                     lineHeight: 1.45
-                    text: qsTr("Или начните новую запись — meety запишет, расшифрует и подготовит протокол.")
+                    text: qsTr("Или начните новую запись — Meeting Assistant запишет, расшифрует и подготовит протокол.")
                     font.family: Theme.fontUi
                     font.pixelSize: Theme.fsBodyLg
                     color: Theme.ink3
@@ -243,7 +243,7 @@ Page {
                             Layout.alignment: Qt.AlignVCenter
                         }
                         Text {
-                            text: "meety"
+                            text: "Meeting Assistant"
                             font.family: Theme.fontSerif
                             font.pixelSize: 26
                             font.weight: Theme.wMedium
@@ -295,7 +295,7 @@ Page {
                                ? qsTr("Разрешите доступ к микрофону и «Запись экрана»")
                                : qsTr("Разрешите доступ к микрофону")
                         desc: Qt.platform.os === "osx"
-                              ? qsTr("Второе разрешение нужно только для системного звука. Снимки экрана meety не делает.")
+                              ? qsTr("Второе разрешение нужно только для системного звука. Снимки экрана Meeting Assistant не делает.")
                               : qsTr("Источник системного звука можно выбрать на экране записи, если он доступен в системе.")
                     }
                     WelcomeBullet {

@@ -139,6 +139,8 @@ void SidecarManager::spawnProcess() {
     // primary). The server polls this PID (~1 Hz) and also detects reparenting.
     args << QStringLiteral("--parent-pid")
          << QString::number(QCoreApplication::applicationPid());
+    if (!m_language.isEmpty())
+        args << QStringLiteral("--language") << m_language;
 
     // May append --parent-pipe-fd and install the child-process modifier
     // (POSIX). Must run before setArguments so the fd arg is not dropped.
@@ -319,9 +321,7 @@ void SidecarManager::onProcessFinished(int exitCode,
         return; // expected exit — nothing to recover
 
     if (exitCode == kExitSingletonBusy) {
-        setState(Failed,
-                 QStringLiteral("Another instance of Meeting Assistant is "
-                                "already running."));
+        setState(Failed, tr("Другой экземпляр Meeting Assistant уже запущен."));
         return;
     }
 

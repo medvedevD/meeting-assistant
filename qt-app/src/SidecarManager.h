@@ -53,6 +53,10 @@ public:
     quint32 serverMinProtocol() const { return m_serverMinProtocol; }
     QString serverBuild() const { return m_serverBuild; }
 
+    // Passed to the sidecar as `--language` on every spawn; it decides which
+    // bundled templates get seeded. Set before start().
+    void setLanguage(const QString &language) { m_language = language; }
+
     // Begin the spawn/handshake/health sequence (idempotent if already live).
     void start();
 
@@ -99,6 +103,7 @@ private:
     QString m_lastError;
     QString m_baseUrl;
     QString m_token;
+    QString m_language;
     quint16 m_port = 0;
     quint32 m_clientProtocol = 0;
     quint32 m_serverProtocol = 0;

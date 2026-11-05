@@ -129,8 +129,9 @@ Item {
         var d = new Date((unixSec || 0) * 1000)
         var now = new Date()
         if (_sameDay(d, now)) return Qt.formatTime(d, "HH:mm")
-        if ((now - d) / 86400000 < 7) return Qt.formatDateTime(d, "ddd")
-        return Qt.formatDateTime(d, "d MMM")
+        // Not Qt.formatDateTime: with a format string it ignores the locale.
+        if ((now - d) / 86400000 < 7) return d.toLocaleString(Qt.locale(), "ddd")
+        return d.toLocaleString(Qt.locale(), "d MMM")
     }
     function compactInitials(name) {
         var s = (name || "").trim()
@@ -226,15 +227,20 @@ Item {
                     Layout.rightMargin: 12
                     Layout.topMargin: 14
                     Layout.bottomMargin: 10
-                    spacing: 8
+                    // Tight enough to fit the jobs badge too: at Theme.sidebarWidth
+                    // a wider row would push the whole sidebar column past its edge.
+                    spacing: 2
 
                     MeetyWordmark { size: 26 }
+                    // Stacked: one line does not fit beside the header buttons.
                     Text {
-                        text: "meety"
+                        Layout.leftMargin: 6
+                        text: "Meeting\nAssistant"
                         font.family: Theme.fontSerif
                         font.weight: Theme.wMedium
-                        font.pixelSize: 22
-                        font.letterSpacing: Theme.tracking(22, -0.02)
+                        font.pixelSize: 15
+                        font.letterSpacing: Theme.tracking(15, -0.01)
+                        lineHeight: 0.9
                         color: Theme.ink
                     }
                     Item { Layout.fillWidth: true }
