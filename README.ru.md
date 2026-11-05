@@ -6,124 +6,69 @@
   </picture>
 </h1>
 
+[![CI](https://github.com/medvedevD/meeting-assistant/actions/workflows/qt-ci.yml/badge.svg?branch=main)](https://github.com/medvedevD/meeting-assistant/actions/workflows/qt-ci.yml)
+[![Release](https://img.shields.io/github/v/release/medvedevD/meeting-assistant?include_prereleases&label=release)](https://github.com/medvedevD/meeting-assistant/releases)
+[![License: MIT](https://img.shields.io/github/license/medvedevD/meeting-assistant)](LICENSE)
+
 [English](README.md) | **Русский**
 
-Десктопное приложение для записи встреч, локальной расшифровки речи и
-подготовки протоколов с помощью LLM.
+Запишите встречу и получите расшифровку и готовый протокол. Речь распознаётся прямо на
+вашем компьютере, а протокол пишет выбранная вами нейросеть.
 
-> Проект находится на стадии alpha. Сборки предназначены для тестирования и
-> пока не подписаны коммерческими сертификатами Apple и Microsoft.
+> **Alpha.** Сборки пока не подписаны коммерческими сертификатами, поэтому при первом
+> запуске macOS и Windows покажут предупреждение.
 
 ## Возможности
 
-- запись микрофона, системного звука или смешанного источника;
-- локальная транскрипция через Whisper;
-- генерация протокола по редактируемым шаблонам;
-- Anthropic, OpenAI, Gemini, Mistral и локальная Ollama;
-- история встреч, повторная обработка и встроенное воспроизведение записей;
-- хранение данных и настроек на компьютере пользователя.
+- **Любой источник:** микрофон, системный звук или оба сразу; можно загрузить готовый файл.
+- **Расшифровка без облака:** Whisper работает локально, аудио не покидает компьютер.
+- **Протоколы по шаблонам:** дейлики, встречи 1-на-1, командные встречи; шаблоны можно менять.
+- **Любая нейросеть:** Anthropic, OpenAI, Gemini или Mistral с вашим ключом либо Ollama офлайн.
+- **История встреч:** записи, расшифровки и протоколы хранятся локально; встречу можно переслушать или обработать заново.
 
-## Установка
+## Скачать
 
-Готовые сборки находятся в
-[GitHub Releases](https://github.com/medvedevD/meeting-assistant/releases).
-
-### macOS
-
-Рекомендуемый бесплатный канал:
+Последняя сборка для macOS, Windows и Linux лежит в
+[Releases](https://github.com/medvedevD/meeting-assistant/releases). На macOS можно
+установить через Homebrew:
 
 ```bash
-brew tap medvedevd/meeting-assistant
-brew install --cask meeting-assistant
+brew tap medvedevd/meeting-assistant && brew install --cask meeting-assistant
 ```
 
-Если Homebrew попросит доверять стороннему tap, выполните указанную им команду
-`brew trust`, затем повторите установку.
+Как пройти предупреждения при первом запуске и настроить приложение, описано в
+[инструкции по установке](docs/INSTALL.ru.md).
 
-Обновление:
+## Приватность
 
-```bash
-brew upgrade --cask meeting-assistant
-```
+Аудио обрабатывается только на вашем компьютере. Расшифровка уходит выбранному вами
+LLM-провайдеру и только при создании протокола. С Ollama данные вообще не покидают
+компьютер. API-ключи хранятся в системном хранилище ключей, если оно доступно.
 
-Также можно скачать `MeetingAssistant-*.dmg` из Releases:
+## Как это устроено
 
-1. Откройте DMG и перетащите MeetingAssistant в Applications.
-2. Запустите приложение из Applications.
-3. Если macOS заблокирует первый запуск, откройте
-   **System Settings → Privacy & Security** и нажмите **Open Anyway**.
+**Стек:** Rust, Qt 6 (QML и C++), whisper.cpp, SQLite, Axum.
 
-DMG подписан ad-hoc, но пока не нотарифицирован Apple. Полностью убрать
-Gatekeeper-предупреждение можно только после перехода на Developer ID и
-notarization.
+- **Два процесса:** интерфейс на Qt запускает sidecar на Rust и общается с ним по локальному HTTP с токеном на каждый запуск, поэтому сбой в нативном коде не роняет интерфейс.
+- **Чистая архитектура:** доменная логика зависит только от интерфейсов, а Whisper, аудио, хранилище и LLM-провайдеры подключаются как адаптеры.
+- **Надёжные задачи:** очередь в SQLite сохраняет результат до завершения задачи, поэтому повторная попытка не запускает Whisper и платный запрос к LLM заново.
+- **Нативный звук в каждой ОС:** ScreenCaptureKit на macOS, WASAPI loopback на Windows, PulseAudio/PipeWire на Linux.
+- **Релизы с проверками:** тег версии собирает установщики только после проверки протокола, форматирования, Clippy и тестов.
 
-### Windows
+Подробнее в [описании архитектуры](docs/ARCHITECTURE.md). Как собрать и запустить проект, описано в [руководстве разработчика](docs/DEVELOPMENT.md). Оба документа на английском.
 
-Скачайте `MeetingAssistant-Setup-*.exe` из Releases и запустите установщик.
-Поскольку alpha-сборка пока не подписана, SmartScreen может потребовать выбрать
-**More info → Run anyway**.
+## Карта репозитория
 
-### Linux
+| Путь | Содержимое |
+|---|---|
+| `rust/` | Ядро, адаптеры, HTTP API и sidecar |
+| `qt-app/` | Интерфейс на QML и C++ с тестами |
+| `prompts/` | Встроенные шаблоны протоколов |
+| `packaging/` | Сборка установщиков, лицензии и чек-лист релиза |
+| `docs/` | Установка, разработка, архитектура и логотипы |
+| `plans/`, `backlog/` | Текущие задачи и идеи на будущее |
 
-Скачайте AppImage и сделайте его исполняемым:
+## Лицензия
 
-```bash
-chmod +x MeetingAssistant-*.AppImage
-./MeetingAssistant-*.AppImage
-```
-
-## Первый запуск
-
-1. Разрешите приложению доступ к микрофону. На macOS для записи системного
-   звука также потребуется разрешение Screen Recording.
-2. Выберите или добавьте модель Whisper в настройках.
-3. Настройте LLM-провайдера. Для облачных провайдеров нужен собственный
-   API-ключ; Ollama работает локально без ключа.
-4. Создайте запись, дождитесь транскрипции и сформируйте протокол.
-
-Аудио обрабатывается Whisper локально и не отправляется в облако. Текст
-транскрипции передаётся наружу только выбранному пользователем LLM-провайдеру
-при генерации протокола.
-
-## Разработка
-
-Требуются Rust, CMake и Qt 6.7+ с модулями Quick, Network, Multimedia и Svg.
-
-Основной dev workflow:
-
-```bash
-./run-qt.sh
-```
-
-Полезные варианты:
-
-```bash
-./run-qt.sh --debug
-./run-qt.sh --no-run
-FIRST_RUN=1 ./run-qt.sh
-```
-
-Тесты:
-
-```bash
-cargo test --manifest-path rust/Cargo.toml
-ctest --test-dir qt-app/build
-```
-
-## Архитектура
-
-- `rust/` — Rust core, адаптеры, HTTP API и sidecar `meeting-server`;
-- `qt-app/` — Qt 6 / QML интерфейс;
-- `prompts/` — встроенные шаблоны протоколов;
-- `packaging/` — сборка установочных артефактов для macOS, Linux и Windows.
-
-GUI запускает sidecar рядом со своим executable и взаимодействует с ним по
-локальному HTTP с одноразовым токеном.
-
-## Диагностика
-
-Логи приложения:
-
-- macOS: `~/Library/Application Support/meeting-assistant/logs/meeting-assistant.log`
-- Linux: `~/.local/share/meeting-assistant/logs/meeting-assistant.log`
-- Windows: `%LOCALAPPDATA%\meeting-assistant\logs\meeting-assistant.log`
+[MIT](LICENSE). В готовые сборки также входят Qt и FFmpeg под LGPL, см.
+[`packaging/LICENSES`](packaging/LICENSES).
