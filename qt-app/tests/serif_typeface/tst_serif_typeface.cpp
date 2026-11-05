@@ -103,8 +103,11 @@ void verifyDrawnIn(const QObject *theme, const QObject *root, const QString &fam
     int serifTexts = 0;
     for (const QQuickItem *text : std::as_const(texts)) {
         QFont font = text->property("font").value<QFont>();
-        if (font.family() == uiFont || font.family() == monoFont)
+        if (font.family() == uiFont || font.family() == monoFont) {
+            // No optical size axis, so these have no reason to leave the default.
+            QCOMPARE(text->property("renderType").toInt(), kQtRendering);
             continue;
+        }
         ++serifTexts;
 
         const QString plain = text->property("text").toString().remove(
@@ -126,8 +129,10 @@ void verifyDrawnIn(const QObject *theme, const QObject *root, const QString &fam
                                     .arg(plain, families.join(QStringLiteral(", ")))));
         }
 
+        // Qt's default renderer sets both serifs too tight on macOS: it draws the
+        // display cut and spaces it for the real size.
 #ifdef Q_OS_MACOS
-        const int expectedRenderType = family == kSourceSerif ? kNativeRendering : kQtRendering;
+        const int expectedRenderType = kNativeRendering;
 #else
         const int expectedRenderType = kQtRendering;
 #endif

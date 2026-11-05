@@ -4,11 +4,40 @@
 #include <QGuiApplication>
 #include <QQmlComponent>
 #include <QQmlEngine>
+#include <QQuickItem>
 #include <QQuickStyle>
 #include <QTemporaryDir>
 #include <QtTest>
 
 #include <memory>
+#include <utility>
+
+namespace {
+
+void collectTexts(const QQuickItem *item, QList<const QQuickItem *> &out) {
+    for (const QQuickItem *child : item->childItems()) {
+        if (child->metaObject()->indexOfProperty("renderType") >= 0)
+            out.append(child);
+        collectTexts(child, out);
+    }
+}
+
+enum class Drawn { Upright, ThroughALayer, Transformed };
+
+// What reaches `text` first on its way up the tree: a layer, which draws it flat
+// before anything can turn it, or a rotation or scale, which applies to it live.
+Drawn howDrawn(const QQuickItem *text) {
+    for (const QQuickItem *item = text; item; item = item->parentItem()) {
+        const auto *layer = item->property("layer").value<QObject *>();
+        if (layer && layer->property("enabled").toBool())
+            return Drawn::ThroughALayer;
+        if (item->rotation() != 0 || item->scale() != 1)
+            return Drawn::Transformed;
+    }
+    return Drawn::Upright;
+}
+
+} // namespace
 
 class FakeMeetingStore final : public QObject {
     Q_OBJECT
@@ -87,6 +116,7 @@ private slots:
     void existingProfileCompletesOnboarding();
     void deletingLastMeetingDoesNotRestoreOnboarding();
     void previewForcesOnboarding();
+    void rotatedCardDrawsItsTextFlatOnMacOS();
 
 private:
     std::unique_ptr<QObject> createWelcome(FakeMeetingStore &store,
@@ -237,6 +267,41 @@ void FirstRunTest::previewForcesOnboarding() {
     QCOMPARE(welcome->property("viewState").toString(),
              QStringLiteral("firstRun"));
     QCOMPARE(preferences.completionCalls(), 0);
+}
+
+// Native text can't follow a rotation: each glyph stays upright and the line comes
+// out stair-stepped. On macOS, where the card's serif text is native, a layer has to
+// draw the text flat first. Other systems keep live text, which rotates cleanly.
+void FirstRunTest::rotatedCardDrawsItsTextFlatOnMacOS() {
+    FakeMeetingStore store;
+    store.setStatus(QStringLiteral("empty"));
+    FakePreferences preferences;
+
+    const auto welcome = createWelcome(store, preferences);
+    QVERIFY(welcome);
+    QCOMPARE(welcome->property("viewState").toString(),
+             QStringLiteral("firstRun"));
+
+    const auto *root = qobject_cast<const QQuickItem *>(welcome.get());
+    QVERIFY(root != nullptr);
+    QList<const QQuickItem *> texts;
+    collectTexts(root, texts);
+
+#ifdef Q_OS_MACOS
+    const Drawn expected = Drawn::ThroughALayer;
+#else
+    const Drawn expected = Drawn::Transformed;
+#endif
+    int onCard = 0;
+    for (const QQuickItem *text : std::as_const(texts)) {
+        const Drawn drawn = howDrawn(text);
+        if (drawn == Drawn::Upright)
+            continue;
+        ++onCard;
+        QVERIFY2(drawn == expected, qPrintable(text->property("text").toString()));
+    }
+    // Stops a screen that never built the card from passing.
+    QVERIFY2(onCard >= 8, qPrintable(QString::number(onCard)));
 }
 
 int main(int argc, char *argv[]) {

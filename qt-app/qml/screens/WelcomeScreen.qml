@@ -422,6 +422,13 @@ Page {
                 anchors.fill: parent
                 anchors.margins: 30
                 spacing: 0
+                // Native text can't follow the card's rotation: each glyph stays
+                // upright and the line comes out stair-stepped. Draw the text flat
+                // and rotate the picture of it. Mipmaps keep it smooth at the scale
+                // a narrow window applies.
+                layer.enabled: mockTitle.renderType === Text.NativeRendering
+                layer.smooth: true
+                layer.mipmap: true
 
                 Text {
                     Layout.fillWidth: true
@@ -435,6 +442,7 @@ Page {
                 }
 
                 Text {
+                    id: mockTitle
                     Layout.fillWidth: true
                     text: qsTr("Платежный флоу — план релиза")
                     wrapMode: Text.WordWrap
