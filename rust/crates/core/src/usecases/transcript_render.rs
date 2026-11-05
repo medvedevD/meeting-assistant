@@ -33,8 +33,8 @@ pub struct TranscriptMeta<'a> {
 /// falls back to the flat `transcript.text` so the file is never empty.
 pub fn render_markdown(t: &Transcript, meta: &TranscriptMeta) -> String {
     let mut out = String::new();
-    out.push_str(&format!("# Транскрипция: {}\n", meta.title));
-    out.push_str(&format!("**Дата:** {}\n\n", meta.date));
+    out.push_str(&format!("# {}\n", meta.title));
+    out.push_str(&format!("{}\n\n", meta.date));
 
     let mut wrote_any = false;
     let mut prev_end_ms: Option<u64> = None;
@@ -138,7 +138,7 @@ mod tests {
     fn header_is_rendered() {
         let t = transcript(vec![seg(0, 1000, "привет")], "привет");
         let md = render_markdown(&t, &meta());
-        assert!(md.starts_with("# Транскрипция: 1x1-sergey-riazancev\n**Дата:** 24.04.2026\n\n"));
+        assert!(md.starts_with("# 1x1-sergey-riazancev\n24.04.2026\n\n"));
     }
 
     #[test]

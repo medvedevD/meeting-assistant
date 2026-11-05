@@ -19,7 +19,7 @@ fn derive_name(source: &Path) -> String {
         .and_then(|s| s.to_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| "Импортированная встреча".to_string())
+        .unwrap_or_else(|| "Imported meeting".to_string())
 }
 
 /// Register an external audio file as a new meeting.
@@ -75,6 +75,12 @@ pub async fn import_audio(
 mod tests {
     use super::*;
     use crate::fakes::{FakeJobRepo, FakeMeetingFileStore, FakeMeetingRepo};
+
+    #[test]
+    fn name_comes_from_the_file_with_an_english_fallback() {
+        assert_eq!(derive_name(Path::new("/downloads/standup.wav")), "standup");
+        assert_eq!(derive_name(Path::new("/")), "Imported meeting");
+    }
 
     #[tokio::test]
     async fn copy_import_places_file_under_recordings_dir_and_enqueues() {

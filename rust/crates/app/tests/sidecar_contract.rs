@@ -456,7 +456,7 @@ fn settings_get_put_roundtrip_and_secret_flag() {
         .expect("get settings")
         .json()
         .expect("json");
-    assert_eq!(snap["transcriber"]["language"], "ru", "default language");
+    assert_eq!(snap["transcriber"]["language"], "auto", "default language");
     assert_eq!(snap["transcriber"]["model_source"], "managed");
     assert_eq!(snap["transcriber"]["model_id"], serde_json::Value::Null);
     assert_eq!(
@@ -639,7 +639,7 @@ fn templates_crud_lifecycle_and_traversal_rejected() {
     let del_body: serde_json::Value = del.json().expect("json");
     assert_eq!(del_body["deleted"], name);
     assert!(
-        del_body["warning"].is_null(),
+        del_body["warning"].is_null() && del_body["warning_code"].is_null(),
         "no warning expected: {del_body}"
     );
 
@@ -650,6 +650,88 @@ fn templates_crud_lifecycle_and_traversal_rejected() {
         .send()
         .expect("get deleted");
     assert_eq!(after.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+/// Names of the templates a sidecar spawned with `args` lists, sorted.
+fn seeded_template_names(args: &[&str]) -> Vec<String> {
+    let data = tempfile::tempdir().expect("tempdir");
+    let data_path = data.path().to_path_buf();
+    let args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+    let s = Sidecar::spawn_in(&data_path, &args, data);
+    let list: serde_json::Value = client()
+        .get(format!("{}/api/v1/templates", s.base_url()))
+        .bearer_auth(&s.handshake.token)
+        .send()
+        .expect("list templates")
+        .json()
+        .expect("json");
+    let mut names: Vec<String> = list["templates"]
+        .as_array()
+        .expect("templates array")
+        .iter()
+        .map(|t| t["name"].as_str().expect("name").to_string())
+        .collect();
+    names.sort_unstable();
+    names
+}
+
+#[test]
+fn english_launch_seeds_only_english_templates() {
+    assert_eq!(
+        seeded_template_names(&["--language", "en"]),
+        ["1-on-1", "Daily stand-up", "Simple minutes", "Team meeting"]
+    );
+}
+
+#[test]
+fn launch_without_a_language_keeps_seeding_russian_templates() {
+    let russian = ["1-на-1", "Дейлик", "Командная встреча", "Простой протокол"];
+    assert_eq!(seeded_template_names(&[]), russian);
+    // An unknown code falls back the same way instead of stopping the sidecar.
+    assert_eq!(seeded_template_names(&["--language", "de"]), russian);
+}
+
+#[test]
+fn deleting_the_default_template_returns_a_localizable_notice_code() {
+    let s = Sidecar::spawn();
+    let c = client();
+    let tok = &s.handshake.token;
+    let base = format!("{}/api/v1/templates", s.base_url());
+    let settings_url = format!("{}/api/v1/settings", s.base_url());
+
+    let mut snap: serde_json::Value = c
+        .get(&settings_url)
+        .bearer_auth(tok)
+        .send()
+        .expect("get settings")
+        .json()
+        .expect("json");
+    snap["default_template"] = serde_json::json!("Дейлик");
+    let put = c
+        .put(&settings_url)
+        .bearer_auth(tok)
+        .json(&snap)
+        .send()
+        .expect("put settings");
+    assert_eq!(put.status(), reqwest::StatusCode::OK);
+
+    let body: serde_json::Value = c
+        .delete(format!("{base}/Дейлик"))
+        .bearer_auth(tok)
+        .send()
+        .expect("delete template")
+        .json()
+        .expect("json");
+
+    assert_eq!(body["deleted"], "Дейлик");
+    assert_eq!(body["warning_code"], "default_template_reset");
+    assert!(body["warning_detail"].is_null(), "{body}");
+    // `warning` stays readable for clients that predate the code, which is why
+    // the code did not need a protocol bump.
+    assert!(
+        body["warning"].as_str().is_some_and(|w| w.is_ascii()),
+        "{body}"
+    );
 }
 
 // ── Loopback-only bind ───────────────────────────────────────────────────────

@@ -8,7 +8,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::template_service::{TemplateError, TemplateService};
+use crate::template_service::{TemplateError, TemplateNotice, TemplateService};
 
 type Svc = Arc<dyn TemplateService>;
 
@@ -46,14 +46,20 @@ pub async fn put(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// `DELETE /api/v1/templates/:name` — delete a template. May return a warning
-/// (e.g. the template was the configured default, now cleared).
+/// `DELETE /api/v1/templates/:name` — delete a template. May return a notice (e.g.
+/// the template was the configured default, now cleared): `warning_code` is what
+/// the GUI localizes, `warning_detail` its raw cause, `warning` an English sentence.
 pub async fn delete(
     State(svc): State<Svc>,
     Path(name): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    let warning = svc.delete(&name).await.map_err(err)?;
-    Ok(Json(json!({ "deleted": name, "warning": warning })))
+    let notice = svc.delete(&name).await.map_err(err)?;
+    Ok(Json(json!({
+        "deleted": name,
+        "warning": notice.as_ref().map(TemplateNotice::message),
+        "warning_code": notice.as_ref().map(TemplateNotice::code),
+        "warning_detail": notice.as_ref().and_then(TemplateNotice::detail),
+    })))
 }
 
 #[derive(Deserialize)]

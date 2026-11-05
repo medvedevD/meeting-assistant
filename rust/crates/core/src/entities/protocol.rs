@@ -164,19 +164,23 @@ fn heading_text(line: &str) -> Option<(usize, String)> {
 
 fn classify_section(title: &str) -> Section {
     let lower = title.to_lowercase();
-    if lower.contains("решен") || lower.contains("договор") || lower.contains("decision")
+    if lower.contains("решен")
+        || lower.contains("договор")
+        || lower.contains("decision")
+        || lower.contains("agreement")
     {
         Section::Decisions
     } else if lower.contains("action")
         || lower.contains("действ")
         || lower.contains("задач")
+        || lower.contains("task")
         || lower.contains("следующ")
+        || lower.contains("next")
     {
         Section::Actions
     } else if lower.contains("вопрос") || lower.contains("question") {
         Section::OpenQuestions
-    } else if lower.contains("тем") || lower.contains("обсужд") || lower.contains("topic")
-    {
+    } else if is_generic_topic_heading(title) {
         Section::Topics
     } else if lower.contains("крат")
         || lower.contains("резюм")
@@ -191,7 +195,10 @@ fn classify_section(title: &str) -> Section {
 
 fn is_generic_topic_heading(title: &str) -> bool {
     let lower = title.to_lowercase();
-    lower.contains("тем") || lower.contains("обсужд") || lower.contains("topic")
+    lower.contains("тем")
+        || lower.contains("обсужд")
+        || lower.contains("topic")
+        || lower.contains("discuss")
 }
 
 fn clean_line(line: &str) -> String {
@@ -311,7 +318,11 @@ fn action_from_text(text: &str) -> ProtocolAction {
 
 fn is_probably_metadata(text: &str) -> bool {
     let lower = text.to_lowercase();
-    lower.starts_with("дата:") || lower.starts_with("участники:") || lower.starts_with("meeting:")
+    lower.starts_with("дата:")
+        || lower.starts_with("участники:")
+        || lower.starts_with("date:")
+        || lower.starts_with("participants:")
+        || lower.starts_with("meeting:")
 }
 
 fn is_empty_placeholder(text: &str) -> bool {
@@ -337,6 +348,12 @@ fn is_empty_placeholder(text: &str) -> bool {
             | "не выявлено"
             | "нет данных"
             | "не указано"
+            | "no"
+            | "not applicable"
+            | "not discussed"
+            | "not mentioned"
+            | "not specified"
+            | "no data"
     )
 }
 
@@ -436,6 +453,111 @@ mod tests {
             structured.summary,
             vec!["Неформальный разговор / дискуссия", "Спорили о жанре."]
         );
+    }
+
+    /// Every `##` heading of the bundled English templates, so a new heading
+    /// cannot ship without a decision on where it belongs. Headings classified
+    /// as `None` match their Russian counterparts, which are `None` too.
+    #[test]
+    fn classifies_every_heading_of_the_english_templates() {
+        const TEMPLATES: [&str; 4] = [
+            include_str!("../../../../../prompts/en/1-on-1.md"),
+            include_str!("../../../../../prompts/en/Daily stand-up.md"),
+            include_str!("../../../../../prompts/en/Team meeting.md"),
+            include_str!("../../../../../prompts/en/Simple minutes.md"),
+        ];
+        let expected = |heading: &str| match heading {
+            "Summary" => Section::Summary,
+            "Topics discussed" | "Key topics" => Section::Topics,
+            "Decisions and agreements" | "Key decisions" | "Decisions" => Section::Decisions,
+            "Action items" | "Tasks / next steps" | "Task and project status" | "Next meeting" => {
+                Section::Actions
+            }
+            "Open questions" => Section::OpenQuestions,
+            "Problems and blockers"
+            | "Feedback"
+            | "Status by participant"
+            | "Shared blockers and risks"
+            | "Meeting goal"
+            | "Participants"
+            | "Risks and issues"
+            | "Meeting type"
+            | "Important conclusions / insights" => Section::None,
+            other => panic!("no expected section for template heading {other:?}"),
+        };
+
+        let mut seen = 0;
+        for template in TEMPLATES {
+            for heading in template.lines().filter_map(|l| l.strip_prefix("## ")) {
+                assert_eq!(classify_section(heading), expected(heading), "{heading}");
+                seen += 1;
+            }
+        }
+        assert!(seen >= 20, "expected the template headings, saw {seen}");
+    }
+
+    #[test]
+    fn russian_headings_keep_their_sections() {
+        for (heading, section) in [
+            ("Краткое резюме", Section::Summary),
+            ("Статус задач и проектов", Section::Actions),
+            ("Проблемы и блокеры", Section::None),
+            ("Решения и договорённости", Section::Decisions),
+            ("Action items", Section::Actions),
+            ("Следующая встреча", Section::Actions),
+            ("Обсуждённые темы", Section::Topics),
+            ("Открытые вопросы", Section::OpenQuestions),
+            ("Тип встречи", Section::None),
+        ] {
+            assert_eq!(classify_section(heading), section, "{heading}");
+        }
+    }
+
+    #[test]
+    fn derives_sections_from_english_minutes() {
+        let md = "\
+## Summary
+The team agreed on the release goal.
+
+## Topics discussed
+### Delivery risks
+- Integration still needs a check.
+
+## Key decisions
+- Ship the beta on Friday.
+- Not discussed
+
+## Action items
+| Owner | Task | Due |
+|-------|------|-----|
+| Dana | Prepare the build | Friday |
+
+## Open questions
+- Who runs the demo?";
+
+        let structured = StructuredProtocol::from_markdown(md);
+
+        assert_eq!(structured.title, None);
+        assert_eq!(
+            structured.summary,
+            vec!["The team agreed on the release goal."]
+        );
+        assert_eq!(structured.topics.len(), 1);
+        assert_eq!(structured.topics[0].title, "Delivery risks");
+        assert_eq!(
+            structured.topics[0].bullets,
+            vec!["Integration still needs a check."]
+        );
+        assert_eq!(structured.decisions, vec!["Ship the beta on Friday."]);
+        assert_eq!(
+            structured.actions,
+            vec![ProtocolAction {
+                title: "Prepare the build".into(),
+                owner: Some("Dana".into()),
+                due: Some("Friday".into()),
+            }]
+        );
+        assert_eq!(structured.open_questions, vec!["Who runs the demo?"]);
     }
 
     #[test]

@@ -197,6 +197,8 @@ fn is_model_not_selected(msg: &str) -> bool {
 
 fn is_model_missing(msg: &str) -> bool {
     let m = msg.to_lowercase();
+    // Older builds wrote the Russian text, which can still sit in a job's
+    // persisted `last_error`.
     m.contains("model_missing")
         || m.contains("модель не найдена")
         || m.contains("model not found")
@@ -207,7 +209,8 @@ fn is_model_missing(msg: &str) -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobProgress {
     pub stage: PipelineStage,
-    /// Short human-readable sub-status (RU), e.g. "Распознавание речи".
+    /// Short English sub-status, e.g. "Transcribing". The GUI localizes by
+    /// `stage` instead of showing this.
     pub sub: String,
     /// 0–100 within the current stage.
     pub percent: u8,
@@ -349,12 +352,20 @@ mod tests {
             )),
             ErrorClass::ModelNotSelected,
         );
-        assert_eq!(
-            ErrorClass::from_core_error(&CoreError::Transcription(
-                "Модель не найдена или повреждена: ...".into()
-            )),
-            ErrorClass::ModelMissing,
-        );
+        for message in [
+            // The text the Whisper loader writes now, and without its prefix.
+            "model_missing: model not found or corrupted: ...",
+            "model not found or corrupted: ...",
+            // What older builds wrote.
+            "model_missing: Модель не найдена или повреждена: ...",
+            "Модель не найдена или повреждена: ...",
+        ] {
+            assert_eq!(
+                ErrorClass::from_core_error(&CoreError::Transcription(message.into())),
+                ErrorClass::ModelMissing,
+                "{message}"
+            );
+        }
         assert_eq!(
             ErrorClass::from_core_error(&CoreError::Transcription("decode failed".into())),
             ErrorClass::Unknown,

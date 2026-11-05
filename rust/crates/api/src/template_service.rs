@@ -43,6 +43,47 @@ impl TemplateError {
     }
 }
 
+/// Something the user should hear about after a template is deleted. The wire
+/// carries [`code`](Self::code) and the GUI turns it into text in its own
+/// language; the sidecar holds no UI language.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TemplateNotice {
+    /// The deleted template was the configured default, now cleared.
+    DefaultTemplateReset,
+    /// The template is gone, but the settings file could not be written.
+    SettingsSaveFailed(String),
+}
+
+impl TemplateNotice {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::DefaultTemplateReset => "default_template_reset",
+            Self::SettingsSaveFailed(_) => "settings_save_failed",
+        }
+    }
+
+    /// The raw cause, for the codes that have one.
+    pub fn detail(&self) -> Option<&str> {
+        match self {
+            Self::DefaultTemplateReset => None,
+            Self::SettingsSaveFailed(detail) => Some(detail),
+        }
+    }
+
+    /// English text for the `warning` field, kept for clients that predate
+    /// `warning_code`. This is why the codes did not need a protocol bump.
+    pub fn message(&self) -> String {
+        match self {
+            Self::DefaultTemplateReset => {
+                "This template was the default; reset to the built-in template.".to_string()
+            }
+            Self::SettingsSaveFailed(detail) => {
+                format!("Template deleted, but settings could not be saved: {detail}")
+            }
+        }
+    }
+}
+
 /// Abstracts template CRUD for the `/api/v1/templates` routes. Like
 /// [`crate::SettingsService`], this lives off [`crate::AppState`] so the routes
 /// carry their own state; the composition layer wires a concrete implementation
@@ -59,10 +100,10 @@ pub trait TemplateService: Send + Sync {
     /// Create or overwrite a template.
     async fn save(&self, name: &str, body: &str) -> Result<(), TemplateError>;
 
-    /// Delete a template. Returns an optional user-facing warning — e.g. the
-    /// deleted template was the configured `default_template`, which the server
-    /// has now cleared.
-    async fn delete(&self, name: &str) -> Result<Option<String>, TemplateError>;
+    /// Delete a template. Returns a notice when the user should hear about a side
+    /// effect, e.g. the deleted template was the configured `default_template`,
+    /// which the server has now cleared.
+    async fn delete(&self, name: &str) -> Result<Option<TemplateNotice>, TemplateError>;
 
     /// Rename `old` to `new`.
     async fn rename(&self, old: &str, new: &str) -> Result<(), TemplateError>;

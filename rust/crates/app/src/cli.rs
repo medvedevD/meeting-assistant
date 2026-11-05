@@ -107,12 +107,12 @@ impl Cli {
         // deletion made in the GUI is honoured. Best-effort: never fails a
         // command.
         {
-            use meeting_adapters::{EmbeddedBundle, JsonSettingsStore};
+            use meeting_adapters::{EmbeddedBundle, JsonSettingsStore, TemplateLanguage};
             let removed = JsonSettingsStore::open_default()
                 .load()
                 .removed_bundled_templates;
             if let Err(e) = meeting_core::usecases::backfill_templates(
-                &EmbeddedBundle,
+                &EmbeddedBundle::new(TemplateLanguage::default()),
                 container.templates.as_ref(),
                 &removed,
             )

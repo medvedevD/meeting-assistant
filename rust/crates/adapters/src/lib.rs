@@ -35,7 +35,7 @@ pub mod templates;
 pub use templates::FileTemplateLoader;
 
 mod template_bundle;
-pub use template_bundle::EmbeddedBundle;
+pub use template_bundle::{is_bundled_template, EmbeddedBundle, TemplateLanguage};
 
 pub mod audio;
 pub use audio::{
