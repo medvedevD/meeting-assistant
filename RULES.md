@@ -139,6 +139,7 @@ of repeating Whisper inference or issuing another paid LLM request.
 - `src/SidecarManager.{h,cpp}` — locates and launches the `meeting-server` binary next to the GUI executable, manages its lifecycle.
 - `src/ApiClient.{h,cpp}` — typed wrapper over the loopback HTTP API.
 - `src/JobPoller.{h,cpp}` — tracks async job state (transcription / protocol generation) over SSE, with polling as a fallback.
+- `src/Language.{h,cpp}` — resolves and stores the interface language, installs the translation before the QML engine loads.
 - `qml/Main.qml`, `qml/AppShell.qml`, `qml/MeetingStore.qml`, `qml/screens/` — UI tree.
 
 ### Sidecar Bridge
@@ -147,12 +148,26 @@ of repeating Whisper inference or issuing another paid LLM request.
 
 ### Prompts
 
-LLM prompt templates are Russian-language `.md` files. Two distinct roles:
+LLM prompt templates are `.md` files, one set per language in `/prompts/ru/` and `/prompts/en/`. A template fixes the language of its output: an English template on a Russian meeting gives English minutes. Two distinct roles:
 
-- **Bundle (read-only, compile-time):** `/prompts/` is the source of truth, **embedded into the binary** via `include_str!` (`EmbeddedBundle`, mirroring the `MIGRATIONS` const). Shipping a new bundled template = drop a `.md` in `/prompts/` + add one line to `BUNDLED`.
+- **Bundle (read-only, compile-time):** `/prompts/` is the source of truth, **embedded into the binary** via `include_str!` (`EmbeddedBundle`, mirroring the `MIGRATIONS` const). Shipping a new bundled template = drop a `.md` in `/prompts/<language>/` + add one line to `BUNDLED`. Names must be unique across languages, because the tombstones below are keyed by name alone.
 - **Writable store (runtime):** the `TemplateLoader` port reads/writes a per-user dir, default `default_prompts_dir()` = `$XDG_DATA_HOME/meeting-assistant/prompts/` (override via `settings.paths.prompts`). User edits live here and survive upgrades.
 
-On startup (sidecar `run()` and every CLI command) `backfill_templates` seeds the writable dir from the embedded bundle: writes only **missing** names, never overwrites, and skips `settings.removed_bundled_templates` (tombstones for bundled templates the user deleted — maintained by `AppTemplateService` on delete/save/rename). This makes a newly shipped template appear on upgrade without disturbing user customisations. Note: `/prompts/` is **no longer** the runtime dir — edits there only change the embed source and require a rebuild.
+On startup (sidecar `run()` and every CLI command) `backfill_templates` seeds the writable dir from the embedded bundle of the active language: the GUI passes it to the sidecar as `--language`, and without that flag (a sidecar started by hand, the CLI) it is `ru`. It writes only **missing** names, never overwrites, and skips `settings.removed_bundled_templates` (tombstones for bundled templates the user deleted, in any language — maintained by `AppTemplateService` on delete/save/rename). This makes a newly shipped template appear on upgrade without disturbing user customisations, and switching the app to the other language adds that language's templates beside the existing ones. Note: `/prompts/` is **no longer** the runtime dir — edits there only change the embed source and require a rebuild.
+
+`classify_section` in `core/src/entities/protocol.rs` sorts minutes into sections by their headings, so a new heading in a bundled template needs a decision there; a test walks every heading of the English templates. It and `_emptyMarker` in `ProtocolDocument.qml` know both languages.
+
+### Localization
+
+The app ships in Russian and English. Russian is the **source language** of every `qsTr` string: `qt-app/i18n/meeting-assistant_en.ts` is the only translation, and QML tests that load no translator assert the Russian text.
+
+- **Which language runs:** `Language` resolves it at startup. An explicit choice wins; otherwise a system whose first language is Russian gets Russian and any other gets English. The choice lives in `QSettings` (`ui/language`), not `settings.json`, because the GUI needs it before the sidecar runs. One run keeps one language: changing it shows the restart banner.
+- **New user-visible text:** wrap it in `qsTr`, including in `.pragma library` JS, where it works and takes the file name as its context. Then run `cmake --build <dir> --target update_translations` and translate what it marks. CI fails on unfinished or outdated strings (`.github/scripts/check-translations.sh`), and `qt-app/tests/i18n` fails on Russian text or the old product name outside `qsTr`.
+- **Dates:** use `date.toLocaleString(Qt.locale(), format)`. `Qt.formatDateTime` with a format string always uses the C locale, whatever the language is.
+- **The backend holds no UI language.** The sidecar needs `--language` only to seed templates. Anything the user reads goes through a code or stage the GUI localizes (`PipelineStage`, `ErrorClass`, a delete's `warning_code`); the English text beside it is for logs and other clients.
+- **Whisper language:** new installs default to `auto`. A settings file that names no language means `ru`, the old default, so a saved setting never changes on upgrade.
+- **Name:** the visible product name is "Meeting Assistant". Internal `Meety*` components and theme identifiers stay as they are.
+- **DMG background:** English only, because the image is static and shared by all users.
 
 ### Settings persistence and hot-swap
 

@@ -173,10 +173,23 @@ banner for those.
 
 ### Templates
 
-Built-in templates are embedded in the binary. At startup, any that are missing are
-copied to a per-user folder, where the user can edit them. Copying never overwrites,
-and it skips built-in templates the user has deleted, so upgrades add new templates
-without disturbing customizations.
+Built-in templates are embedded in the binary, one set per language. At startup, any
+of the active language that are missing are copied to a per-user folder, where the user
+can edit them. Copying never overwrites, and it skips built-in templates the user has
+deleted, so upgrades add new templates without disturbing customizations. A template
+fixes the language of its output, so minutes follow the template, not the interface.
+
+### Interface language
+
+The app runs in Russian or English: an explicit choice wins, a Russian system gets
+Russian, and any other system gets English. The choice is stored by the GUI rather than
+the sidecar, because the GUI needs it before the sidecar is running, and a new choice
+applies after a restart so that one run keeps one language.
+
+Russian stays the source language of the UI strings, so only the English translation
+exists as a file. The sidecar holds no UI language: it reports stages, error classes,
+and notice codes, and the GUI turns them into text. It uses the language only to choose
+which templates to seed.
 
 ### Database migrations
 

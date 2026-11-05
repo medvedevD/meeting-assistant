@@ -8,7 +8,7 @@ See the [architecture overview](ARCHITECTURE.md) for how the parts fit together,
 - Rust. The version is pinned in `rust-toolchain.toml`, and rustup installs it
   automatically.
 - CMake 3.21 or newer.
-- Qt 6.7 or newer with Quick, Quick Controls 2, Network, Multimedia, and Svg.
+- Qt 6.7 or newer with Quick, Quick Controls 2, Network, Multimedia, Svg, and Linguist tools.
 - ffmpeg, which mixes microphone and system audio.
 
 Platform notes:
@@ -69,6 +69,20 @@ cargo fmt --manifest-path rust/Cargo.toml --all -- --check
 
 ```bash
 cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
+```
+
+```bash
+.github/scripts/check-translations.sh
+```
+
+## Translations
+
+Russian is the source language of the interface strings, and
+`qt-app/i18n/meeting-assistant_en.ts` holds the English translation. After changing a
+string, refresh the file and translate what it marks as unfinished:
+
+```bash
+cmake --build qt-app/build --target update_translations
 ```
 
 ## Developer tools

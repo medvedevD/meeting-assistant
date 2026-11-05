@@ -60,15 +60,15 @@ let dark = NSColor(white: 0.13, alpha: 1)
 let gray = NSColor(white: 0.34, alpha: 1)
 
 // ── Drag cue (just below the app + Applications icon row at y≈150) ────────────
-draw("Перетащите значок в Applications и откройте приложение",
+draw("Drag the icon to Applications, then open the app",
      top: 235, size: 13.5, weight: .medium, color: gray)
 
 // ── First-launch steps (the Gatekeeper "Open Anyway" path) ───────────────────
-draw("Первый запуск — если macOS пишет «не удалось проверить»:",
+draw("First launch: if macOS says it could not verify the app,",
      top: 300, size: 13, weight: .semibold, color: dark)
-draw("Откройте Системные настройки → Конфиденциальность и безопасность",
+draw("open System Settings → Privacy & Security",
      top: 330, size: 12.5, weight: .regular, color: dark)
-draw("и нажмите «Всё равно открыть» (Open Anyway)",
+draw("and click Open Anyway",
      top: 353, size: 12.5, weight: .semibold, color: accent)
 
 NSGraphicsContext.restoreGraphicsState()
