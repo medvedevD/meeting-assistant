@@ -32,7 +32,7 @@ pub trait Transcriber: Send + Sync {
     /// adapter via `set_abort_callback_safe`) wire the token in; the default
     /// ignores it and delegates to [`Transcriber::transcribe_with_progress`].
     /// Used by the worker for jobs that may be cancelled via
-    /// `DELETE /api/v1/jobs/:id`. See `plans/active/job-cancellation`.
+    /// `DELETE /api/v1/jobs/:id`.
     async fn transcribe_cancelable(
         &self,
         audio_path: &Path,

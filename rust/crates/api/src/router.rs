@@ -148,7 +148,7 @@ pub fn create_server_router(
     // that matches the threat. Steady ~100 req/s (one cell per 10 ms) with a
     // burst of 50; the GUI sits far under this by design. The default handler
     // rejects excess with `429 Too Many Requests` and an `x-ratelimit-after`
-    // retry hint. See plans/api-rate-limit/plan.md for the full rationale.
+    // retry hint.
     let governor = GovernorLayer {
         config: Arc::new(
             GovernorConfigBuilder::default()

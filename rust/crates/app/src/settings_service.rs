@@ -178,7 +178,7 @@ impl SettingsService for AppSettingsService {
                 "model_path": s.transcriber.custom_model_path,
                 // Read-only: compiled Whisper backend (cpu/metal/cuda/vulkan).
                 // Ignored on PUT (unknown to PersistedSettings). The UI offers the
-                // GPU toggle iff this is not "cpu". See ADR-010.
+                // GPU toggle iff this is not "cpu".
                 "backend": whisper_backend(),
             },
             "llm": {

@@ -98,7 +98,6 @@ pub async fn status(
 /// `202`; running jobs have their in-memory cancellation token signalled and
 /// the worker drives the terminal transition at its next safe checkpoint
 /// (also `202`). Already-terminal jobs return `204`; unknown ids return `404`.
-/// See `plans/active/job-cancellation`.
 pub async fn cancel(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -143,7 +142,7 @@ pub async fn active(
 }
 
 /// `GET /api/v1/jobs/:id/events` — Server-Sent Events stream of a job's live
-/// progress (see `plans/done/job-progress-sse` ADR-002). Pushes the current
+/// progress. Pushes the current
 /// snapshot on connect, a `progress` frame per worker update, then a single
 /// terminal `status` frame carrying the persisted final state before closing.
 /// The polling path (`GET /jobs/:id`) is retained as a fallback for clients or

@@ -114,7 +114,7 @@ pub enum ErrorClass {
     ModelMissing,
     /// User-initiated cancellation via `DELETE /api/v1/jobs/:id`. Distinct
     /// from `WorkerKilled` (process-level termination) and from the retry
-    /// path — see `plans/active/job-cancellation`.
+    /// path.
     Cancelled,
     Unknown,
 }

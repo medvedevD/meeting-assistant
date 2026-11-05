@@ -6,7 +6,7 @@ use crate::{
 use std::sync::Arc;
 
 /// Result of a `DELETE /api/v1/jobs/:id`. Mapped to HTTP status codes by the
-/// API handler (see `plans/active/job-cancellation` ADR-004):
+/// API handler:
 ///
 /// - `Cancelled` / `Cancelling` → `202 Accepted`
 /// - `AlreadyTerminal` → `204 No Content`

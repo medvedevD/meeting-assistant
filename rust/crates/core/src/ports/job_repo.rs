@@ -20,8 +20,7 @@ pub trait JobRepo: Send + Sync {
     /// the UI's active-jobs view after an app restart.
     async fn list_active(&self) -> Result<Vec<Job>, CoreError>;
     /// Atomically claim one pending job whose `kind` is in `kinds` and whose
-    /// `retry_after <= now_ts`. The split worker-pool architecture
-    /// ([`plans/active/worker-concurrency-pool`]) uses this to run a
+    /// `retry_after <= now_ts`. The split worker pool uses this to run a
     /// CPU-bound transcribe worker and an IO-bound protocol worker that each
     /// claim disjoint kinds.
     async fn claim_pending_kind(
@@ -67,7 +66,7 @@ pub trait JobRepo: Send + Sync {
     /// 0 if the job was already non-pending (idempotent), 1 on success.
     ///
     /// Used by `DELETE /api/v1/jobs/:id` when the job has not yet been
-    /// claimed by a worker. See `plans/active/job-cancellation`.
+    /// claimed by a worker.
     async fn cancel_pending(&self, id: &str, now_ts: i64) -> Result<u64, CoreError>;
 
     /// Mark a `pending`-or-`running` job as terminal `failed` with
