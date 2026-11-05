@@ -251,6 +251,9 @@ ColumnLayout {
                 || t === "отсутствуют" || t === "не обсуждалось"
                 || t === "не было" || t === "не выявлено"
                 || t === "нет данных" || t === "не указано"
+                || t === "no" || t === "not applicable"
+                || t === "not discussed" || t === "not mentioned"
+                || t === "not specified" || t === "no data"
     }
     function _cleanItems(items) {
         if (!items)

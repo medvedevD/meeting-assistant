@@ -9,7 +9,7 @@ pub use router::{
     DefaultTemplateFn, LiveJobs, VersionInfo,
 };
 pub use settings_service::SettingsService;
-pub use template_service::{TemplateDto, TemplateError, TemplateService};
+pub use template_service::{TemplateDto, TemplateError, TemplateNotice, TemplateService};
 pub use transcription_model_service::{
     InstallStarted, InstallationView, ModelServiceError, TranscriptionModelService,
     TranscriptionModelView, TranscriptionModelsView,

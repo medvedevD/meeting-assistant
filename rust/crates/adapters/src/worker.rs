@@ -24,16 +24,17 @@ pub const TRANSCRIBE_KINDS: &[JobKind] = &[JobKind::Transcribe, JobKind::Reproce
 /// Kinds the IO-bound protocol worker claims.
 pub const PROTOCOL_KINDS: &[JobKind] = &[JobKind::RegenerateProtocol];
 
-/// RU sub-status shown under each pipeline stage.
+/// Sub-status for logs and API clients. The GUI shows its own localized label
+/// for the stage and ignores this text.
 fn stage_sub(stage: PipelineStage) -> &'static str {
     match stage {
-        PipelineStage::Queued => "В очереди",
-        PipelineStage::LoadingModel => "Загрузка модели",
-        PipelineStage::DecodingAudio => "Декодирование аудио",
-        PipelineStage::Transcribing => "Распознавание речи",
-        PipelineStage::WritingTranscript => "Сохранение транскрипта",
-        PipelineStage::GeneratingProtocol => "Генерация протокола",
-        PipelineStage::Done => "Готово",
+        PipelineStage::Queued => "Queued",
+        PipelineStage::LoadingModel => "Loading model",
+        PipelineStage::DecodingAudio => "Decoding audio",
+        PipelineStage::Transcribing => "Transcribing",
+        PipelineStage::WritingTranscript => "Saving transcript",
+        PipelineStage::GeneratingProtocol => "Generating minutes",
+        PipelineStage::Done => "Done",
     }
 }
 
@@ -516,6 +517,21 @@ mod tests {
     use meeting_core::ports::{JobRepo, MeetingRepo};
     use std::path::PathBuf;
 
+    #[test]
+    fn stage_labels_carry_no_ui_language() {
+        for stage in [
+            PipelineStage::Queued,
+            PipelineStage::LoadingModel,
+            PipelineStage::DecodingAudio,
+            PipelineStage::Transcribing,
+            PipelineStage::WritingTranscript,
+            PipelineStage::GeneratingProtocol,
+            PipelineStage::Done,
+        ] {
+            assert!(stage_sub(stage).is_ascii(), "{}", stage.as_str());
+        }
+    }
+
     fn make_worker(jr: Arc<FakeJobRepo>, mr: Arc<FakeMeetingRepo>) -> Worker {
         Worker::new(
             jr as Arc<dyn JobRepo>,
@@ -677,10 +693,7 @@ mod tests {
                 .clone()
         };
         assert!(path.ends_with("transcript.md"));
-        assert!(
-            body.contains("# Транскрипция: Стендап"),
-            "missing header: {body}"
-        );
+        assert!(body.contains("# Стендап\n"), "missing header: {body}");
         assert!(
             body.contains("[00:00] привет мир"),
             "missing timestamp: {body}"

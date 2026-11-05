@@ -35,7 +35,7 @@ ScrollView {
     }
     function load() {
         var tr = t()
-        langBox.setValue(tr.language || "ru")
+        langBox.setValue(tr.language || "auto")
         beamSpin.value = tr.beam_size || 1
         threadsSpin.value = tr.n_threads || 0
         gpuSwitch.checked = backendAccelerated() && tr.use_gpu !== false
@@ -902,7 +902,7 @@ ScrollView {
                             }
                             Text {
                                 Layout.fillWidth: true
-                                text: qsTr("Whisper.cpp ggml-*.bin или совместимый. Meety только запоминает путь.")
+                                text: qsTr("Whisper.cpp ggml-*.bin или совместимый. Meeting Assistant только запоминает путь.")
                                 wrapMode: Text.WordWrap
                                 font.family: Theme.fontUi
                                 font.pixelSize: Theme.fsBody
@@ -1007,7 +1007,7 @@ ScrollView {
                 ]
                 function setValue(code) {
                     var i = indexOfValue(code)
-                    currentIndex = i >= 0 ? i : 1
+                    currentIndex = i >= 0 ? i : 0
                 }
                 onActivated: { panel.t().language = currentValue; scr.touch() }
             }

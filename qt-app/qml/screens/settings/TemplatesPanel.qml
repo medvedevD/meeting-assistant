@@ -51,11 +51,24 @@ ScrollView {
         onOk: function (j) { panel.status = qsTr("Шаблон сохранён"); panel.refresh() }
         onFail: function (s, e) { panel.status = qsTr("Ошибка сохранения: %1").arg(e) }
     }
+    // The sidecar reports side effects of a delete as codes; it holds no UI
+    // language. `warning` is its English fallback for a code unknown here.
+    function deleteNotice(j) {
+        switch (j.warning_code) {
+        case "default_template_reset":
+            return qsTr("Шаблон «%1» был выбран по умолчанию — сброшено на встроенный шаблон.")
+                       .arg(j.deleted)
+        case "settings_save_failed":
+            return qsTr("Шаблон удалён, но не удалось сохранить настройки: %1")
+                       .arg(j.warning_detail)
+        }
+        return j.warning
+    }
     Request {
         id: delReq
         onOk: function (j) {
-            panel.status = (j && j.warning)
-                ? qsTr("Удалено. %1").arg(j.warning)
+            panel.status = (j && j.warning_code)
+                ? qsTr("Удалено. %1").arg(panel.deleteNotice(j))
                 : qsTr("Шаблон удалён")
             panel.selected = ""
             panel.refresh()

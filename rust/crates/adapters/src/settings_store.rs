@@ -20,7 +20,9 @@ pub struct PersistedSettings {
     /// [`meeting_core::usecases::backfill_templates`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub removed_bundled_templates: Vec<String>,
-    #[serde(default)]
+    /// `PersistedTranscriberPrefs::default()` is for new installs, so a file
+    /// written before this section existed gets its legacy values instead.
+    #[serde(default = "PersistedTranscriberPrefs::legacy")]
     pub transcriber: PersistedTranscriberPrefs,
     #[serde(default)]
     pub llm: LlmPrefs,
@@ -43,7 +45,8 @@ impl PersistedSettings {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PersistedTranscriberPrefs {
-    /// BCP-47 language code or "auto". Default: "ru".
+    /// BCP-47 language code or "auto". New installs default to "auto"; a settings
+    /// file that names no language means "ru", which was the old default.
     pub language: String,
     /// Beam size for decoding. 1 = Greedy (fastest), 2–5 = BeamSearch. Default: 1.
     #[serde(default = "default_beam_size")]
@@ -87,7 +90,7 @@ pub struct CustomTranscriptionModel {
 
 #[derive(Deserialize)]
 struct PersistedTranscriberPrefsWire {
-    #[serde(default = "default_language")]
+    #[serde(default = "legacy_language")]
     language: String,
     #[serde(default = "default_beam_size")]
     beam_size: u32,
@@ -130,7 +133,9 @@ fn default_beam_size() -> u32 {
     1
 }
 
-fn default_language() -> String {
+/// The language of a settings file that names none. Every such file was written
+/// when "ru" was the default, and a saved setting must not change on upgrade.
+fn legacy_language() -> String {
     "ru".to_string()
 }
 
@@ -153,7 +158,7 @@ where
 impl Default for PersistedTranscriberPrefs {
     fn default() -> Self {
         Self {
-            language: "ru".into(),
+            language: "auto".into(),
             beam_size: 1,
             n_threads: 0,
             use_gpu: true,
@@ -166,6 +171,13 @@ impl Default for PersistedTranscriberPrefs {
 }
 
 impl PersistedTranscriberPrefs {
+    fn legacy() -> Self {
+        Self {
+            language: legacy_language(),
+            ..Self::default()
+        }
+    }
+
     fn normalize(&mut self, legacy_paths_model: Option<String>) {
         if self.custom_model_path.is_none() {
             self.custom_model_path = legacy_paths_model.and_then(|value| {
@@ -435,7 +447,10 @@ impl JsonSettingsStore {
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned)
         };
-        let mut settings = PersistedSettings::default();
+        let mut settings = PersistedSettings {
+            transcriber: PersistedTranscriberPrefs::legacy(),
+            ..Default::default()
+        };
         settings.paths.model = str_val("paths.model");
         settings.paths.models_dir = str_val("paths.models_dir");
         settings.paths.db = str_val("paths.db");
@@ -477,7 +492,54 @@ fn default_models_dir() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{PersistedSettings, PersistedTranscriberPrefs, TranscriptionModelSource};
+    use super::{
+        JsonSettingsStore, PersistedSettings, PersistedTranscriberPrefs, TranscriptionModelSource,
+    };
+
+    #[test]
+    fn new_install_defaults_to_auto_language() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = JsonSettingsStore::open(tmp.path().join("settings.json"));
+        assert_eq!(store.load().transcriber.language, "auto");
+    }
+
+    #[test]
+    fn saved_language_survives_a_reload() {
+        for language in ["ru", "en", "auto"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let path = tmp.path().join("settings.json");
+            let store = JsonSettingsStore::open(path.clone());
+            let mut settings = store.load();
+            settings.transcriber.language = language.to_string();
+            store.save(settings).unwrap();
+
+            let reopened = JsonSettingsStore::open(path);
+            assert_eq!(reopened.load().transcriber.language, language);
+        }
+    }
+
+    #[test]
+    fn existing_settings_without_a_language_stay_russian() {
+        let no_language: PersistedSettings = serde_json::from_str(
+            r#"{
+                "paths": {},
+                "recording": { "source": "mic", "echo_cancel": false },
+                "transcriber": { "beam_size": 3 }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(no_language.transcriber.language, "ru");
+        assert_eq!(no_language.transcriber.beam_size, 3);
+
+        let no_transcriber: PersistedSettings = serde_json::from_str(
+            r#"{
+                "paths": {},
+                "recording": { "source": "mic", "echo_cancel": false }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(no_transcriber.transcriber.language, "ru");
+    }
 
     #[test]
     fn transcriber_model_path_empty_string_deserializes_as_none() {

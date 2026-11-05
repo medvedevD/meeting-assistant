@@ -126,8 +126,8 @@ Page {
                 spacing: 10
                 Text {
                     visible: scr.createdAt > 0
-                    text: Qt.formatDateTime(new Date(scr.createdAt * 1000),
-                                            "d MMMM, HH:mm")
+                    text: new Date(scr.createdAt * 1000)
+                          .toLocaleString(Qt.locale(), "d MMMM, HH:mm")
                     font.family: Theme.fontUi
                     font.pixelSize: Theme.fsSmall
                     color: Theme.ink3

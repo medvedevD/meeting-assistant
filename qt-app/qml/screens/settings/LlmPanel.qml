@@ -92,7 +92,7 @@ ScrollView {
         { id: "openai",    label: "OpenAI (ChatGPT)" },
         { id: "gemini",    label: "Google (Gemini)" },
         { id: "mistral",   label: "Mistral" },
-        { id: "ollama",    label: "Ollama (локально)" }
+        { id: "ollama",    label: qsTr("Ollama (локально)") }
     ]
     // Built-in suggestions: shown until the provider's own list for the stored
     // key arrives (refreshModels), and kept if it can't be fetched.
@@ -263,7 +263,7 @@ ScrollView {
             Layout.rightMargin: 32
             Layout.topMargin: 4
             Layout.bottomMargin: 28
-            text: qsTr("meety использует большую модель для превращения транскрипта в структурированный протокол.")
+            text: qsTr("Meeting Assistant использует большую модель для превращения транскрипта в структурированный протокол.")
             wrapMode: Text.WordWrap
             font.family: Theme.fontUi
             font.pixelSize: Theme.fsBody

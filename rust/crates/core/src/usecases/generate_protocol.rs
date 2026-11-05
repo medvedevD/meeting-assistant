@@ -13,11 +13,13 @@ fn build_message(template: &str, transcript: &str, meeting_name: Option<&str>) -
     }
 }
 
+/// Used when no template is configured. It fixes no output language, so the
+/// minutes come out in the language of the meeting.
 const DEFAULT_PROMPT: &str = "\
-Составь краткий структурированный протокол встречи на русском языке на основе следующей транскрипции. \
-Выдели ключевые темы, решения и дальнейшие действия (action items).
+Write brief structured meeting minutes based on the following transcript, in the language of the transcript. \
+Highlight the key topics, decisions, and action items.
 
-Транскрипция:
+Transcript:
 {transcript}";
 
 pub async fn generate_protocol(
@@ -141,6 +143,21 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(err, CoreError::Llm(_)));
+    }
+
+    #[test]
+    fn fallback_prompt_fixes_no_output_language() {
+        assert!(
+            !DEFAULT_PROMPT
+                .chars()
+                .any(|c| ('\u{0400}'..='\u{04FF}').contains(&c)),
+            "must not carry Russian"
+        );
+        let lower = DEFAULT_PROMPT.to_lowercase();
+        for fixed in ["in english", "in russian"] {
+            assert!(!lower.contains(fixed), "must not ask for {fixed:?}");
+        }
+        assert!(lower.contains("in the language of the transcript"));
     }
 
     #[test]

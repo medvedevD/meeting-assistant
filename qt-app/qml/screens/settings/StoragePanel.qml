@@ -71,7 +71,7 @@ ScrollView {
             Layout.rightMargin: 32
             Layout.topMargin: 4
             Layout.bottomMargin: 28
-            text: qsTr("Где meety хранит базу, аудио, транскрипты и prompt-шаблоны.")
+            text: qsTr("Где Meeting Assistant хранит базу, аудио, транскрипты и prompt-шаблоны.")
             wrapMode: Text.WordWrap
             font.family: Theme.fontUi
             font.pixelSize: Theme.fsBody

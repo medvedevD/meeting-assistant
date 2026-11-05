@@ -54,7 +54,9 @@ ApplicationWindow {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: sidecar.stateText
+                    text: sidecar.state === SidecarManager.Restarting
+                          ? qsTr("Перезапуск ядра…")
+                          : qsTr("Запуск ядра…")
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
                     font.family: Theme.fontSerif

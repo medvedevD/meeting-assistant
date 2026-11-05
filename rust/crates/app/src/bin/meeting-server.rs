@@ -44,6 +44,7 @@ use tracing_subscriber::EnvFilter;
 use container::{
     default_db_path, default_model_path, default_prompts_dir, default_recordings_dir, Container,
 };
+use meeting_adapters::{EmbeddedBundle, TemplateLanguage};
 
 /// Clean shutdown (signal, parent death, or graceful stop).
 const EXIT_OK: i32 = 0;
@@ -60,6 +61,9 @@ struct Args {
     /// Development-only command: roll back the latest reversible DB migration
     /// and exit without starting the loopback HTTP sidecar.
     rollback_one: bool,
+    /// Language of the bundled templates to seed. Absent or unknown means the
+    /// default, so a sidecar started by hand behaves like the legacy CLI.
+    language: TemplateLanguage,
 }
 
 fn parse_args() -> Args {
@@ -75,6 +79,13 @@ fn parse_args() -> Args {
             }
             "--rollback-one" => {
                 args.rollback_one = true;
+            }
+            "--language" => {
+                let code = it.next().unwrap_or_default();
+                args.language = TemplateLanguage::parse(&code).unwrap_or_else(|| {
+                    tracing::warn!("ignoring unknown --language value: {code}");
+                    TemplateLanguage::default()
+                });
             }
             other => {
                 tracing::warn!("ignoring unrecognised argument: {other}");
@@ -140,14 +151,15 @@ async fn run(args: Args) -> Result<()> {
         .take()
         .expect("sidecar container must carry settings handles");
 
-    // Seed any bundled prompt template missing from the (effective) prompts dir:
-    // first run, or a template newly shipped in this release. Honours deliberate
-    // deletions and never overwrites an existing file, so user edits survive.
-    // Best-effort: a failure here must not stop the sidecar from serving.
+    // Seed any bundled prompt template of the active language missing from the
+    // (effective) prompts dir: first run, or a template newly shipped in this
+    // release. Honours deliberate deletions and never overwrites an existing
+    // file, so user edits survive. Best-effort: a failure here must not stop the
+    // sidecar from serving.
     {
         let removed = handles.settings_store.load().removed_bundled_templates;
         match meeting_core::usecases::backfill_templates(
-            &meeting_adapters::EmbeddedBundle,
+            &EmbeddedBundle::new(args.language),
             handles.templates.as_ref(),
             &removed,
         )

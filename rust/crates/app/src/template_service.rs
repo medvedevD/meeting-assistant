@@ -1,19 +1,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use meeting_adapters::{EmbeddedBundle, JsonSettingsStore};
-use meeting_api::{TemplateDto, TemplateError, TemplateService};
-use meeting_core::ports::{TemplateBundle, TemplateLoader};
+use meeting_adapters::{is_bundled_template, JsonSettingsStore};
+use meeting_api::{TemplateDto, TemplateError, TemplateNotice, TemplateService};
+use meeting_core::ports::TemplateLoader;
 use meeting_core::usecases;
 use meeting_core::CoreError;
-
-/// True if `name` is one of the templates shipped with the app. Used to keep
-/// `settings.removed_bundled_templates` (the startup-backfill tombstone list) in
-/// sync with user edits: deleting a bundled template tombstones it; re-creating
-/// it clears the tombstone.
-fn is_bundled(name: &str) -> bool {
-    EmbeddedBundle.entries().iter().any(|(n, _)| n == name)
-}
 
 /// Concrete [`TemplateService`] over the file-backed [`TemplateLoader`] and the
 /// JSON settings store. Validation lives in the core use-cases; this layer maps
@@ -72,7 +64,7 @@ impl TemplateService for AppTemplateService {
 
         // Re-creating a bundled template the user had deleted clears its
         // tombstone, so future backfills treat it as present again.
-        if is_bundled(name) {
+        if is_bundled_template(name) {
             let mut settings = self.settings_store.load();
             if let Some(pos) = settings
                 .removed_bundled_templates
@@ -86,7 +78,7 @@ impl TemplateService for AppTemplateService {
         Ok(())
     }
 
-    async fn delete(&self, name: &str) -> Result<Option<String>, TemplateError> {
+    async fn delete(&self, name: &str) -> Result<Option<TemplateNotice>, TemplateError> {
         usecases::delete_template(&self.templates, name)
             .await
             .map_err(map_err)?;
@@ -96,7 +88,9 @@ impl TemplateService for AppTemplateService {
 
         // Tombstone a deleted bundled template so startup backfill won't
         // resurrect it on the next launch.
-        if is_bundled(name) && !settings.removed_bundled_templates.iter().any(|n| n == name) {
+        if is_bundled_template(name)
+            && !settings.removed_bundled_templates.iter().any(|n| n == name)
+        {
             settings.removed_bundled_templates.push(name.to_string());
             dirty = true;
         }
@@ -108,18 +102,14 @@ impl TemplateService for AppTemplateService {
         if settings.default_template.as_deref() == Some(name) {
             settings.default_template = None;
             dirty = true;
-            notice = Some(format!(
-                "Шаблон «{name}» был выбран по умолчанию — сброшено на встроенный шаблон."
-            ));
+            notice = Some(TemplateNotice::DefaultTemplateReset);
         }
 
         if dirty {
             if let Err(e) = self.settings_store.save(settings) {
                 // The template is already gone; a failed settings write is
                 // non-fatal but worth flagging rather than silently swallowing.
-                return Ok(Some(format!(
-                    "Шаблон удалён, но не удалось сохранить настройки: {e}"
-                )));
+                return Ok(Some(TemplateNotice::SettingsSaveFailed(e.to_string())));
             }
         }
         Ok(notice)
@@ -143,7 +133,9 @@ impl TemplateService for AppTemplateService {
         // Renaming a bundled template away tombstones the old name (else backfill
         // would re-seed it); renaming onto a bundled name clears that tombstone.
         if old != new {
-            if is_bundled(old) && !settings.removed_bundled_templates.iter().any(|n| n == old) {
+            if is_bundled_template(old)
+                && !settings.removed_bundled_templates.iter().any(|n| n == old)
+            {
                 settings.removed_bundled_templates.push(old.to_string());
                 dirty = true;
             }

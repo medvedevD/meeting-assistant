@@ -15,8 +15,7 @@
 Record a meeting, get a transcript and structured minutes. Speech recognition runs on
 your computer, and you choose which AI writes the minutes.
 
-> **Alpha.** The interface and built-in templates are in Russian for now, and English
-> is in progress. Builds are not yet signed with commercial certificates.
+> **Alpha.** Builds are not yet signed with commercial certificates.
 
 ## Features
 

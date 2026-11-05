@@ -192,6 +192,12 @@ jobs:
           # libQt6QuickControls2.so.6) that aren't on the default loader path.
           echo "LD_LIBRARY_PATH=$root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
+      # lupdate comes with the Qt installed above (qttools is in the default
+      # archives of all three installs).
+      - name: Check translations
+        shell: bash
+        run: bash .github/scripts/check-translations.sh
+
       # ── Build the Rust sidecar (the artefact the Qt smoke spawns) ──────────
       - name: Build meeting-server (release)
         shell: bash

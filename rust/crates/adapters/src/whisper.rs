@@ -527,7 +527,7 @@ impl LazyWhisperTranscriber {
             ctx_params.use_gpu(use_gpu);
             let ctx = WhisperContext::new_with_params(path_str, ctx_params).map_err(|e| {
                 CoreError::Transcription(format!(
-                    "model_missing: Модель не найдена или повреждена: {e}"
+                    "model_missing: model not found or corrupted: {e}"
                 ))
             })?;
             let model_name = path

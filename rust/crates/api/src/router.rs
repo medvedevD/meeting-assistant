@@ -391,7 +391,10 @@ mod tests {
         async fn save(&self, _name: &str, _body: &str) -> Result<(), crate::TemplateError> {
             Ok(())
         }
-        async fn delete(&self, _name: &str) -> Result<Option<String>, crate::TemplateError> {
+        async fn delete(
+            &self,
+            _name: &str,
+        ) -> Result<Option<crate::TemplateNotice>, crate::TemplateError> {
             Ok(None)
         }
         async fn rename(&self, _old: &str, _new: &str) -> Result<(), crate::TemplateError> {
