@@ -1085,7 +1085,7 @@ fn sigterm_right_after_a_transcription_exits_zero() {
     let audio = files.path().join("silence.wav");
     std::fs::write(&audio, one_second_wav()).expect("write audio");
     let job = start_transcription(&s, files.path(), &audio);
-    wait_for_job(&s, &job, |state| state["status"] == "done");
+    wait_for_job(&mut s, &job, |state| state["status"] == "done");
 
     unsafe { libc::kill(s.pid() as libc::pid_t, libc::SIGTERM) };
     let status = s
@@ -1114,7 +1114,7 @@ fn sigterm_during_a_transcription_exits_zero() {
         .expect("run mkfifo");
     assert!(mkfifo.success(), "mkfifo: {mkfifo}");
     let job = start_transcription(&s, files.path(), &audio);
-    wait_for_job(&s, &job, |state| {
+    wait_for_job(&mut s, &job, |state| {
         state["progress"]["stage"] == "decoding_audio"
     });
 
@@ -1180,17 +1180,23 @@ fn start_transcription(s: &Sidecar, files: &Path, audio: &Path) -> String {
 
 /// Polls the job until `reached` accepts its state.
 #[cfg(unix)]
-fn wait_for_job(s: &Sidecar, job_url: &str, reached: impl Fn(&serde_json::Value) -> bool) {
+fn wait_for_job(s: &mut Sidecar, job_url: &str, reached: impl Fn(&serde_json::Value) -> bool) {
     let c = client();
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
-        // A failed request usually means the sidecar died, and only its log says why.
+        // A failed request usually means the sidecar died. A crash in native code
+        // can leave nothing in its log, so its exit status is the only evidence.
         let state: serde_json::Value = c
             .get(job_url)
             .bearer_auth(&s.handshake.token)
             .send()
             .and_then(|response| response.json())
-            .unwrap_or_else(|e| panic!("get job: {e}\nstderr:\n{}", s.final_log()));
+            .unwrap_or_else(|e| {
+                let log = s.final_log();
+                let exit = s.child.try_wait().ok().flatten();
+                let exit = exit.map(|status| status.to_string());
+                panic!("get job: {e}\nsidecar exit: {exit:?}\nstderr:\n{log}")
+            });
         if reached(&state) {
             return;
         }
