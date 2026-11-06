@@ -86,7 +86,8 @@ Page {
                 Layout.fillWidth: true
                 text: qsTr("Диагностика")
                 elide: Text.ElideRight
-                font.family: Theme.fontSerif
+                font.family: Theme.serifFor(text)
+                renderType: Theme.renderTypeFor(font.family)
                 font.pixelSize: Theme.fsTitle
                 font.weight: Theme.wMedium
                 font.letterSpacing: Theme.tracking(Theme.fsTitle, -0.02)

@@ -392,7 +392,8 @@ Page {
                 Text {
                     Layout.fillWidth: true
                     text: qsTr("Новая запись")
-                    font.family: Theme.fontSerif
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
                     font.pixelSize: Theme.fsTitle
                     font.weight: Theme.wMedium
                     font.letterSpacing: Theme.tracking(Theme.fsTitle, -0.02)
@@ -420,7 +421,8 @@ Page {
                     Text {
                         Layout.fillWidth: true
                         text: qsTr("Готовы записать?")
-                        font.family: Theme.fontSerif
+                        font.family: Theme.serifFor(text)
+                        renderType: Theme.renderTypeFor(font.family)
                         font.pixelSize: Theme.fsH1
                         font.weight: Theme.wMedium
                         font.letterSpacing: Theme.tracking(Theme.fsH1, -0.02)
@@ -430,7 +432,8 @@ Page {
                         Layout.fillWidth: true
                         Layout.bottomMargin: 28
                         text: qsTr("Дайте встрече название — остальное Meeting Assistant сделает сам.")
-                        font.family: Theme.fontSerif
+                        font.family: Theme.serifFor(text)
+                        renderType: Theme.renderTypeFor(font.family)
                         font.pixelSize: 16
                         font.italic: true
                         color: Theme.ink2
@@ -759,7 +762,8 @@ Page {
                 Text {
                     Layout.alignment: Qt.AlignHCenter
                     text: scr.fmt(scr.elapsed)
-                    font.family: Theme.fontSerif
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
                     font.pixelSize: 76
                     font.weight: Theme.wRegular
                     font.letterSpacing: Theme.tracking(76, -0.025)
@@ -806,7 +810,8 @@ Page {
                     text: qsTr("«%1»").arg(scr.recName)
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
-                    font.family: Theme.fontSerif
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
                     font.pixelSize: 20
                     font.italic: true
                     color: Theme.ink2

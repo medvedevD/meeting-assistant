@@ -200,15 +200,24 @@ qt_add_translations(meeting-assistant-qt
     LUPDATE_OPTIONS -locations none)
 
 # Bundled design fonts (qt-redesign): variable TTFs registered as :/fonts/*,
-# loaded by Theme.qml's FontLoaders. All OFL-licensed (see fonts/OFL-*.txt);
-# packaging must ship the OFL notices and the binary grows accordingly.
+# loaded by Theme.qml's FontLoaders. All OFL-licensed: the license must travel
+# with the fonts, so the install rules below ship every file in MA_FONT_LICENSES.
+# tests/serif_typeface loads the same MA_FONT_FILES.
+set(MA_FONT_FILES
+    fonts/Geist-Variable.ttf
+    fonts/Newsreader-Variable.ttf
+    fonts/Newsreader-Italic-Variable.ttf
+    fonts/SourceSerif4-Variable.ttf
+    fonts/SourceSerif4-Italic-Variable.ttf
+    fonts/JetBrainsMono-Variable.ttf)
+set(MA_FONT_LICENSES
+    fonts/OFL-Geist.txt
+    fonts/OFL-Newsreader.txt
+    fonts/OFL-SourceSerif4.txt
+    fonts/OFL-JetBrainsMono.txt)
 qt_add_resources(meeting-assistant-qt "meety_fonts"
     PREFIX "/"
-    FILES
-        fonts/Geist-Variable.ttf
-        fonts/Newsreader-Variable.ttf
-        fonts/Newsreader-Italic-Variable.ttf
-        fonts/JetBrainsMono-Variable.ttf)
+    FILES ${MA_FONT_FILES})
 
 # Fusion fallback: compiled-in `:/qtquickcontrols2.conf`. Qt Quick Controls
 # reads this at startup; combined with QQuickStyle::setStyle("Fusion") in
@@ -262,6 +271,7 @@ function(ma_install_licenses destination)
     install(DIRECTORY "${_lic_dir}/" DESTINATION "${destination}"
         PATTERN "Qt-VERSION.txt.in" EXCLUDE)
     install(FILES "${_qt_version_notice}" DESTINATION "${destination}")
+    install(FILES ${MA_FONT_LICENSES} DESTINATION "${destination}")
 endfunction()
 
 if(APPLE AND MA_MACOS_APP_BUNDLE)

@@ -234,5 +234,7 @@ glibc floor. The Rust toolchain is pinned in `rust-toolchain.toml`, so a new sta
 release cannot break the gate without a code change.
 
 Qt and FFmpeg are used under the LGPL, and every installer includes the license texts
-and written offers from [`packaging/LICENSES`](../packaging/LICENSES).
+and written offers from [`packaging/LICENSES`](../packaging/LICENSES). The bundled fonts
+are under the SIL Open Font License, and their licenses from
+[`qt-app/fonts`](../qt-app/fonts) ship in the same folder.
 See [`packaging/README.md`](../packaging/README.md) for per-OS details.

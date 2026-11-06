@@ -42,6 +42,8 @@ int main(int argc, char *argv[]) {
     const QString uiFont = loadFont(QStringLiteral(":/fonts/Geist-Variable.ttf"));
     loadFont(QStringLiteral(":/fonts/Newsreader-Variable.ttf"));
     loadFont(QStringLiteral(":/fonts/Newsreader-Italic-Variable.ttf"));
+    loadFont(QStringLiteral(":/fonts/SourceSerif4-Variable.ttf"));
+    loadFont(QStringLiteral(":/fonts/SourceSerif4-Italic-Variable.ttf"));
     loadFont(QStringLiteral(":/fonts/JetBrainsMono-Variable.ttf"));
     if (!uiFont.isEmpty()) {
         QFont appFont(uiFont);

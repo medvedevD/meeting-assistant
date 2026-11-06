@@ -8,6 +8,10 @@ ColumnLayout {
     id: doc
     property string markdown: ""
     property var structured: null
+    // One serif for the whole document, so a table cell holding only "PDF" matches
+    // the Russian lines around it. It reads the source text rather than `blocks`,
+    // whose section titles follow the interface language.
+    readonly property string serif: Theme.serifFor(markdown + JSON.stringify(structured))
     spacing: 0
 
     function _escape(s) {
@@ -399,7 +403,8 @@ ColumnLayout {
             text: blk ? doc._inline(blk.text) : ""
             textFormat: Text.StyledText
             wrapMode: Text.WordWrap
-            font.family: Theme.fontSerif
+            font.family: doc.serif
+            renderType: Theme.renderTypeFor(font.family)
             font.pixelSize: 40
             font.weight: Theme.wMedium
             font.letterSpacing: Theme.tracking(40, -0.025)
@@ -460,7 +465,8 @@ ColumnLayout {
             text: blk ? doc._inline(blk.text) : ""
             textFormat: Text.StyledText
             wrapMode: Text.WordWrap
-            font.family: Theme.fontSerif
+            font.family: doc.serif
+            renderType: Theme.renderTypeFor(font.family)
             font.pixelSize: 19
             font.weight: Theme.wSemiBold
             font.letterSpacing: Theme.tracking(19, -0.01)
@@ -476,7 +482,8 @@ ColumnLayout {
             text: blk ? doc._inline(blk.text) : ""
             textFormat: Text.StyledText
             wrapMode: Text.WordWrap
-            font.family: Theme.fontSerif
+            font.family: doc.serif
+            renderType: Theme.renderTypeFor(font.family)
             font.pixelSize: 17
             font.weight: Theme.wSemiBold
             color: Theme.ink
@@ -491,7 +498,8 @@ ColumnLayout {
             text: blk ? doc._inline(blk.text) : ""
             textFormat: Text.StyledText
             wrapMode: Text.WordWrap
-            font.family: Theme.fontSerif
+            font.family: doc.serif
+            renderType: Theme.renderTypeFor(font.family)
             font.pixelSize: 17
             color: Theme.ink
             lineHeight: 1.45
@@ -524,7 +532,8 @@ ColumnLayout {
                         visible: !parent.isTask
                         Layout.alignment: Qt.AlignTop
                         text: "•"; color: Theme.ink4
-                        font.family: Theme.fontSerif; font.pixelSize: 17
+                        font.family: doc.serif; font.pixelSize: 17
+                        renderType: Theme.renderTypeFor(font.family)
                     }
                     // task checkbox
                     Rectangle {
@@ -546,7 +555,8 @@ ColumnLayout {
                         text: doc._inline(parent.body)
                         textFormat: Text.StyledText
                         wrapMode: Text.WordWrap
-                        font.family: Theme.fontSerif
+                        font.family: doc.serif
+                        renderType: Theme.renderTypeFor(font.family)
                         font.pixelSize: 17
                         color: Theme.ink
                         lineHeight: 1.4
@@ -572,14 +582,16 @@ ColumnLayout {
                         Layout.alignment: Qt.AlignTop
                         text: modelData.num + "."
                         color: Theme.ink4
-                        font.family: Theme.fontSerif; font.pixelSize: 17
+                        font.family: doc.serif; font.pixelSize: 17
+                        renderType: Theme.renderTypeFor(font.family)
                     }
                     Text {
                         Layout.fillWidth: true
                         text: doc._inline(modelData.text)
                         textFormat: Text.StyledText
                         wrapMode: Text.WordWrap
-                        font.family: Theme.fontSerif
+                        font.family: doc.serif
+                        renderType: Theme.renderTypeFor(font.family)
                         font.pixelSize: 17
                         color: Theme.ink
                         lineHeight: 1.4
@@ -606,7 +618,8 @@ ColumnLayout {
                 text: blk ? doc._inlineMultiline(blk.text) : ""
                 textFormat: Text.StyledText
                 wrapMode: Text.WordWrap
-                font.family: Theme.fontSerif
+                font.family: doc.serif
+                renderType: Theme.renderTypeFor(font.family)
                 font.pixelSize: 17
                 font.italic: true
                 color: Theme.ink2
@@ -726,7 +739,8 @@ ColumnLayout {
                                 text: doc._inline((bodyRow.modelData[index] || "") + "")
                                 textFormat: Text.StyledText
                                 wrapMode: Text.WordWrap
-                                font.family: Theme.fontSerif
+                                font.family: doc.serif
+                                renderType: Theme.renderTypeFor(font.family)
                                 font.pixelSize: 15
                                 lineHeight: 1.4
                                 color: index === 0 ? Theme.ink : Theme.ink2

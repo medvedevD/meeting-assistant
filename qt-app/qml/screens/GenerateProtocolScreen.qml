@@ -139,7 +139,8 @@ Page {
             Text {
                 Layout.fillWidth: true
                 text: qsTr("Генерация протокола")
-                font.family: Theme.fontSerif
+                font.family: Theme.serifFor(text)
+                renderType: Theme.renderTypeFor(font.family)
                 font.pixelSize: Theme.fsTitle
                 font.weight: Theme.wMedium
                 font.letterSpacing: Theme.tracking(Theme.fsTitle, -0.02)
@@ -228,7 +229,8 @@ Page {
                             text: scr.meetingName
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.WordWrap
-                            font.family: Theme.fontSerif
+                            font.family: Theme.serifFor(text)
+                            renderType: Theme.renderTypeFor(font.family)
                             font.pixelSize: Theme.fsTitle
                             font.weight: Theme.wMedium
                             font.letterSpacing: Theme.tracking(Theme.fsTitle, -0.02)
@@ -367,7 +369,8 @@ Page {
                         text: scr.meetingName
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
-                        font.family: Theme.fontSerif
+                        font.family: Theme.serifFor(text)
+                        renderType: Theme.renderTypeFor(font.family)
                         font.pixelSize: Theme.fsTitle
                         font.weight: Theme.wMedium
                         font.letterSpacing: Theme.tracking(Theme.fsTitle, -0.02)

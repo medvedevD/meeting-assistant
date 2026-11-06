@@ -71,4 +71,5 @@ LLM-провайдеру и только при создании протоко�
 ## Лицензия
 
 [MIT](LICENSE). В готовые сборки также входят Qt и FFmpeg под LGPL, см.
-[`packaging/LICENSES`](packaging/LICENSES).
+[`packaging/LICENSES`](packaging/LICENSES). Встроенные шрифты распространяются под SIL
+Open Font License, см. [`qt-app/fonts`](qt-app/fonts).
