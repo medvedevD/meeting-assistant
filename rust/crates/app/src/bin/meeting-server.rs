@@ -205,8 +205,6 @@ async fn run(args: Args) -> Result<()> {
         .await;
 
     let workers = container.spawn_workers().await;
-    let transcribe_abort = workers.transcribe_join.abort_handle();
-    let protocol_abort = workers.protocol_join.abort_handle();
 
     // ── Loopback bind (strict) ────────────────────────────────────────────────
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
@@ -311,12 +309,27 @@ async fn run(args: Args) -> Result<()> {
     })
     .await;
     if drain.is_err() {
-        tracing::warn!("workers did not stop within 1.2s — aborting");
-        transcribe_abort.abort();
-        protocol_abort.abort();
+        tracing::warn!("workers did not stop within 1.2s — exiting with a job still running");
     }
     tracing::info!("graceful shutdown complete");
-    std::process::exit(EXIT_OK);
+    exit_without_destructors(EXIT_OK);
+}
+
+/// Ends the process without running C++ static destructors.
+///
+/// `std::process::exit` runs them, and ggml's Metal device is one. Its destructor
+/// aborts while a Whisper context still has buffers registered (macOS 15+ on Apple
+/// Silicon), and a running transcription can't be made to release its context.
+/// Nothing needs them here: the OS reclaims the GPU memory, SQLite recovers from
+/// any exit, a job left `running` resumes on next start, and the logger writes
+/// straight to stderr. Windows has no Metal backend, so it keeps the normal exit.
+fn exit_without_destructors(code: i32) -> ! {
+    #[cfg(unix)]
+    unsafe {
+        libc::_exit(code)
+    }
+    #[cfg(not(unix))]
+    std::process::exit(code)
 }
 
 /// Spawns the parent-death watchdog(s). On parent death any watchdog fires

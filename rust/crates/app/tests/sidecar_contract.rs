@@ -177,6 +177,20 @@ impl Sidecar {
         String::from_utf8_lossy(&self.stderr.lock().unwrap()).into_owned()
     }
 
+    /// The log of a server that has exited, up to its last line. The thread that
+    /// drains stderr can still be catching up when the process is gone.
+    #[cfg(unix)]
+    fn final_log(&self) -> String {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let log = self.stderr_string();
+            if log.contains("graceful shutdown complete") || Instant::now() >= deadline {
+                return log;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     /// Wait up to `budget` for the process to exit; return its status.
     fn wait_for_exit(&mut self, budget: Duration) -> Option<std::process::ExitStatus> {
         let deadline = Instant::now() + budget;
@@ -1049,6 +1063,204 @@ fn sigterm_triggers_graceful_shutdown_exit_zero() {
         Some(0),
         "SIGTERM must drive a graceful exit(0)"
     );
+
+    // Idle workers have nothing to drain. They used to sit out their poll
+    // interval, which is longer than the drain budget, and get reported as stuck.
+    let log = s.final_log();
+    assert!(
+        !log.contains("workers did not stop"),
+        "idle workers must stop at once:\n{log}"
+    );
+}
+
+// While a Whisper context is alive its Metal buffers stay registered with ggml's
+// device, whose destructor aborts if any are left (macOS 15+ on Apple Silicon).
+// That destructor used to run at exit, so a normal quit could die with SIGABRT
+// and leave a crash report behind.
+#[cfg(unix)]
+#[test]
+fn sigterm_right_after_a_transcription_exits_zero() {
+    let files = tempfile::tempdir().unwrap();
+    let mut s = Sidecar::spawn();
+    let audio = files.path().join("silence.wav");
+    std::fs::write(&audio, one_second_wav()).expect("write audio");
+    let job = start_transcription(&s, files.path(), &audio);
+    wait_for_job(&s, &job, |state| state["status"] == "done");
+
+    unsafe { libc::kill(s.pid() as libc::pid_t, libc::SIGTERM) };
+    let status = s
+        .wait_for_exit(REAP_BUDGET)
+        .expect("sidecar must exit after SIGTERM");
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "a quit with a loaded Whisper context must exit(0):\n{}",
+        s.final_log()
+    );
+}
+
+// A running transcription can't be interrupted, so its thread still holds the
+// Whisper context when the drain budget runs out and nothing can free it first.
+// Audio from a FIFO with no writer keeps the job in that state for the whole test.
+#[cfg(unix)]
+#[test]
+fn sigterm_during_a_transcription_exits_zero() {
+    let files = tempfile::tempdir().unwrap();
+    let mut s = Sidecar::spawn();
+    let audio = files.path().join("never-ends.wav");
+    let mkfifo = Command::new("mkfifo")
+        .arg(&audio)
+        .status()
+        .expect("run mkfifo");
+    assert!(mkfifo.success(), "mkfifo: {mkfifo}");
+    let job = start_transcription(&s, files.path(), &audio);
+    wait_for_job(&s, &job, |state| {
+        state["progress"]["stage"] == "decoding_audio"
+    });
+
+    unsafe { libc::kill(s.pid() as libc::pid_t, libc::SIGTERM) };
+    let status = s
+        .wait_for_exit(REAP_BUDGET)
+        .expect("sidecar must exit after SIGTERM");
+    let log = s.final_log();
+    assert!(
+        log.contains("workers did not stop"),
+        "the job must still be running at exit:\n{log}"
+    );
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "a quit during a transcription must exit(0):\n{log}"
+    );
+}
+
+/// Selects a model file that needs no download and submits a transcription of
+/// `audio`. Returns the URL of the job.
+#[cfg(unix)]
+fn start_transcription(s: &Sidecar, files: &Path, audio: &Path) -> String {
+    let model = files.join("ggml-empty.bin");
+    std::fs::write(&model, empty_whisper_model()).expect("write model");
+
+    let c = client();
+    let tok = &s.handshake.token;
+    let settings_url = format!("{}/api/v1/settings", s.base_url());
+    let mut settings: serde_json::Value = c
+        .get(&settings_url)
+        .bearer_auth(tok)
+        .send()
+        .expect("get settings")
+        .json()
+        .expect("settings json");
+    settings["transcriber"]["model_source"] = serde_json::json!("custom_path");
+    settings["transcriber"]["custom_model_path"] = serde_json::json!(model);
+    settings["transcriber"]["custom_models"] =
+        serde_json::json!([{ "id": "empty", "name": "Empty", "path": model }]);
+    let put = c
+        .put(&settings_url)
+        .bearer_auth(tok)
+        .json(&settings)
+        .send()
+        .expect("put settings");
+    assert!(put.status().is_success(), "put settings: {}", put.status());
+
+    let job: serde_json::Value = c
+        .post(format!("{}/api/v1/jobs", s.base_url()))
+        .bearer_auth(tok)
+        .json(&serde_json::json!({ "audio_path": audio, "name": "synthetic" }))
+        .send()
+        .expect("submit job")
+        .json()
+        .expect("job json");
+    format!(
+        "{}/api/v1/jobs/{}",
+        s.base_url(),
+        job["id"].as_str().expect("job id")
+    )
+}
+
+/// Polls the job until `reached` accepts its state.
+#[cfg(unix)]
+fn wait_for_job(s: &Sidecar, job_url: &str, reached: impl Fn(&serde_json::Value) -> bool) {
+    let c = client();
+    let deadline = Instant::now() + Duration::from_secs(60);
+    loop {
+        let state: serde_json::Value = c
+            .get(job_url)
+            .bearer_auth(&s.handshake.token)
+            .send()
+            .expect("get job")
+            .json()
+            .expect("job json");
+        if reached(&state) {
+            return;
+        }
+        assert!(
+            state["status"] != "failed" && Instant::now() < deadline,
+            "job did not get there: {state}\nstderr:\n{}",
+            s.stderr_string()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// A valid Whisper model file with no tensors in it. whisper.cpp loads this as an
+/// "empty model for testing": it allocates the buffers on the real backend (Metal
+/// on macOS) and ends decoding at once, so a job runs in moments and no model has
+/// to be downloaded. The sizes are the smallest that load.
+#[cfg(unix)]
+fn empty_whisper_model() -> Vec<u8> {
+    const N_MELS: i32 = 80;
+    const N_FFT: i32 = 201;
+
+    let mut model = Vec::new();
+    model.extend_from_slice(&0x6767_6d6c_u32.to_le_bytes()); // magic: "ggml"
+    let hparams: [i32; 11] = [
+        51_864, // n_vocab: English-only, so there is no language to detect
+        1_500,  // n_audio_ctx
+        8,      // n_audio_state
+        1,      // n_audio_head
+        1,      // n_audio_layer
+        448,    // n_text_ctx
+        8,      // n_text_state
+        1,      // n_text_head
+        1,      // n_text_layer
+        N_MELS, // n_mels
+        0,      // ftype: all f32
+    ];
+    for value in hparams {
+        model.extend_from_slice(&value.to_le_bytes());
+    }
+    model.extend_from_slice(&N_MELS.to_le_bytes());
+    model.extend_from_slice(&N_FFT.to_le_bytes());
+    // Mel filters, all zero.
+    model.resize(model.len() + (N_MELS * N_FFT) as usize * 4, 0);
+    // whisper.cpp fills in the vocab but looks up the blank token by its text.
+    model.extend_from_slice(&1i32.to_le_bytes());
+    model.extend_from_slice(&1u32.to_le_bytes());
+    model.push(b' ');
+    model
+}
+
+/// One second of silence as a finalized 16 kHz mono 16-bit WAV.
+#[cfg(unix)]
+fn one_second_wav() -> Vec<u8> {
+    const DATA_LEN: u32 = 32_000;
+
+    let mut wav = Vec::new();
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + DATA_LEN).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+    wav.extend_from_slice(&16_000u32.to_le_bytes());
+    wav.extend_from_slice(&32_000u32.to_le_bytes()); // byte rate
+    wav.extend_from_slice(&2u16.to_le_bytes()); // block align
+    wav.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&DATA_LEN.to_le_bytes());
+    wav.resize(wav.len() + DATA_LEN as usize, 0);
+    wav
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
