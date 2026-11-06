@@ -1231,7 +1231,7 @@ fn empty_whisper_model() -> Vec<u8> {
         1,      // n_text_head
         1,      // n_text_layer
         N_MELS, // n_mels
-        0,      // ftype: all f32
+        1,      // ftype: f16, like real models. ggml's CPU convolution rejects f32
     ];
     for value in hparams {
         model.extend_from_slice(&value.to_le_bytes());
