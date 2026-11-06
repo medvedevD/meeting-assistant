@@ -89,6 +89,8 @@ When creating commits, do not add AI-agent attribution. Commit messages must not
 
 See `packaging/` for OS-specific build/sign/notarize scripts (handled outside the dev loop). Before each release, run the manual per-OS check in `packaging/SMOKE-CHECKLIST.md`.
 
+The Qt version differs per OS and each one is held in place by something specific: see "Qt version per OS" in `packaging/README.md` before changing a runner or a Qt version. The app promises macOS 13, so macOS builds set `MACOSX_DEPLOYMENT_TARGET` from `packaging/macos/Info.plist.in`, and `packaging/macos/check-bundle.sh` fails on any binary that needs a newer macOS.
+
 ### Release Gate
 
 Release packaging must be gated by CI, not just triggered by a tag. Before any

@@ -33,6 +33,15 @@ for a in "$@"; do case "$a" in
     *) echo "Unknown arg: $a" >&2; exit 1 ;;
 esac; done
 
+# ── Build for the macOS the app promises, not the one doing the build ─────────
+# With no target, clang and CMake build for the host OS, so a newer runner raises
+# the real minimum in silence. rustc, cc-rs, CMake and FFmpeg's configure (through
+# clang) all read this variable. check-bundle.sh below fails the build if it was
+# not enough.
+MACOSX_DEPLOYMENT_TARGET="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$SCRIPT_DIR/Info.plist.in")"
+export MACOSX_DEPLOYMENT_TARGET
+echo "→ Deployment target: macOS $MACOSX_DEPLOYMENT_TARGET"
+
 # ── Locate Qt 6 (mirrors run-qt.sh) ──────────────────────────────────────────
 detect_qt_prefix() {
     if [[ -n "${CMAKE_PREFIX_PATH:-}" ]]; then echo "$CMAKE_PREFIX_PATH"; return; fi
@@ -150,6 +159,9 @@ fi
 cp "$ff_prefix/bin/ffmpeg" "$APP/Contents/MacOS/ffmpeg"
 chmod +x "$APP/Contents/MacOS/ffmpeg"
 echo "→ ffmpeg CLI bundled: $APP/Contents/MacOS/ffmpeg"
+
+# ── 4f. Minimum macOS, arm64 and the Qt notice, now that every binary is in ───
+"$SCRIPT_DIR/check-bundle.sh" "$APP"
 
 # ── 5. Ad-hoc deep-sign + verify (the spike's crux) ──────────────────────────
 "$SCRIPT_DIR/codesign-deep.sh" "$APP"

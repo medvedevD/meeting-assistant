@@ -60,13 +60,12 @@ jobs:
 
           entry() { # entry <key> → one matrix include object
             case "$1" in
-              linux)   echo '{"os":"ubuntu-latest","container":"ubuntu:20.04","installer_glob":"dist/linux/*.AppImage"}' ;;
-              # macos-14 (not macos-latest): aqt's Qt 6.7 prebuilt hard-links
-              # -framework AGL, removed from the macos-15+/Xcode 26 SDK on
-              # macos-latest. macos-14 keeps the AGL stub and is arm64 (the
-              # .dmg's target arch). See qt-ci.yml for the same pin.
-              macos)   echo '{"os":"macos-14","container":"","installer_glob":"dist/macos/*.dmg"}' ;;
-              windows) echo '{"os":"windows-latest","container":"","installer_glob":"dist/windows/*.exe"}' ;;
+              # Runner and Qt per OS must match qt-ci.yml, which explains them:
+              # macos-26 with Qt 6.11 because its SDK has no AGL, which Qt 6.8 and
+              # older link, and Qt 6.10+ is out of reach on Linux's glibc floor.
+              linux)   echo '{"os":"ubuntu-latest","container":"ubuntu:20.04","qt":"6.7.3","installer_glob":"dist/linux/*.AppImage"}' ;;
+              macos)   echo '{"os":"macos-26","container":"","qt":"6.11.1","installer_glob":"dist/macos/*.dmg"}' ;;
+              windows) echo '{"os":"windows-latest","container":"","qt":"6.7.3","installer_glob":"dist/windows/*.exe"}' ;;
               *) echo "::error::unknown target '$1'" >&2; exit 1 ;;
             esac
           }
@@ -184,11 +183,11 @@ jobs:
       #   its deep dependency chain is never needed.) qt-ci.yml doesn't bundle
       #   multimedia, so it never needed any of these.
 
-      - name: Install Qt 6.7 (host runners)
+      - name: Install Qt (host runners)
         if: matrix.container == ''
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.7.3'
+          version: ${{ matrix.qt }}
           # qtmultimedia is NOT in the default desktop set; the in-card audio
           # player's find_package(Qt6 … Multimedia) fails without it.
           modules: qtmultimedia
@@ -198,7 +197,7 @@ jobs:
         if: matrix.container != ''
         uses: astral-sh/setup-uv@v5
 
-      - name: Install Qt 6.7 (Linux container)
+      - name: Install Qt (Linux container)
         if: matrix.container != ''
         shell: bash
         run: |
@@ -206,8 +205,8 @@ jobs:
           # -m qtmultimedia: the audio player needs Qt6::Multimedia, which the
           # base desktop archive omits. Qt SVG is part of the base archive.
           uvx --python 3.12 --from aqtinstall aqt \
-            install-qt linux desktop 6.7.3 linux_gcc_64 -m qtmultimedia -O "$qtdir"
-          qmake="$(find "$qtdir/6.7.3" -path '*/bin/qmake' | head -n1)"
+            install-qt linux desktop ${{ matrix.qt }} linux_gcc_64 -m qtmultimedia -O "$qtdir"
+          qmake="$(find "$qtdir/${{ matrix.qt }}" -path '*/bin/qmake' | head -n1)"
           root="$(dirname "$(dirname "$qmake")")"
           test -x "$root/bin/qmake"
           echo "QT_ROOT_DIR=$root" >> "$GITHUB_ENV"
@@ -245,13 +244,16 @@ jobs:
           key: linux-tools-${{ runner.arch }}-ffmpeg6.1.1-v2
 
       # Same idea for the macOS from-source ffmpeg CLI (build-app.sh): cache the
-      # static LGPL build so it isn't rebuilt every (10x-billed) macOS run.
+      # static LGPL build so it isn't rebuilt every (10x-billed) macOS run. The key
+      # does not see the deployment target or the SDK, so bump the suffix when
+      # either changes: check-bundle.sh fails on an ffmpeg built for a newer macOS.
+      # v3: first build for macOS 13 on the macos-26 SDK (v2 was minos 14.0).
       - name: Cache macOS build tools (FFmpeg)
         if: runner.os == 'macOS'
         uses: actions/cache@v4
         with:
           path: dist/macos/.tools
-          key: macos-tools-${{ runner.arch }}-ffmpeg6.1.1-v2
+          key: macos-tools-${{ runner.arch }}-ffmpeg6.1.1-v3
 
       # build-app.sh uses create-dmg for the drag-to-install layout + bundled
       # first-launch guide. (textutil, used for the guide RTF, is built in.)
