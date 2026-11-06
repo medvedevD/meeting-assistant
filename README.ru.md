@@ -27,7 +27,7 @@
 
 | Запись | Расшифровка | Протокол |
 |---|---|---|
-| ![Экран записи с таймером](docs/screenshots/recording.png) | ![Ход распознавания речи](docs/screenshots/progress.png) | ![Протокол с решениями и таблицей задач](docs/screenshots/minutes.png) |
+| <img src="docs/screenshots/recording.png" width="250" alt="Экран записи с таймером"> | <img src="docs/screenshots/progress.png" width="250" alt="Ход распознавания речи"> | <img src="docs/screenshots/minutes.png" width="250" alt="Протокол с решениями и таблицей задач"> |
 
 ## Скачать
 

@@ -27,7 +27,7 @@ Record a meeting, get a transcript and structured minutes. Speech recognition ru
 
 | Record | Transcribe | Read the minutes |
 |---|---|---|
-| ![Recording screen with a running timer](docs/screenshots/recording.png) | ![Progress card during speech recognition](docs/screenshots/progress.png) | ![Minutes with decisions and an action table](docs/screenshots/minutes.png) |
+| <img src="docs/screenshots/recording.png" width="250" alt="Recording screen with a running timer"> | <img src="docs/screenshots/progress.png" width="250" alt="Progress card during speech recognition"> | <img src="docs/screenshots/minutes.png" width="250" alt="Minutes with decisions and an action table"> |
 
 ## Download
 
