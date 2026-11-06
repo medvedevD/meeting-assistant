@@ -125,8 +125,11 @@ impl Container {
             let _ = settings_store.save(settings.clone());
         }
 
-        // Effective paths: a settings override wins over the passed default. (db
-        // and recordings overrides are restart-required and applied at boot.)
+        // Effective paths: a settings override wins over the passed default. The
+        // recordings override is restart-required and applied here at boot.
+        // `paths.db` is not read yet: `db_path` is always the default.
+        let recordings_dir =
+            effective_recordings_dir(settings.paths.meetings_dir.as_deref(), recordings_dir)?;
         let model_resolution = resolve_transcription_model_path(&settings);
         let model = model_resolution
             .as_ref()
@@ -293,6 +296,33 @@ pub fn default_recordings_dir() -> PathBuf {
         .join("meeting-assistant")
 }
 
+/// Create and return the recordings dir: `paths.meetings_dir` when it is usable,
+/// otherwise `default`.
+///
+/// Older versions ignored this setting, so an existing settings file may hold a
+/// stale or hand-typed value. Such a value must not stop the app from starting,
+/// so it only costs a warning. A relative path would follow the working
+/// directory, which differs between launches, so it counts as unusable.
+fn effective_recordings_dir(configured: Option<&str>, default: PathBuf) -> Result<PathBuf> {
+    if let Some(dir) = configured.map(str::trim).filter(|dir| !dir.is_empty()) {
+        let dir = PathBuf::from(dir);
+        if !dir.is_absolute() {
+            tracing::warn!(
+                "ignoring paths.meetings_dir {}: not an absolute path",
+                dir.display()
+            );
+        } else {
+            match std::fs::create_dir_all(&dir) {
+                Ok(()) => return Ok(dir),
+                Err(e) => tracing::warn!("ignoring paths.meetings_dir {}: {e}", dir.display()),
+            }
+        }
+    }
+    std::fs::create_dir_all(&default)
+        .with_context(|| format!("cannot create recordings dir {default:?}"))?;
+    Ok(default)
+}
+
 pub fn default_prompts_dir() -> PathBuf {
     // Writable, per-user, survives upgrades (like the db and models dirs). The
     // bundled templates are embedded in the binary and seeded here at startup by
@@ -306,6 +336,61 @@ fn xdg_data_dir() -> PathBuf {
         .or_else(dirs::data_dir)
         .or_else(|| dirs::home_dir().map(|home| home.join(".local/share")))
         .expect("cannot resolve user's data directory")
+}
+
+#[cfg(test)]
+mod recordings_dir_tests {
+    use super::effective_recordings_dir;
+
+    #[test]
+    fn a_configured_dir_is_created_and_used_instead_of_the_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let chosen = tmp.path().join("chosen/recordings");
+        let default = tmp.path().join("default");
+
+        let dir = effective_recordings_dir(chosen.to_str(), default.clone()).unwrap();
+
+        assert_eq!(dir, chosen);
+        assert!(chosen.is_dir());
+        assert!(!default.exists(), "the default must not be created");
+    }
+
+    #[test]
+    fn no_or_blank_value_means_the_default() {
+        for configured in [None, Some(""), Some("   ")] {
+            let tmp = tempfile::tempdir().unwrap();
+            let default = tmp.path().join("default");
+
+            let dir = effective_recordings_dir(configured, default.clone()).unwrap();
+
+            assert_eq!(dir, default);
+            assert!(default.is_dir());
+        }
+    }
+
+    #[test]
+    fn a_relative_value_falls_back_to_the_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let default = tmp.path().join("default");
+
+        let dir = effective_recordings_dir(Some("meetings-relative"), default.clone()).unwrap();
+
+        assert_eq!(dir, default);
+        assert!(!std::path::Path::new("meetings-relative").exists());
+    }
+
+    #[test]
+    fn a_value_that_cannot_be_created_falls_back_to_the_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("a-file");
+        std::fs::write(&file, b"").unwrap();
+        let default = tmp.path().join("default");
+
+        let dir =
+            effective_recordings_dir(file.join("recordings").to_str(), default.clone()).unwrap();
+
+        assert_eq!(dir, default);
+    }
 }
 
 #[cfg(all(test, windows))]
