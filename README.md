@@ -12,10 +12,10 @@
 
 **English** | [Русский](README.ru.md)
 
-Record a meeting, get a transcript and structured minutes. Speech recognition runs on
-your computer, and you choose which AI writes the minutes.
+Record a meeting, get a transcript and structured minutes. Speech recognition runs on your computer, and you choose which AI writes the minutes.
 
-> **Alpha.** Builds are not yet signed with commercial certificates.
+<img src="docs/screenshots/demo.gif" width="720" alt="Recording a meeting, following transcription progress, and reading the generated minutes"><br>
+<sub>A staged demo with a fictional meeting: no real microphone audio, and the minutes text was prepared in advance.</sub>
 
 ## Features
 
@@ -25,7 +25,13 @@ your computer, and you choose which AI writes the minutes.
 - **Your choice of AI:** Anthropic, OpenAI, Gemini, or Mistral with your own key, or Ollama offline.
 - **Meeting history:** keep recordings, transcripts, and minutes locally; replay or reprocess any meeting.
 
+| Record | Transcribe | Read the minutes |
+|---|---|---|
+| <img src="docs/screenshots/recording.png" width="250" alt="Recording screen with a running timer"> | <img src="docs/screenshots/progress.png" width="250" alt="Progress card during speech recognition"> | <img src="docs/screenshots/minutes.png" width="250" alt="Minutes with decisions and an action table"> |
+
 ## Download
+
+> **Alpha.** Builds are not yet signed with commercial certificates.
 
 Get the latest build for macOS, Windows, or Linux from
 [Releases](https://github.com/medvedevD/meeting-assistant/releases). On macOS you can
@@ -63,7 +69,7 @@ Read more in the [architecture overview](docs/ARCHITECTURE.md). To build and run
 | `qt-app/` | Desktop UI in QML and C++, with its tests |
 | `prompts/` | Built-in minutes templates |
 | `packaging/` | Installer recipes, license notices, and the release checklist |
-| `docs/` | Installation, development, architecture, and brand assets |
+| `docs/` | Installation, development, architecture, screenshots, and brand assets |
 | `plans/`, `backlog/` | Work in progress and future ideas |
 
 ## License
