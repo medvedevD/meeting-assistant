@@ -138,8 +138,6 @@ async fn run(args: Args) -> Result<()> {
     let db = default_db_path();
     let prompts = default_prompts_dir();
     let recordings = default_recordings_dir();
-    std::fs::create_dir_all(&recordings)
-        .with_context(|| format!("cannot create recordings dir {recordings:?}"))?;
 
     let mut container = Container::new_sidecar(&model, &db, &prompts, recordings)
         .context("failed to wire sidecar adapter graph")?;
