@@ -1184,13 +1184,13 @@ fn wait_for_job(s: &Sidecar, job_url: &str, reached: impl Fn(&serde_json::Value)
     let c = client();
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
+        // A failed request usually means the sidecar died, and only its log says why.
         let state: serde_json::Value = c
             .get(job_url)
             .bearer_auth(&s.handshake.token)
             .send()
-            .expect("get job")
-            .json()
-            .expect("job json");
+            .and_then(|response| response.json())
+            .unwrap_or_else(|e| panic!("get job: {e}\nstderr:\n{}", s.final_log()));
         if reached(&state) {
             return;
         }
