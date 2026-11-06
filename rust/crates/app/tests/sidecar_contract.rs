@@ -7,12 +7,13 @@
 //! `/version`, parent-death reaping (POSIX pipe EOF + `--parent-pid` poll),
 //! the distinct singleton exit code, and graceful SIGTERM shutdown.
 //!
-//! Each server gets its own `XDG_DATA_HOME`/`XDG_CACHE_HOME` temp dir so the
-//! SQLite DB, recordings dir and singleton lock are isolated and tests run in
-//! parallel — except [`second_instance_exits_with_singleton_code`], which
+//! Each server gets its own temp dir (see [`isolated_server`]) so the SQLite
+//! DB, recordings dir, settings and singleton lock are isolated and tests run
+//! in parallel — except [`second_instance_exits_with_singleton_code`], which
 //! deliberately shares one data dir between two instances.
 
 use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -27,6 +28,48 @@ const REAP_BUDGET: Duration = Duration::from_secs(8);
 /// The distinct exit code a second instance returns on lock contention
 /// (`meeting-server.rs` `EXIT_SINGLETON_BUSY`).
 const EXIT_SINGLETON_BUSY: i32 = 3;
+
+/// The directory [`isolated_server`] configures as the recordings dir.
+fn recordings_dir(dir: &Path) -> PathBuf {
+    dir.join("recordings")
+}
+
+/// A `meeting-server` command that reads and writes only under `dir`.
+///
+/// `XDG_*` covers the DB, the singleton lock, `settings.json` and the secrets
+/// file, but not the recordings dir, which defaults to the OS Documents folder:
+/// that follows `HOME` on Linux and macOS and no env var at all on Windows. The
+/// `paths.meetings_dir` setting is what moves it on every OS. Without this the
+/// startup recovery pass would rewrite damaged WAVs in the developer's real
+/// recordings, including one the running app is still writing.
+fn isolated_server(dir: &Path) -> Command {
+    let recordings = recordings_dir(dir);
+    std::fs::create_dir_all(&recordings).expect("create recordings dir");
+
+    // Two instances can share `dir`. Naming the language keeps this equal to a
+    // new install: a settings file without one means the legacy "ru".
+    let settings = serde_json::json!({
+        "paths": { "meetings_dir": recordings },
+        "recording": { "source": "mic", "echo_cancel": false },
+        "transcriber": { "language": "auto" },
+    });
+    let settings_path = dir.join("meeting-assistant/settings.json");
+    std::fs::create_dir_all(settings_path.parent().unwrap()).expect("create config dir");
+    std::fs::write(&settings_path, settings.to_string()).expect("write settings.json");
+
+    let mut cmd = Command::new(SERVER_BIN);
+    cmd.env("XDG_DATA_HOME", dir)
+        .env("XDG_CACHE_HOME", dir)
+        .env("XDG_CONFIG_HOME", dir)
+        .env("HOME", dir.join("home"))
+        // Tests never read or write the real OS keyring.
+        .env("MEETING_ASSISTANT_KEYRING_DISABLE", "1")
+        .env_remove("ANTHROPIC_API_KEY")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    cmd
+}
 
 /// The one machine-readable line `meeting-server` prints to stdout before it
 /// serves anything. Mirrors the section-02 wire shape.
@@ -63,25 +106,9 @@ impl Sidecar {
 
     /// Spawn pointing at `data_dir` (shared between instances for the
     /// singleton test), with extra args, taking ownership of the temp guard.
-    fn spawn_in(
-        data_dir: &std::path::Path,
-        extra_args: &[String],
-        guard: tempfile::TempDir,
-    ) -> Sidecar {
-        let mut cmd = Command::new(SERVER_BIN);
-        cmd.args(extra_args)
-            // Isolate DB, recordings dir and the singleton lock.
-            .env("XDG_DATA_HOME", data_dir)
-            .env("XDG_CACHE_HOME", data_dir)
-            // Isolate settings.json + the secrets fallback file, and force the
-            // file fallback so tests never read/write the real OS keyring.
-            .env("XDG_CONFIG_HOME", data_dir)
-            .env("MEETING_ASSISTANT_KEYRING_DISABLE", "1")
-            .env("RUST_LOG", "info")
-            .env_remove("ANTHROPIC_API_KEY")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+    fn spawn_in(data_dir: &Path, extra_args: &[String], guard: tempfile::TempDir) -> Sidecar {
+        let mut cmd = isolated_server(data_dir);
+        cmd.args(extra_args).env("RUST_LOG", "info");
         let mut child = cmd.spawn().expect("spawn meeting-server");
 
         // Drain stderr off-thread: never block the child, capture for asserts.
@@ -175,6 +202,77 @@ fn client() -> reqwest::blocking::Client {
         .timeout(Duration::from_secs(10))
         .build()
         .expect("reqwest client")
+}
+
+// ── Recordings dir ───────────────────────────────────────────────────────────
+
+/// A recording whose writer died: samples on disk, both RIFF lengths still the
+/// placeholder 0, and a torn last frame. The recovery pass rewrites this file
+/// whenever it reaches it.
+fn crashed_recording() -> Vec<u8> {
+    let mut wav = Vec::new();
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&0u32.to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&3u16.to_le_bytes()); // IEEE float
+    wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+    wav.extend_from_slice(&48_000u32.to_le_bytes());
+    wav.extend_from_slice(&192_000u32.to_le_bytes()); // byte rate
+    wav.extend_from_slice(&4u16.to_le_bytes()); // block align
+    wav.extend_from_slice(&32u16.to_le_bytes()); // bits per sample
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&0u32.to_le_bytes());
+    wav.extend_from_slice(&[0u8; 403]); // 100 frames + 3 bytes of a torn one
+    wav
+}
+
+fn plant_crashed_recording(recordings: &Path) -> PathBuf {
+    let meeting = recordings.join("2026-05-10_14-30_a1b2c3d4");
+    std::fs::create_dir_all(&meeting).expect("create meeting dir");
+    let wav = meeting.join("recording.wav");
+    std::fs::write(&wav, crashed_recording()).expect("write recording");
+    wav
+}
+
+#[test]
+fn recovery_uses_the_configured_recordings_dir_and_leaves_the_default_alone() {
+    let data = tempfile::tempdir().unwrap();
+    let data_path = data.path().to_path_buf();
+
+    let configured = plant_crashed_recording(&recordings_dir(&data_path));
+    // Where the default resolves under the isolated HOME on Linux and macOS. On
+    // Windows nothing can reach this copy, so `configured` carries the test.
+    let at_default = plant_crashed_recording(&data_path.join("home/Documents/meeting-assistant"));
+
+    // The handshake is printed after the recovery pass, so that has finished.
+    let s = Sidecar::spawn_in(&data_path, &[], data);
+
+    let meetings: serde_json::Value = client()
+        .get(format!("{}/api/v1/meetings", s.base_url()))
+        .bearer_auth(&s.handshake.token)
+        .send()
+        .expect("list meetings")
+        .json()
+        .expect("json");
+    let listed: Vec<&str> = meetings
+        .as_array()
+        .expect("meetings array")
+        .iter()
+        .map(|m| m["audio_path"].as_str().expect("audio_path"))
+        .collect();
+    assert_eq!(listed, [configured.to_str().unwrap()]);
+
+    assert_eq!(
+        std::fs::read(&configured).unwrap().len(),
+        444,
+        "recovery must finalize the recording in the configured dir"
+    );
+    assert_eq!(
+        std::fs::read(&at_default).unwrap(),
+        crashed_recording(),
+        "recovery must not touch the default location when a dir is configured"
+    );
 }
 
 // ── Handshake + stdout/stderr discipline ─────────────────────────────────────
@@ -837,14 +935,8 @@ fn parent_death_via_pipe_eof_exits_within_budget() {
     unsafe { libc::fcntl(write_fd, libc::F_SETFD, libc::FD_CLOEXEC) };
 
     let data = tempfile::tempdir().unwrap();
-    let mut cmd = Command::new(SERVER_BIN);
-    cmd.arg("--parent-pipe-fd")
-        .arg(read_fd.to_string())
-        .env("XDG_DATA_HOME", data.path())
-        .env("XDG_CACHE_HOME", data.path())
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    let mut cmd = isolated_server(data.path());
+    cmd.arg("--parent-pipe-fd").arg(read_fd.to_string());
     unsafe {
         // Pre-exec, in the forked child: clear CLOEXEC so the read end
         // survives exec into the server. Async-signal-safe (fcntl only).
@@ -915,14 +1007,7 @@ fn second_instance_exits_with_distinct_singleton_code() {
 
     // Second instance against the SAME data dir: must lose the lock and exit
     // with the distinct code before it ever serves.
-    let mut second = Command::new(SERVER_BIN)
-        .env("XDG_DATA_HOME", &shared_path)
-        .env("XDG_CACHE_HOME", &shared_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn second");
+    let mut second = isolated_server(&shared_path).spawn().expect("spawn second");
 
     let deadline = Instant::now() + Duration::from_secs(10);
     let status = loop {
