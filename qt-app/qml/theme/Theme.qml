@@ -51,15 +51,18 @@ QtObject {
     readonly property string _sourceSerifName: _serifCyrillic.name.length > 0 ? _serifCyrillic.name
                                                                               : "Source Serif 4"
 
-    // How to draw serif text in `family`. Source Serif 4 has an optical size axis,
-    // and macOS picks the cut from the font size. Qt's default renderer takes every
-    // glyph from one large master, the display cut, but spaces it for the real size,
-    // which leaves thin letters with uneven gaps. Native rendering draws the cut the
-    // layout measured. Other systems don't pick a cut by size, so they stay on the
-    // default. Newsreader has the same axis and keeps its current look on purpose.
+    // How to draw serif text in `family`. Both serifs have an optical size axis, and
+    // macOS picks the cut from the font size. Qt's default renderer takes every glyph
+    // from one large master, the display cut, but spaces it for the real size, which
+    // leaves the letters tight and uneven. Native rendering draws the cut the layout
+    // measured. Other systems don't pick a cut by size, so they stay on the default,
+    // and so do Geist and JetBrains Mono, which have no such axis.
+    //
+    // Native text can't follow a rotation: draw it flat in a layer first, as the
+    // card on the first-run screen does.
     function renderTypeFor(family) {
-        return family === _sourceSerifName && Qt.platform.os === "osx"
-                ? Text.NativeRendering : Text.QtRendering
+        const serif = family === _newsreaderName || family === _sourceSerifName
+        return serif && Qt.platform.os === "osx" ? Text.NativeRendering : Text.QtRendering
     }
 
     // weights (variable fonts cover the range)
