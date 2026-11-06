@@ -4,6 +4,8 @@
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QQuickItem>
+#include <QQuickRenderControl>
+#include <QQuickWindow>
 #include <QtTest>
 
 class ProtocolDocumentTest : public QObject {
@@ -18,7 +20,58 @@ private slots:
     void showsOtherSectionsInDocumentOrder();
     void otherSectionsAloneCountAsStructured();
     void escapesInlineHtml();
+    void spacesBlocksApart();
+    void alignsTableColumns_data();
+    void alignsTableColumns();
 };
+
+// Gives a document a width and lays it out. Layouts only arrange their items in a
+// window's polish pass; QQuickRenderControl runs that pass directly, so real
+// geometry can be read with no render loop, GPU, or exposed window.
+class LaidOutDocument {
+public:
+    LaidOutDocument(QQuickItem *document, qreal width) : m_window(&m_control) {
+        document->setParentItem(m_window.contentItem());
+        document->setWidth(width);
+        // Wrapping text changes implicit sizes, which the next pass picks up.
+        for (int pass = 0; pass < 5; ++pass)
+            m_control.polishItems();
+    }
+
+private:
+    QQuickRenderControl m_control;
+    QQuickWindow m_window;
+};
+
+// The document's blocks, in visual order. The Repeater is also a child item.
+static QList<QQuickItem *> documentBlocks(const QQuickItem *document) {
+    QList<QQuickItem *> blocks;
+    for (QQuickItem *child : document->childItems()) {
+        if (child->inherits("QQuickLoader"))
+            blocks.append(child);
+    }
+    return blocks;
+}
+
+// The cells of a table, one list per row, with the header first.
+static void collectTableRows(const QQuickItem *item, QList<QList<QQuickItem *>> &rows) {
+    for (QQuickItem *child : item->childItems()) {
+        if (!child->inherits("QQuickRowLayout")) {
+            collectTableRows(child, rows);
+            continue;
+        }
+        QList<QQuickItem *> cells;
+        for (QQuickItem *cell : child->childItems()) {
+            if (cell->inherits("QQuickText"))
+                cells.append(cell);
+        }
+        rows.append(cells);
+    }
+}
+
+static qreal leftEdge(const QQuickItem *cell, const QQuickItem *document) {
+    return cell->mapToItem(document, QPointF(0, 0)).x();
+}
 
 static QVariantMap otherSection(const QString &title, const QString &markdown, const QVariant &before) {
     QVariantMap section;
@@ -303,6 +356,133 @@ void ProtocolDocumentTest::escapesInlineHtml() {
     QVERIFY(text.contains(QStringLiteral("<b>bold</b>")));
     QVERIFY(text.contains(QStringLiteral("x&lt;y")));
     QVERIFY(text.contains(QStringLiteral("<a href=\"https://example.test\">link</a>")));
+}
+
+// Each block's Layout.topMargin must reach the layout that positions the block.
+void ProtocolDocumentTest::spacesBlocksApart() {
+    QQmlEngine engine;
+    engine.addImportPath(QStringLiteral(MA_PROTOCOL_QML_IMPORT_DIR));
+
+    QQmlComponent component(&engine);
+    std::unique_ptr<QObject> root = createDocument(engine, component);
+    QVERIFY2(root != nullptr, qPrintable(component.errorString()));
+
+    root->setProperty("markdown", QStringLiteral(
+        "# Title\n\n"
+        "#### Date: today\n\n"
+        "## Section\n\n"
+        "Paragraph\n\n"
+        "- Item\n\n"
+        "### Subsection\n\n"
+        "1. First\n\n"
+        "> Quote\n\n"
+        "```\ncode\n```\n\n"
+        "---\n\n"
+        "#### Detail\n\n"
+        "A | B\n--- | ---\n1 | 2\n"));
+
+    auto *document = qobject_cast<QQuickItem *>(root.get());
+    QVERIFY(document != nullptr);
+    LaidOutDocument laidOut(document, 720);
+
+    const QVariantList model = root->property("blocks").toList();
+    const QList<QQuickItem *> blocks = documentBlocks(document);
+    QCOMPARE(blocks.size(), model.size());
+
+    // The screen sets the space above the document, so the first block adds none.
+    QCOMPARE(blocks.first()->y(), 0.0);
+
+    QStringList gaps;
+    for (qsizetype i = 1; i < blocks.size(); ++i) {
+        const qreal gap = blocks.at(i)->y() - (blocks.at(i - 1)->y() + blocks.at(i - 1)->height());
+        gaps.append(model.at(i).toMap().value(QStringLiteral("type")).toString()
+                    + QLatin1Char(':') + QString::number(qRound(gap)));
+    }
+    QCOMPARE(gaps, QStringList({
+        QStringLiteral("meta:8"),
+        QStringLiteral("h2:32"),
+        QStringLiteral("p:14"),
+        QStringLiteral("ul:8"),
+        QStringLiteral("h3:22"),
+        QStringLiteral("ol:8"),
+        QStringLiteral("quote:16"),
+        QStringLiteral("code:16"),
+        QStringLiteral("hr:22"),
+        QStringLiteral("h4:16"),
+        QStringLiteral("table:12"),
+    }));
+}
+
+void ProtocolDocumentTest::alignsTableColumns_data() {
+    QVariantMap action;
+    action.insert(QStringLiteral("title"), QStringLiteral("Подготовить сборку к релизу"));
+    action.insert(QStringLiteral("owner"), QStringLiteral("Дима"));
+    action.insert(QStringLiteral("due"), QStringLiteral("пятница"));
+    QVariantMap structured;
+    structured.insert(QStringLiteral("actions"), QVariantList { action });
+
+    QTest::addColumn<QVariantMap>("structured");
+    QTest::addColumn<QString>("markdown");
+    QTest::addColumn<qreal>("width");
+
+    QTest::newRow("action table") << structured << QString() << 720.0;
+    QTest::newRow("action table, narrow") << structured << QString() << 300.0;
+    QTest::newRow("one column") << QVariantMap()
+        << QStringLiteral("| A |\n|---|\n| 1 |\n") << 720.0;
+    QTest::newRow("two columns") << QVariantMap()
+        << QStringLiteral("A | B\n--- | ---\n1 | 2\n") << 720.0;
+    QTest::newRow("five columns") << QVariantMap()
+        << QStringLiteral("A | B | C | D | E\n--- | --- | --- | --- | ---\n1 | 2 | 3 | 4 | 5\n") << 720.0;
+    QTest::newRow("too many columns to fit") << QVariantMap()
+        << QStringLiteral("A | B | C | D | E | F | G | H\n"
+                          "--- | --- | --- | --- | --- | --- | --- | ---\n"
+                          "1 | 2 | 3 | 4 | 5 | 6 | 7 | 8\n") << 720.0;
+    QTest::newRow("row shorter than the header") << QVariantMap()
+        << QStringLiteral("A | B | C\n--- | --- | ---\n1 | 2 |\n4 | 5 | 6\n") << 720.0;
+    QTest::newRow("row longer than the header") << QVariantMap()
+        << QStringLiteral("A | B\n--- | ---\n1 | 2 | 3\n4 | 5\n") << 720.0;
+}
+
+// The header and each body row are separate layouts, so nothing but matching
+// sizes keeps a column straight.
+void ProtocolDocumentTest::alignsTableColumns() {
+    QFETCH(QVariantMap, structured);
+    QFETCH(QString, markdown);
+    QFETCH(qreal, width);
+
+    QQmlEngine engine;
+    engine.addImportPath(QStringLiteral(MA_PROTOCOL_QML_IMPORT_DIR));
+
+    QQmlComponent component(&engine);
+    std::unique_ptr<QObject> root = createDocument(engine, component);
+    QVERIFY2(root != nullptr, qPrintable(component.errorString()));
+
+    root->setProperty("markdown", markdown);
+    root->setProperty("structured", structured);
+
+    auto *document = qobject_cast<QQuickItem *>(root.get());
+    QVERIFY(document != nullptr);
+    LaidOutDocument laidOut(document, width);
+
+    QList<QList<QQuickItem *>> rows;
+    collectTableRows(document, rows);
+    QVERIFY2(rows.size() >= 2, "expected a header and at least one body row");
+
+    const QList<QQuickItem *> &header = rows.first();
+    QVERIFY(!header.isEmpty());
+    for (const QList<QQuickItem *> &row : rows) {
+        QCOMPARE(row.size(), header.size());
+        for (qsizetype column = 0; column < row.size(); ++column) {
+            QCOMPARE(leftEdge(row.at(column), document), leftEdge(header.at(column), document));
+            QCOMPARE(row.at(column)->width(), header.at(column)->width());
+        }
+    }
+
+    // The columns stay inside the document, and none is squeezed below the rest.
+    const QQuickItem *lastColumn = header.last();
+    QVERIFY(leftEdge(lastColumn, document) + lastColumn->width() <= width + 0.5);
+    QVERIFY(header.first()->width() >= lastColumn->width() - 0.5);
+    QVERIFY(lastColumn->width() > 0);
 }
 
 int main(int argc, char *argv[]) {

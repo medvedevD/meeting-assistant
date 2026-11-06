@@ -672,25 +672,39 @@ ColumnLayout {
     Component {
         id: tableC
         ColumnLayout {
+            id: table
             property var blk
             Layout.fillWidth: true
             Layout.topMargin: 12
             spacing: 0
 
+            // The header and each body row are separate layouts, so a column lines
+            // up only if every row has the same cells at the same widths. The first
+            // column takes the remaining space; the others shrink when they don't fit.
+            readonly property int columnGap: 12
+            readonly property int columnCount: {
+                var count = blk && blk.header ? blk.header.length : 0
+                var rows = blk ? blk.rows : []
+                for (var i = 0; i < rows.length; ++i)
+                    count = Math.max(count, rows[i].length)
+                return count
+            }
+            readonly property int valueColumnWidth:
+                Math.min(140, Math.floor((width - columnGap * (columnCount - 1)) / columnCount))
+
             // header
             RowLayout {
                 Layout.fillWidth: true
                 visible: blk && blk.header
-                spacing: 12
+                spacing: table.columnGap
                 Repeater {
-                    model: blk && blk.header ? blk.header : []
+                    model: blk && blk.header ? table.columnCount : 0
                     delegate: Text {
-                        required property var modelData
                         required property int index
                         Layout.fillWidth: index === 0
-                        Layout.preferredWidth: index === 0 ? -1 : 120
+                        Layout.preferredWidth: index === 0 ? -1 : table.valueColumnWidth
                         topPadding: 10; bottomPadding: 10
-                        text: doc._inline((modelData + "").toUpperCase())
+                        text: doc._inline(((blk.header[index] || "") + "").toUpperCase())
                         textFormat: Text.StyledText
                         wrapMode: Text.WordWrap
                         font.family: Theme.fontUi
@@ -707,22 +721,22 @@ ColumnLayout {
             Repeater {
                 model: blk ? blk.rows : []
                 delegate: ColumnLayout {
+                    id: bodyRow
                     required property var modelData
                     Layout.fillWidth: true
                     spacing: 0
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 12
+                        spacing: table.columnGap
                         Repeater {
-                            model: modelData
+                            model: table.columnCount
                             delegate: Text {
-                                required property var modelData
                                 required property int index
                                 Layout.fillWidth: index === 0
-                                Layout.preferredWidth: index === 0 ? -1 : 140
+                                Layout.preferredWidth: index === 0 ? -1 : table.valueColumnWidth
                                 Layout.alignment: Qt.AlignTop
                                 topPadding: 11; bottomPadding: 11
-                                text: doc._inline(modelData + "")
+                                text: doc._inline((bodyRow.modelData[index] || "") + "")
                                 textFormat: Text.StyledText
                                 wrapMode: Text.WordWrap
                                 font.family: doc.serif
@@ -743,7 +757,11 @@ ColumnLayout {
         model: doc.blocks
         delegate: Loader {
             required property var modelData
+            required property int index
             Layout.fillWidth: true
+            // The Loader is what the layout positions, not the block inside it. The
+            // first block has no margin: the screen already sets the space above it.
+            Layout.topMargin: item && index > 0 ? (item as Item).Layout.topMargin : 0
             sourceComponent: modelData.type === "h1" ? h1C
                            : modelData.type === "h2" ? h2C
                            : modelData.type === "meta" ? metaC

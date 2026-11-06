@@ -77,6 +77,8 @@ cargo test --manifest-path rust/Cargo.toml -p <crate-name> <test_name>
 ctest --test-dir qt-app/build
 ```
 
+A test that spawns `meeting-server` must keep it away from the developer's real data, because its startup recovery pass rewrites damaged WAVs in the recordings dir. `XDG_*` is not enough: the recordings dir defaults to the OS Documents folder, and on Windows no env var moves it. Point `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME` and `HOME` at temp dirs, write a `settings.json` whose `paths.meetings_dir` is a temp dir, and set `MEETING_ASSISTANT_KEYRING_DISABLE=1`. `isolated_server` in `sidecar_contract.rs` and `initTestCase` in `tst_smoke.cpp` do this.
+
 ### Regression Tests
 
 For every bug fix, add or update a regression test at the lowest level that reproduces the observed failure. The test must fail on the old behavior and pass with the fix. If the bug is in QML wiring or screen behavior, prefer a QML integration test over only a C++ unit test; lower-level tests are useful only when they exercise the actual failing contract.
@@ -88,6 +90,8 @@ When creating commits, do not add AI-agent attribution. Commit messages must not
 ### Packaging
 
 See `packaging/` for OS-specific build/sign/notarize scripts (handled outside the dev loop). Before each release, run the manual per-OS check in `packaging/SMOKE-CHECKLIST.md`.
+
+The Qt version differs per OS and each one is held in place by something specific: see "Qt version per OS" in `packaging/README.md` before changing a runner or a Qt version. The app promises macOS 13, so macOS builds set `MACOSX_DEPLOYMENT_TARGET` from `packaging/macos/Info.plist.in`, and `packaging/macos/check-bundle.sh` fails on any binary that needs a newer macOS.
 
 ### Release Gate
 
