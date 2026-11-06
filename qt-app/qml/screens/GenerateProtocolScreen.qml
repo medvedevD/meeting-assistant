@@ -15,11 +15,11 @@ import "../i18n/errors.js" as Errors
 Page {
     id: scr
     property var shell
-    property var store
     property string meetingId
     property string meetingName
     property string audioPath
     property bool hasTranscript: false
+    property double createdAt: 0
     property bool autoStart: false
 
     // Live job for this meeting, owned by the store; `version` re-evaluates
@@ -83,11 +83,10 @@ Page {
             if (meetingId !== scr.meetingId)
                 return
             if (status === "done") {
-                scr.store.refresh()
                 scr.shell.showDetail({
                     "id": scr.meetingId, "name": scr.meetingName,
                     "audio_path": scr.audioPath, "has_transcript": true,
-                    "created_at": 0
+                    "created_at": scr.createdAt
                 })
             } else {
                 scr.lastFailedKind = kind

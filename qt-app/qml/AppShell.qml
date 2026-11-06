@@ -45,6 +45,13 @@ Item {
         }
     }
 
+    // A finished job changes what the sidebar says about its meeting, and by then
+    // the user may be on any screen, so this can't be left to the job's own screen.
+    Connections {
+        target: ActiveJobsStore
+        function onJobFinished() { store.refresh() }
+    }
+
     // ── navigation (always reset to the list root, then push target) ─────────
     function showList() {
         selectedId = ""
@@ -79,9 +86,10 @@ Item {
         selectedId = m.id
         stack.pop(null, StackView.Immediate)
         stack.push(genComp, {
-            "shell": shell, "store": store,
+            "shell": shell,
             "meetingId": m.id, "meetingName": m.name,
             "audioPath": m.audio_path, "hasTranscript": m.has_transcript === true,
+            "createdAt": m.created_at,
             "autoStart": autoStart === true
         }, StackView.Immediate)
     }
