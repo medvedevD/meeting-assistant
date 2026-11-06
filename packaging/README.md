@@ -18,6 +18,32 @@ Build commands (Qt 6.7+ required; auto-discovered, or set `CMAKE_PREFIX_PATH`):
 pwsh packaging/windows/build-installer.ps1   # → dist/windows/MeetingAssistant-Setup-*.exe
 ```
 
+## Qt version per OS
+
+CI and releases do not use one Qt version everywhere. `qt-ci.yml` and `release.yml`
+set it per OS and must agree.
+
+| OS | Runner | Qt | What holds it there |
+|---|---|---|---|
+| macOS | `macos-26` | 6.11.1 | Needs 6.9+: older Qt links AGL, which the Xcode 26 SDK removed. 6.12 needs macOS 14.4, above the app's minimum of 13. Local development uses 6.11.1. |
+| Linux | `ubuntu:20.04` container | 6.7.3 | Qt 6.10+ needs glibc 2.34, and its `moc` won't start on this container's 2.31. Raising the floor would drop Astra Linux and Debian 11. |
+| Windows | `windows-latest` | 6.7.3 | Nothing yet: it stays where it passes until there is a reason to move it. |
+
+Qt 6.9.3 is the only version all three could share. It would rework the Linux
+FFmpeg staging, because its Linux build ships FFmpeg libraries where 6.7.3 ships
+none, in exchange for an older Qt than the one in development.
+
+Moving the macOS Qt to 6.12 is a product decision: it drops macOS 13.
+
+## macOS minimum version
+
+The app promises macOS 13 in `Info.plist.in` and in the Homebrew cask, because
+ScreenCaptureKit needs it. A compile with no deployment target builds for the OS it
+runs on instead, so `build-app.sh` and `qt-ci.yml` set `MACOSX_DEPLOYMENT_TARGET`
+from `Info.plist.in`, and [`macos/check-bundle.sh`](macos/check-bundle.sh) fails the
+build if any binary needs a newer macOS. This proves what the binaries declare, not
+that they run: no hosted runner has macOS 13.
+
 ## Cross-cutting invariant: GUI locates its sibling sidecar
 
 On every OS the CMake `install()` rules ([qt-app/CMakeLists.txt](../qt-app/CMakeLists.txt))
@@ -63,12 +89,22 @@ Qt 6 is used under **LGPLv3**. Compliance, identically in every artifact:
    Contents: `Qt-LGPLv3-WRITTEN-OFFER.txt` (3-yr source offer + relink note),
    `Qt-LICENSE.txt`, `Qt-LICENSE.GPL3-EXCEPT.txt`, `Qt-VERSION.txt`,
    `FFmpeg-LGPLv2.1-NOTICE.txt`.
+3. **The exact Qt version.** CMake generates `Qt-VERSION.txt` from
+   `LICENSES/Qt-VERSION.txt.in` at configure time, because the version differs per OS.
+   `check-bundle.sh` compares it with the bundled QtCore on macOS.
 
 Static linking would force releasing the app's source — we do not static-link.
 
+### Bundled fonts
+
+The fonts are compiled into the GUI binary and are under the **SIL Open Font
+License**, which requires the license to travel with them. CMake installs each
+`qt-app/fonts/OFL-*.txt` into the same `licenses` folder as above. A new font needs
+its license added to `MA_FONT_LICENSES` in `qt-app/CMakeLists.txt`.
+
 ### Qt Multimedia / FFmpeg backend
 
-The in-card audio player uses **Qt Multimedia**, whose Qt 6.7 backend bundles
+The in-card audio player uses **Qt Multimedia**, whose backend bundles
 **FFmpeg** shared libraries (LGPLv2.1+, dynamically linked) plus the
 `multimedia` backend plugin. Each recipe now force-bundles and **asserts** the
 backend so a missing plugin fails the build instead of shipping a dead player:
@@ -111,7 +147,7 @@ packaging/
   assets/                       app icons + macOS DMG background
   LICENSES/                     Qt LGPLv3 written offer + license text (bundled)
   macos/   Info.plist.in  entitlements.plist  codesign-deep.sh  build-app.sh
-           render-release-cask.sh  HOMEBREW-SUNSET.md  SPIKE-RESULTS.md
+           check-bundle.sh  render-release-cask.sh  HOMEBREW-SUNSET.md  SPIKE-RESULTS.md
   linux/   build-appimage.sh  meeting-assistant.desktop
   windows/ build-installer.ps1  installer.iss  SMARTSCREEN.md
 ```

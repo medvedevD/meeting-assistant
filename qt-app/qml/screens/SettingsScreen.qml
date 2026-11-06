@@ -128,7 +128,8 @@ Page {
             Text {
                 Layout.fillWidth: true
                 text: qsTr("Настройки")
-                font.family: Theme.fontSerif
+                font.family: Theme.serifFor(text)
+                renderType: Theme.renderTypeFor(font.family)
                 font.pixelSize: Theme.fsTitle
                 font.weight: Theme.wMedium
                 font.letterSpacing: 0

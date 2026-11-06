@@ -75,6 +75,7 @@ endfunction()
 
 add_subdirectory(pipeline_progress)
 add_subdirectory(protocol_document)
+add_subdirectory(serif_typeface)
 add_subdirectory(meety_menu)
 add_subdirectory(first_run)
 add_subdirectory(app_shell_wiring)

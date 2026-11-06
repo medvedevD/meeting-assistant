@@ -32,7 +32,8 @@ Rectangle {
                 spacing: 2
                 Text {
                     text: "Meety"
-                    font.family: Theme.fontSerif
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
                     font.pixelSize: 40
                     font.weight: Theme.wMedium
                     font.letterSpacing: Theme.tracking(40, -0.02)
@@ -40,7 +41,8 @@ Rectangle {
                 }
                 Text {
                     text: "Design tokens — light · sienna"
-                    font.family: Theme.fontSerif
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
                     font.italic: true
                     font.pixelSize: 16
                     color: Theme.ink2
@@ -120,15 +122,17 @@ Rectangle {
                 }
                 Text {
                     text: "Протокол совещания"
-                    font.family: Theme.fontSerif
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
                     font.pixelSize: Theme.fsDisplay
                     font.weight: Theme.wMedium
                     font.letterSpacing: Theme.tracking(Theme.fsDisplay, -0.025)
                     color: Theme.ink
                 }
                 Text {
-                    text: "Newsreader serif · заголовок раздела H1 — 44px"
-                    font.family: Theme.fontSerif
+                    text: "Serif · заголовок раздела H1 — 44px"
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
                     font.pixelSize: Theme.fsTitle
                     font.weight: Theme.wMedium
                     color: Theme.ink
@@ -156,8 +160,9 @@ Rectangle {
                     color: Theme.ink2
                 }
                 Text {
-                    text: "Newsreader italic · «тихий редакторский тон»"
-                    font.family: Theme.fontSerif
+                    text: "Serif italic · «тихий редакторский тон»"
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
                     font.italic: true
                     font.pixelSize: 18
                     color: Theme.ink2

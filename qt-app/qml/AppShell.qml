@@ -236,7 +236,8 @@ Item {
                     Text {
                         Layout.leftMargin: 6
                         text: "Meeting\nAssistant"
-                        font.family: Theme.fontSerif
+                        font.family: Theme.serifFor(text)
+                        renderType: Theme.renderTypeFor(font.family)
                         font.weight: Theme.wMedium
                         font.pixelSize: 15
                         font.letterSpacing: Theme.tracking(15, -0.01)
@@ -398,7 +399,8 @@ Item {
                         visible: store.status === "empty" || shell.noMatches
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
-                        font.family: Theme.fontSerif
+                        font.family: Theme.serifFor(text)
+                        renderType: Theme.renderTypeFor(font.family)
                         font.italic: true
                         font.pixelSize: 13
                         color: Theme.ink4
@@ -540,7 +542,8 @@ Item {
                                                 visible: shell.sidebarCompact
                                                 anchors.centerIn: parent
                                                 text: row.compactLabel
-                                                font.family: Theme.fontSerif
+                                                font.family: Theme.serifFor(text)
+                                                renderType: Theme.renderTypeFor(font.family)
                                                 font.italic: true
                                                 font.pixelSize: 18
                                                 font.weight: Theme.wMedium

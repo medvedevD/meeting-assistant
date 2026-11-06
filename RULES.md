@@ -77,6 +77,8 @@ cargo test --manifest-path rust/Cargo.toml -p <crate-name> <test_name>
 ctest --test-dir qt-app/build
 ```
 
+A test that spawns `meeting-server` must keep it away from the developer's real data, because its startup recovery pass rewrites damaged WAVs in the recordings dir. `XDG_*` is not enough: the recordings dir defaults to the OS Documents folder, and on Windows no env var moves it. Point `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME` and `HOME` at temp dirs, write a `settings.json` whose `paths.meetings_dir` is a temp dir, and set `MEETING_ASSISTANT_KEYRING_DISABLE=1`. `isolated_server` in `sidecar_contract.rs` and `initTestCase` in `tst_smoke.cpp` do this.
+
 ### Regression Tests
 
 For every bug fix, add or update a regression test at the lowest level that reproduces the observed failure. The test must fail on the old behavior and pass with the fix. If the bug is in QML wiring or screen behavior, prefer a QML integration test over only a C++ unit test; lower-level tests are useful only when they exercise the actual failing contract.
@@ -88,6 +90,8 @@ When creating commits, do not add AI-agent attribution. Commit messages must not
 ### Packaging
 
 See `packaging/` for OS-specific build/sign/notarize scripts (handled outside the dev loop). Before each release, run the manual per-OS check in `packaging/SMOKE-CHECKLIST.md`.
+
+The Qt version differs per OS and each one is held in place by something specific: see "Qt version per OS" in `packaging/README.md` before changing a runner or a Qt version. The app promises macOS 13, so macOS builds set `MACOSX_DEPLOYMENT_TARGET` from `packaging/macos/Info.plist.in`, and `packaging/macos/check-bundle.sh` fails on any binary that needs a newer macOS.
 
 ### Release Gate
 
@@ -166,6 +170,7 @@ The app ships in Russian and English. Russian is the **source language** of ever
 - **Dates:** use `date.toLocaleString(Qt.locale(), format)`. `Qt.formatDateTime` with a format string always uses the C locale, whatever the language is.
 - **The backend holds no UI language.** The sidecar needs `--language` only to seed templates. Anything the user reads goes through a code or stage the GUI localizes (`PipelineStage`, `ErrorClass`, a delete's `warning_code`); the English text beside it is for logs and other clients.
 - **Whisper language:** new installs default to `auto`. A settings file that names no language means `ru`, the old default, so a saved setting never changes on upgrade.
+- **Serif text:** Newsreader has no Cyrillic, and Qt would silently draw the missing letters in a system font while digits and Latin words in the same line stay in Newsreader. Set serif text with `font.family: Theme.serifFor(text)`, which picks Source Serif 4 for any string containing Cyrillic and Newsreader for the rest, plus `renderType: Theme.renderTypeFor(font.family)`, because on macOS Qt's default renderer draws both serifs in their display cut, spaced for the real size, which leaves the letters tight and uneven. Native text can't follow a rotation, so a rotated item draws its text flat in a layer first, as the card on the first-run screen does. `ProtocolDocument` picks once for the whole document, so a table cell holding only "PDF" matches the Russian around it. `qt-app/tests/serif_typeface` checks the fonts the glyphs actually come from. The font files ship unmodified: Source Serif 4 reserves the name "Source", so a modified copy could not keep it.
 - **Name:** the visible product name is "Meeting Assistant". Internal `Meety*` components and theme identifiers stay as they are.
 - **DMG background:** English only, because the image is static and shared by all users.
 

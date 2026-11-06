@@ -40,6 +40,10 @@ AppImage fails to launch, run it from a terminal to see stderr.
 - [ ] Transcription runs to completion.
 - [ ] Enter your own API key in Settings. "Test key" succeeds.
 - [ ] Generate minutes. They render.
+- [ ] Russian minutes are set in one serif: digits and Latin words match the letters
+      around them.
+- [ ] Minutes in both languages have even letter spacing.
+- [ ] On the first-run screen, the text on the tilted card is smooth, not stair-stepped.
 - [ ] Play the recording in the meeting card: play, pause, seek, speed, volume.
 - [ ] Change a setting, restart the app, and confirm the change persisted.
 - [ ] The log file has no errors beyond expected info lines.

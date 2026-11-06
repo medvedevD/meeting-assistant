@@ -27,13 +27,43 @@ QtObject {
     readonly property FontLoader _serifItalic: FontLoader {
         source: "qrc:/fonts/Newsreader-Italic-Variable.ttf"
     }
+    readonly property FontLoader _serifCyrillic: FontLoader {
+        source: "qrc:/fonts/SourceSerif4-Variable.ttf"
+    }
+    readonly property FontLoader _serifCyrillicItalic: FontLoader {
+        source: "qrc:/fonts/SourceSerif4-Italic-Variable.ttf"
+    }
     readonly property FontLoader _mono: FontLoader {
         source: "qrc:/fonts/JetBrainsMono-Variable.ttf"
     }
 
     readonly property string fontUi: _ui.name.length > 0 ? _ui.name : "Geist"
-    readonly property string fontSerif: _serif.name.length > 0 ? _serif.name : "Newsreader"
     readonly property string fontMono: _mono.name.length > 0 ? _mono.name : "JetBrains Mono"
+
+    // The serif for a piece of text. Newsreader has no Cyrillic, and Qt would set
+    // the missing letters in a system font while digits and Latin words in the same
+    // line stay in Newsreader. So a string with Cyrillic uses Source Serif 4 whole,
+    // and Newsreader keeps everything else.
+    function serifFor(text) {
+        return /[\u0400-\u052F]/.test(text) ? _sourceSerifName : _newsreaderName
+    }
+    readonly property string _newsreaderName: _serif.name.length > 0 ? _serif.name : "Newsreader"
+    readonly property string _sourceSerifName: _serifCyrillic.name.length > 0 ? _serifCyrillic.name
+                                                                              : "Source Serif 4"
+
+    // How to draw serif text in `family`. Both serifs have an optical size axis, and
+    // macOS picks the cut from the font size. Qt's default renderer takes every glyph
+    // from one large master, the display cut, but spaces it for the real size, which
+    // leaves the letters tight and uneven. Native rendering draws the cut the layout
+    // measured. Other systems don't pick a cut by size, so they stay on the default,
+    // and so do Geist and JetBrains Mono, which have no such axis.
+    //
+    // Native text can't follow a rotation: draw it flat in a layer first, as the
+    // card on the first-run screen does.
+    function renderTypeFor(family) {
+        const serif = family === _newsreaderName || family === _sourceSerifName
+        return serif && Qt.platform.os === "osx" ? Text.NativeRendering : Text.QtRendering
+    }
 
     // weights (variable fonts cover the range)
     readonly property int wRegular: Font.Normal      // 400

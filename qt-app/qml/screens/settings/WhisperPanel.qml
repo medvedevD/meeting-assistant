@@ -513,7 +513,8 @@ ScrollView {
             Layout.rightMargin: 32
             Layout.topMargin: 32
             text: qsTr("Транскрипция")
-            font.family: Theme.fontSerif
+            font.family: Theme.serifFor(text)
+            renderType: Theme.renderTypeFor(font.family)
             font.pixelSize: 26
             font.weight: Theme.wMedium
             font.letterSpacing: 0
@@ -604,7 +605,8 @@ ScrollView {
                             Layout.fillWidth: true
                             text: panel.activeName()
                             elide: Text.ElideRight
-                            font.family: Theme.fontSerif
+                            font.family: Theme.serifFor(text)
+                            renderType: Theme.renderTypeFor(font.family)
                             font.pixelSize: Theme.fsTitle
                             font.weight: Theme.wMedium
                             font.letterSpacing: 0
@@ -894,7 +896,8 @@ ScrollView {
                             Text {
                                 Layout.fillWidth: true
                                 text: qsTr("Добавить свой файл модели")
-                                font.family: Theme.fontSerif
+                                font.family: Theme.serifFor(text)
+                                renderType: Theme.renderTypeFor(font.family)
                                 font.pixelSize: 16
                                 font.weight: Theme.wMedium
                                 font.letterSpacing: 0

@@ -1,3 +1,0 @@
-Qt 6.11.1
-The Qt Company / open-source LGPLv3 build.
-Source: https://download.qt.io/official_releases/qt/6.11/6.11.1/single/
