@@ -20,3 +20,19 @@
 # clobbered.
 [target.'cfg(target_os = "macos")']
 rustflags = ["-C", "link-arg=-Wl,-rpath,/usr/lib/swift"]
+
+# Build whisper.cpp for a fixed CPU, not for the machine doing the build.
+#
+# whisper-rs-sys hands every GGML_* variable to CMake, and ggml's default,
+# GGML_NATIVE=ON, tunes for the host: -march=native on Linux, the best /arch the host
+# runs on Windows, -mcpu=native on macOS. A release then follows whichever runner it
+# lands on. The Windows build of v0.1.0-alpha.13 came out with AVX-512, which most PCs
+# lack.
+#
+# OFF gives AVX2, FMA, F16C and BMI2 on x86-64 and the M1's feature set on Apple silicon.
+# Changing it also means changing a cache key: see "CPU baseline" in packaging/README.md.
+#
+# A variable already set in the environment wins, so a developer can still ask for a
+# build tuned to their own machine with GGML_NATIVE=ON.
+[env]
+GGML_NATIVE = "OFF"

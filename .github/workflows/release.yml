@@ -63,9 +63,9 @@ jobs:
               # Runner and Qt per OS must match qt-ci.yml, which explains them:
               # macos-26 with Qt 6.11 because its SDK has no AGL, which Qt 6.8 and
               # older link, and Qt 6.10+ is out of reach on Linux's glibc floor.
-              linux)   echo '{"os":"ubuntu-latest","container":"ubuntu:20.04","qt":"6.7.3","installer_glob":"dist/linux/*.AppImage"}' ;;
-              macos)   echo '{"os":"macos-26","container":"","qt":"6.11.1","installer_glob":"dist/macos/*.dmg"}' ;;
-              windows) echo '{"os":"windows-latest","container":"","qt":"6.7.3","installer_glob":"dist/windows/*.exe"}' ;;
+              linux)   echo '{"os":"ubuntu-latest","container":"ubuntu:20.04","qt":"6.7.3","installer_glob":"dist/linux/*.AppImage","sidecar":"dist/linux/AppDir/usr/bin/meeting-server"}' ;;
+              macos)   echo '{"os":"macos-26","container":"","qt":"6.11.1","installer_glob":"dist/macos/*.dmg","sidecar":"dist/macos/MeetingAssistant.app/Contents/MacOS/meeting-server"}' ;;
+              windows) echo '{"os":"windows-latest","container":"","qt":"6.7.3","installer_glob":"dist/windows/*.exe","sidecar":"dist/windows/stage/meeting-server.exe"}' ;;
               *) echo "::error::unknown target '$1'" >&2; exit 1 ;;
             esac
           }
@@ -96,7 +96,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-          key: release-quality-${{ runner.os }}
+          # whisper-baseline: change it with any GGML_* value in .cargo/config.toml, or
+          # old whisper objects come back. See "CPU baseline" in packaging/README.md.
+          key: release-quality-${{ runner.os }}-whisper-baseline
 
       - name: Install Linux system dependencies
         run: |
@@ -155,7 +157,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-          key: ${{ steps.rust_cache_key.outputs.img }}
+          # whisper-baseline: change it with any GGML_* value in .cargo/config.toml, or
+          # old whisper objects come back. See "CPU baseline" in packaging/README.md.
+          key: ${{ steps.rust_cache_key.outputs.img }}-whisper-baseline
 
       # cpal/ALSA, reqwest/OpenSSL, the Qt offscreen/xcb libs and FUSE-less
       # linuxdeploy deps — same set qt-ci.yml installs.
@@ -292,6 +296,12 @@ jobs:
           fi
           printf 'installer: %s\n' "${files[@]}"
 
+      # The copy that ships, not the one in target/. Before the upload, so a failure
+      # also stops the release job.
+      - name: Check the packaged sidecar's CPU baseline
+        shell: bash
+        run: bash .github/scripts/check-cpu-baseline.sh "${{ matrix.sidecar }}"
+
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
@@ -349,7 +359,7 @@ jobs:
 
           ## Other platforms
 
-          Windows and Linux installers are attached below. This is an unsigned / ad-hoc-signed alpha for cross-OS self-testing; Windows may show SmartScreen. Protocol generation needs your own API key in Settings.
+          Windows and Linux installers are attached below. They need a CPU with AVX2: Intel Haswell (2013) or AMD Excavator (2015) and later. This is an unsigned / ad-hoc-signed alpha for cross-OS self-testing; Windows may show SmartScreen. Protocol generation needs your own API key in Settings.
 
           The durable macOS public-distribution fix remains Developer ID signing + notarization/stapling (see packaging/macos/HOMEBREW-SUNSET.md).
           EOF

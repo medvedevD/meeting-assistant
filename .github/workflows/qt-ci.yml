@@ -224,6 +224,10 @@ jobs:
         shell: bash
         run: cargo build --release --manifest-path rust/Cargo.toml -p meeting-assistant --bin meeting-server
 
+      - name: Check the sidecar's CPU baseline
+        shell: bash
+        run: bash .github/scripts/check-cpu-baseline.sh "${{ matrix.sidecar }}"
+
       # ── Rust tests: recovery pass (section-06) + sidecar contract (02) ─────
       - name: Recovery-pass tests
         shell: bash

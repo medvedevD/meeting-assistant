@@ -8,6 +8,10 @@ on Apple silicon, Windows x64, and Linux x86_64. They are alpha builds, not yet 
 with commercial Apple or Microsoft certificates, so macOS and Windows show a warning
 on first launch.
 
+The Windows and Linux builds need a CPU with AVX2: Intel Haswell (2013) or AMD Excavator
+(2015) and later. Some Pentium, Celeron and Atom chips don't have it. On such a CPU the
+app opens, but transcription fails.
+
 ## macOS
 
 Recommended, with Homebrew:

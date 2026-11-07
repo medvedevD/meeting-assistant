@@ -37,7 +37,9 @@ AppImage fails to launch, run it from a terminal to see stderr.
       Recording if system audio is used.
 - [ ] Start a recording. The timer runs and the status line names the real device.
 - [ ] Stop. The meeting appears in the list.
-- [ ] Transcription runs to completion.
+- [ ] Transcription runs to completion. On Windows or Linux, use a CPU without AVX-512
+      at least once, such as a Ryzen 5000 or a 12th-gen Intel Core. CI only proves the
+      binary doesn't ask for it.
 - [ ] Enter your own API key in Settings. "Test key" succeeds.
 - [ ] Generate minutes. They render.
 - [ ] Russian minutes are set in one serif: digits and Latin words match the letters
