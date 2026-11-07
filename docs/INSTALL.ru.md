@@ -8,6 +8,10 @@ Apple silicon, Windows x64 и Linux x86_64. Это alpha-сборки без к�
 сертификатов Apple и Microsoft, поэтому при первом запуске macOS и Windows покажут
 предупреждение.
 
+Сборкам для Windows и Linux нужен процессор с AVX2: Intel Haswell (2013) или AMD
+Excavator (2015) и новее. У некоторых Pentium, Celeron и Atom его нет. На таком
+процессоре приложение откроется, но транскрипция завершится ошибкой.
+
 ## macOS
 
 Рекомендуемый способ, через Homebrew:

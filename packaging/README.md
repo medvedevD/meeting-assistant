@@ -44,6 +44,42 @@ from `Info.plist.in`, and [`macos/check-bundle.sh`](macos/check-bundle.sh) fails
 build if any binary needs a newer macOS. This proves what the binaries declare, not
 that they run: no hosted runner has macOS 13.
 
+## CPU baseline
+
+whisper.cpp compiles for one CPU level, chosen at build time. ggml's default,
+`GGML_NATIVE=ON`, takes that level from the machine doing the build, so a release
+follows whichever runner it lands on. v0.1.0-alpha.13 shows it: the Windows build got
+AVX-512, which most PCs lack, and the Linux build from the same commit did not. Picking
+code at run time (`GGML_CPU_ALL_VARIANTS`) needs shared libraries, and `whisper-rs-sys`
+links statically, so it would take a fork of that crate.
+
+The root `.cargo/config.toml` sets `GGML_NATIVE=OFF`, which gives:
+
+| OS | Baseline | Runs on |
+|---|---|---|
+| Windows, Linux | AVX2, FMA, F16C, BMI2 | Intel Haswell (2013) and later, AMD Excavator (2015) and later |
+| macOS | The M1's features, clang's default for arm64 macOS | Every Apple silicon chip |
+
+Below the baseline, the sidecar dies with an illegal instruction when it transcribes.
+Lowering the x86 baseline is a product decision: it slows transcription for everyone.
+[`docs/INSTALL.md`](../docs/INSTALL.md) and the release notes in `release.yml` state the
+requirement.
+
+- **Changing a `GGML_*` value needs a new cache key.** `whisper-rs-sys` does not ask
+  cargo to watch these variables, so cargo keeps the old objects. `rust-cache` falls
+  back to an older entry when its hash misses, so only its `key` input drops them.
+  Change the `cpu-baseline-avx2` part in `qt-ci.yml` and `release.yml`. A local tree
+  needs `cargo clean -p whisper-rs-sys`, once after pulling the first pin too.
+- **[`check-cpu-baseline.sh`](../.github/scripts/check-cpu-baseline.sh) reads the
+  binary in both workflows.** It fails on `zmm` registers on x86-64, and on i8mm, SVE
+  or SME in ggml on arm64. This proves what the binary asks for, not that it runs on an
+  old CPU: no hosted runner has one. It also can't see a native build on a runner
+  without AVX-512, which is why the pin lives in config rather than in this check.
+- **A build tuned to your own machine** is still there for local work: run
+  `cargo clean -p whisper-rs-sys`, then build with `GGML_NATIVE=ON` set. Don't package
+  that build. Numbers from `rust/scripts/bench_transcribe.sh` match what users get only
+  without it.
+
 ## Cross-cutting invariant: GUI locates its sibling sidecar
 
 On every OS the CMake `install()` rules ([qt-app/CMakeLists.txt](../qt-app/CMakeLists.txt))

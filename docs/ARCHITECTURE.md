@@ -140,6 +140,12 @@ build, not to runtime:
 screen shows it. A runtime `use_gpu` switch lets users force CPU on accelerated builds.
 CPU builds show a plain note instead of a switch that does nothing.
 
+The CPU instruction set is also fixed at build time. Every build pins it in
+`.cargo/config.toml` instead of tuning for the machine doing the build, so a release
+doesn't depend on which runner it landed on: AVX2 on x86-64, the M1's features on Apple
+silicon. CI reads the built binary to check. See
+[`packaging/README.md`](../packaging/README.md).
+
 ### API key storage
 
 Keys never go into `settings.json`, and the API exposes only `has_key`, never the
