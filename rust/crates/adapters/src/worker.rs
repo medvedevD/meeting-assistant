@@ -112,10 +112,11 @@ impl Worker {
     }
 
     /// Main loop. Permit-before-claim: an idle pool never holds rows in
-    /// `running`. Shutdown interrupts both the permit-acquire and the claim
-    /// via `tokio::select!`; in-flight tasks are drained best-effort and
-    /// any survivors are aborted when the sidecar's outer 1.2s budget
-    /// expires (they recover on next start via `recover_running_jobs`).
+    /// `running`. Shutdown interrupts the permit-acquire, the claim and the
+    /// wait between polls via `tokio::select!`; in-flight tasks are drained
+    /// best-effort and any survivors die with the process when the sidecar's
+    /// outer 1.2s budget expires (they recover on next start via
+    /// `recover_running_jobs`).
     pub async fn run(self: Arc<Self>, mut shutdown: tokio::sync::oneshot::Receiver<()>) {
         info!(
             worker = self.name,
@@ -172,22 +173,25 @@ impl Worker {
                         me.execute(job, cancel).await;
                         drop(permit);
                     });
+                    continue;
                 }
-                Ok(None) => {
-                    drop(permit);
-                    sleep(POLL_INTERVAL).await;
-                }
+                Ok(None) => {}
                 Err(e) => {
-                    drop(permit);
                     error!(worker = self.name, "job_repo.claim_pending_kind error: {e}");
-                    sleep(POLL_INTERVAL).await;
                 }
+            }
+
+            // 3. Nothing claimed: wait for the next poll (also interruptible).
+            drop(permit);
+            tokio::select! {
+                biased;
+                _ = &mut shutdown => break,
+                _ = sleep(POLL_INTERVAL) => {}
             }
         }
 
         // Drain in-flight tasks. The sidecar's outer timeout caps how long
-        // this can run; if it expires the run task is aborted and JoinSet's
-        // Drop cancels what's left.
+        // this can run; if it expires the process exits with them unfinished.
         let mut drained = 0u32;
         while inflight.join_next().await.is_some() {
             drained += 1;
@@ -1162,6 +1166,29 @@ mod tests {
 
         let after = jr.find_by_id(&job.id).await.unwrap().unwrap();
         assert_eq!(after.status, JobStatus::Pending, "job must remain pending");
+    }
+
+    // The sidecar gives its workers 1.2s to stop, less than one poll interval, so
+    // an idle worker that sat out its wait used up the budget and looked stuck.
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_interrupts_the_idle_poll_wait() {
+        let worker = worker_with_transcriber(
+            FakeJobRepo::new(),
+            FakeMeetingRepo::new(),
+            FakeTranscriber::new("ok") as Arc<dyn Transcriber>,
+            1,
+        );
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let run = tokio::spawn(worker.run(rx));
+
+        // Let it find no job and start waiting for the next poll.
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        let _ = tx.send(());
+
+        tokio::time::timeout(POLL_INTERVAL / 2, run)
+            .await
+            .expect("an idle worker must stop without waiting for its next poll")
+            .unwrap();
     }
 
     #[tokio::test]

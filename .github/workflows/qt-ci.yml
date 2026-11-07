@@ -10,6 +10,14 @@ on:
   pull_request:
   workflow_dispatch:
 
+env:
+  # whisper.cpp otherwise builds with -march=native, and rust-cache restores that
+  # build on whichever runner comes next. On a runner with a different CPU the
+  # sidecar then dies with SIGILL as soon as ggml runs. OFF is a fixed baseline
+  # (AVX2, no AVX-512). whisper-rs-sys doesn't rebuild when this value changes, so
+  # changing it also needs new cache keys below.
+  GGML_NATIVE: "OFF"
+
 jobs:
   # Fast, OS-independent gate: Rust PROTOCOL_VERSION == generated C++ kClientProtocol.
   protocol-version:
@@ -36,7 +44,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-          key: rust-quality-${{ runner.os }}
+          key: rust-quality-${{ runner.os }}-whisper-baseline
 
       - name: Install Linux system dependencies
         run: |
@@ -137,7 +145,7 @@ jobs:
           # the hosted image updates. Without this, a refreshed windows-latest
           # image (e.g. Visual Studio 17 2022 -> 18 2026) restores a stale
           # whisper-rs-sys cmake build dir and fails with a generator mismatch.
-          key: ${{ steps.rust_cache_key.outputs.img }}
+          key: ${{ steps.rust_cache_key.outputs.img }}-whisper-baseline
 
       # cpal needs ALSA headers; reqwest's default-tls needs OpenSSL; the Qt
       # offscreen platform plugin still dlopens a handful of system libs.
