@@ -79,6 +79,7 @@ add_subdirectory(serif_typeface)
 add_subdirectory(meety_menu)
 add_subdirectory(first_run)
 add_subdirectory(app_shell_wiring)
+add_subdirectory(meeting_flow)
 add_subdirectory(i18n)
 
 qt_add_executable(tst_smoke

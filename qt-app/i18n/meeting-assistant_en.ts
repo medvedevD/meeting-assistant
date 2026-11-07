@@ -829,6 +829,10 @@ The interface uses protocol %1, but the core supports only %2–%3.</translation
         <translation>Minutes not generated yet</translation>
     </message>
     <message>
+        <source>Транскрипт уже готов. Запустите генерацию протокола — это займёт пару минут.</source>
+        <translation>The transcript is ready. Start generating the minutes. It takes a couple of minutes.</translation>
+    </message>
+    <message>
         <source>У встречи есть аудиозапись. Запустите транскрипцию и генерацию протокола — это займёт пару минут.</source>
         <translation>This meeting has an audio recording. Start transcription and minutes generation. It takes a couple of minutes.</translation>
     </message>

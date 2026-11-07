@@ -93,6 +93,8 @@ See `packaging/` for OS-specific build/sign/notarize scripts (handled outside th
 
 The Qt version differs per OS and each one is held in place by something specific: see "Qt version per OS" in `packaging/README.md` before changing a runner or a Qt version. The app promises macOS 13, so macOS builds set `MACOSX_DEPLOYMENT_TARGET` from `packaging/macos/Info.plist.in`, and `packaging/macos/check-bundle.sh` fails on any binary that needs a newer macOS.
 
+whisper.cpp builds for a fixed CPU, not for the build machine: the root `.cargo/config.toml` sets `GGML_NATIVE=OFF`, which means AVX2 on x86-64 and the M1's features on Apple silicon, and `.github/scripts/check-cpu-baseline.sh` reads the built binary in CI and releases. Cargo does not rebuild whisper when a `GGML_*` value changes, so changing one also means changing the `rust-cache` key: see "CPU baseline" in `packaging/README.md`.
+
 ### Release Gate
 
 Release packaging must be gated by CI, not just triggered by a tag. Before any

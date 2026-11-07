@@ -18,6 +18,7 @@ private slots:
     void initTestCase();
     void pendingThenDoneEmitsFinishedFromQml();
     void modelUnavailableFailureShowsCauseAndProviderReason();
+    void finishedTranscriptionLeavesTheMinutesStepOpen();
 };
 
 namespace {
@@ -188,6 +189,45 @@ void PipelineProgressTest::modelUnavailableFailureShowsCauseAndProviderReason() 
     QVERIFY(detail->property("visible").toBool());
     QVERIFY(detail->property("text").toString().contains(
         QStringLiteral("This model is not available in your subscription tier")));
+}
+
+// An imported file gets a transcription and no minutes, but the finished card
+// ticked all three steps, including "Протокол".
+void PipelineProgressTest::finishedTranscriptionLeavesTheMinutesStepOpen() {
+    ApiClient api;
+
+    QQmlEngine engine;
+    engine.rootContext()->setContextProperty(QStringLiteral("api"), &api);
+    engine.addImportPath(QStringLiteral(MA_PIPELINE_QML_IMPORT_DIR));
+
+    QQmlComponent component(
+        &engine,
+        QUrl::fromLocalFile(QStringLiteral(MA_PIPELINE_QML_FILE)));
+    QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+    std::unique_ptr<QObject> root(component.create());
+    QVERIFY2(root != nullptr, qPrintable(component.errorString()));
+
+    const auto stepComplete = [&root](const QString &label) {
+        const auto children = root->findChildren<QObject *>();
+        for (QObject *o : children)
+            if (o->property("label").toString() == label)
+                return o->property("complete").toBool();
+        return false;
+    };
+    const auto showFinished = [&root](const QString &kind) {
+        root->setProperty("sourceJob", QVariantMap{{QStringLiteral("status"), QStringLiteral("done")},
+                                                   {QStringLiteral("kind"), kind}});
+    };
+
+    showFinished(QStringLiteral("transcribe"));
+    QVERIFY(stepComplete(QStringLiteral("Транскрипция")));
+    QVERIFY(!stepComplete(QStringLiteral("Протокол")));
+
+    showFinished(QStringLiteral("reprocess_transcribe"));
+    QVERIFY(!stepComplete(QStringLiteral("Протокол")));
+
+    showFinished(QStringLiteral("regenerate_protocol"));
+    QVERIFY(stepComplete(QStringLiteral("Протокол")));
 }
 
 int main(int argc, char *argv[]) {
