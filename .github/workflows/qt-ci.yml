@@ -36,9 +36,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-          # cpu-baseline: change it with any GGML_* value in .cargo/config.toml, or
-          # old whisper objects come back. See "CPU baseline" in packaging/README.md.
-          key: rust-quality-cpu-baseline-avx2-${{ runner.os }}
+          key: rust-quality-${{ runner.os }}-whisper-baseline
 
       - name: Install Linux system dependencies
         run: |
@@ -139,9 +137,7 @@ jobs:
           # the hosted image updates. Without this, a refreshed windows-latest
           # image (e.g. Visual Studio 17 2022 -> 18 2026) restores a stale
           # whisper-rs-sys cmake build dir and fails with a generator mismatch.
-          # cpu-baseline: change it with any GGML_* value in .cargo/config.toml, or
-          # old whisper objects come back. See "CPU baseline" in packaging/README.md.
-          key: cpu-baseline-avx2-${{ steps.rust_cache_key.outputs.img }}
+          key: ${{ steps.rust_cache_key.outputs.img }}-whisper-baseline
 
       # cpal needs ALSA headers; reqwest's default-tls needs OpenSSL; the Qt
       # offscreen platform plugin still dlopens a handful of system libs.

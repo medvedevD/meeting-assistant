@@ -68,7 +68,7 @@ requirement.
 - **Changing a `GGML_*` value needs a new cache key.** `whisper-rs-sys` does not ask
   cargo to watch these variables, so cargo keeps the old objects. `rust-cache` falls
   back to an older entry when its hash misses, so only its `key` input drops them.
-  Change the `cpu-baseline-avx2` part in `qt-ci.yml` and `release.yml`. A local tree
+  Change the `whisper-baseline` part in `qt-ci.yml` and `release.yml`. A local tree
   needs `cargo clean -p whisper-rs-sys`, once after pulling the first pin too.
 - **[`check-cpu-baseline.sh`](../.github/scripts/check-cpu-baseline.sh) reads the
   binary in both workflows.** It fails on `zmm` registers on x86-64, and on i8mm, SVE

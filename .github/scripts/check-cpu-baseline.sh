@@ -23,7 +23,7 @@ OBJDUMP="$(command -v objdump || command -v llvm-objdump || true)"
 stale_hint() {
     echo "cargo does not rebuild whisper-rs-sys when a GGML_* value changes, so this is" >&2
     echo "usually an old build: run 'cargo clean -p whisper-rs-sys' locally, or change" >&2
-    echo "the cpu-baseline part of the rust-cache key in CI." >&2
+    echo "the whisper-baseline part of the rust-cache key in CI." >&2
 }
 
 kind="$(file -b "$BIN")"

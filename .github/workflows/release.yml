@@ -96,9 +96,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-          # cpu-baseline: change it with any GGML_* value in .cargo/config.toml, or
+          # whisper-baseline: change it with any GGML_* value in .cargo/config.toml, or
           # old whisper objects come back. See "CPU baseline" in packaging/README.md.
-          key: release-quality-cpu-baseline-avx2-${{ runner.os }}
+          key: release-quality-${{ runner.os }}-whisper-baseline
 
       - name: Install Linux system dependencies
         run: |
@@ -157,9 +157,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-          # cpu-baseline: change it with any GGML_* value in .cargo/config.toml, or
+          # whisper-baseline: change it with any GGML_* value in .cargo/config.toml, or
           # old whisper objects come back. See "CPU baseline" in packaging/README.md.
-          key: cpu-baseline-avx2-${{ steps.rust_cache_key.outputs.img }}
+          key: ${{ steps.rust_cache_key.outputs.img }}-whisper-baseline
 
       # cpal/ALSA, reqwest/OpenSSL, the Qt offscreen/xcb libs and FUSE-less
       # linuxdeploy deps — same set qt-ci.yml installs.
