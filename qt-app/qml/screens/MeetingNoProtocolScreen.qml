@@ -30,7 +30,6 @@ Page {
         function onJobFinished(meetingId, status, job, kind) {
             if (meetingId !== scr.meetingId)
                 return
-            scr.store.refresh()
             if (status === "done")
                 scr.shell.showDetail({
                     "id": scr.meetingId, "name": scr.meetingName,
@@ -206,9 +205,11 @@ Page {
             font.family: Theme.fontUi
             font.pixelSize: Theme.fsBodyLg
             color: Theme.ink3
-            text: scr.audioPath.length > 0
-                  ? qsTr("У встречи есть аудиозапись. Запустите транскрипцию и генерацию протокола — это займёт пару минут.")
-                  : qsTr("Запишите встречу, чтобы сгенерировать протокол.")
+            text: scr.audioPath.length === 0
+                  ? qsTr("Запишите встречу, чтобы сгенерировать протокол.")
+                  : scr.hasTranscript
+                    ? qsTr("Транскрипт уже готов. Запустите генерацию протокола — это займёт пару минут.")
+                    : qsTr("У встречи есть аудиозапись. Запустите транскрипцию и генерацию протокола — это займёт пару минут.")
         }
         MeetyButton {
             visible: scr.audioPath.length > 0

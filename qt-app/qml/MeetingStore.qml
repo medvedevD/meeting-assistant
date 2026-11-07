@@ -3,6 +3,7 @@
 // the backend (GET /api/v1/meetings/:id) by MeetingDetailScreen, so there is no
 // longer a client-side protocol cache.
 import QtQuick
+import MeetingAssistant
 
 QtObject {
     id: store
@@ -36,7 +37,28 @@ QtObject {
     signal scanFailed(string message)
 
     function importFile(path, copy, transcribe) {
-        _import.post("/api/v1/meetings/import", {
+        // One Request per call: "Из папки" imports a batch, and a Request delivers
+        // only the reply to its latest call.
+        var req = _requestComp.createObject(store)
+        req.ok.connect(function (j) {
+            // Here and before importDone, so the job's progress reaches whichever
+            // screen opens the meeting, and survives the user leaving this one.
+            ActiveJobsStore.track(j.id, j.job_id || "", "transcribe")
+            store.refresh()
+            store.importDone(j.id, j.job_id || "")
+            req.destroy()
+        })
+        req.fail.connect(function (s, e) {
+            // ApiClient surfaces the response body in the error string; pull the
+            // existing meeting id out of the 409 conflict payload if present.
+            var m = s === 409 ? /"existing_id"\s*:\s*"([^"]+)"/.exec(e) : null
+            if (m)
+                store.importConflict(m[1])
+            else
+                store.importFailed(s > 0 ? qsTr("HTTP %1: %2").arg(s).arg(e) : e)
+            req.destroy()
+        })
+        req.post("/api/v1/meetings/import", {
             "path": path,
             "copy": copy === undefined ? true : copy,
             "transcribe": transcribe === undefined ? true : transcribe
@@ -50,21 +72,7 @@ QtObject {
             _scan.get("/api/v1/meetings/scan")
     }
 
-    property Request _import: Request {
-        onOk: function (j) {
-            store.refresh()
-            store.importDone(j.id, j.job_id || "")
-        }
-        onFail: function (s, e) {
-            // ApiClient surfaces the response body in the error string; pull the
-            // existing meeting id out of the 409 conflict payload if present.
-            if (s === 409) {
-                var m = /"existing_id"\s*:\s*"([^"]+)"/.exec(e)
-                if (m) { store.importConflict(m[1]); return }
-            }
-            store.importFailed(s > 0 ? qsTr("HTTP %1: %2").arg(s).arg(e) : e)
-        }
-    }
+    property Component _requestComp: Component { Request {} }
 
     property Request _scan: Request {
         onOk: function (j) { store.scanDone(j ? j : []) }

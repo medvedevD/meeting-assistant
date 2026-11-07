@@ -59,11 +59,11 @@ Page {
         function onJobFinished(meetingId, status, job, kind) {
             if (meetingId !== scr.meetingId)
                 return
-            scr.store.refresh()
-            if (status === "done") {
+            if (status === "done")
                 scr.actionNote = qsTr("Готово.")
-                scr.loadProtocol()
-            }
+            // Also after a failure: a job that left no minutes must not leave
+            // this screen blank once its card is swept.
+            scr.loadProtocol()
         }
         function onEnqueueFailed(meetingId, error) {
             if (meetingId === scr.meetingId)
@@ -78,6 +78,9 @@ Page {
             scr.structuredProtocol = (j && j.structured_protocol)
                                    ? j.structured_protocol : null
             scr.protocolUsage = (j && j.protocol_usage) ? j.protocol_usage : null
+            // The caller's value predates any job that finished since. Passing it
+            // on stale makes "generate" clear a saved transcript and transcribe again.
+            scr.hasTranscript = !!(j && j.has_transcript)
             if (!scr.hasProtocol && scr.shell.selectedId === scr.meetingId
                     && !ActiveJobsStore.isActive(scr.meetingId))
                 scr.shell.showNoProtocol({
@@ -200,6 +203,7 @@ Page {
 
         // ── content-bar (detail) ─────────────────────────────────────────────
         RowLayout {
+            objectName: "detailHeader"
             Layout.fillWidth: true
             Layout.maximumWidth: scr.readingWidth
             Layout.alignment: Qt.AlignHCenter
@@ -306,12 +310,16 @@ Page {
         }
 
         // ── inline reprocess progress + note ─────────────────────────────────
+        // Hidden when empty, not just zero-sized. At implicit height 0 a layout
+        // falls back to the item's height and keeps that value for good, so if
+        // this screen opens with a finished job's card up, the card's space would
+        // stay above the document after the card goes.
         ColumnLayout {
+            visible: scr.jobEntry !== null || scr.actionNote.length > 0
             Layout.fillWidth: true
             Layout.maximumWidth: scr.readingWidth
             Layout.alignment: Qt.AlignHCenter
-            Layout.topMargin: (scr.jobEntry !== null
-                               || scr.actionNote.length > 0) ? 16 : 0
+            Layout.topMargin: 16
             spacing: 10
 
             MeetyCard {
@@ -396,6 +404,14 @@ Page {
                     }
                 }
             }
+        }
+
+        // Takes the spare height while there is no document, e.g. during an
+        // import. No row above can grow, so the layout would otherwise spread it
+        // between them and scatter the header, player and card down the page.
+        Item {
+            visible: !scr.hasProtocol
+            Layout.fillHeight: true
         }
     }
 }

@@ -42,6 +42,9 @@ ColumnLayout {
     readonly property string errorClass: job.error_class || ""
     readonly property bool failed: status === "failed"
     readonly property bool done: status === "done"
+    // A finished transcription has not produced minutes, e.g. after an import.
+    readonly property bool minutesPending: job.kind === "transcribe"
+                                           || job.kind === "reprocess_transcribe"
     readonly property int displayPercent: done ? 100 : Math.max(0, Math.min(100, percent))
     readonly property bool indeterminate: !failed && !done
                                       && (stage === "queued"
@@ -145,7 +148,9 @@ ColumnLayout {
         property int index: 0
         property string label: ""
         readonly property bool active: !root.failed && root.activeStep() === index
-        readonly property bool complete: root.done || root.activeStep() > index
+        readonly property bool complete: root.done
+                                         ? !(root.minutesPending && index === 2)
+                                         : root.activeStep() > index
         Layout.fillWidth: true
         spacing: 9
         Rectangle {
