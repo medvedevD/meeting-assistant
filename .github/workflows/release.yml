@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Only bootstraps rustup: cargo then installs the version pinned in
       # rust-toolchain.toml (with rustfmt and clippy) on first use.
@@ -141,7 +141,7 @@ jobs:
           ln -sf /usr/bin/python3 /usr/local/bin/python
           python3 -m pip install --upgrade "cmake>=3.21" ninja
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Only bootstraps rustup: cargo then installs the version pinned in
       # rust-toolchain.toml on first use.
@@ -199,7 +199,7 @@ jobs:
 
       - name: Install uv (Linux container)
         if: matrix.container != ''
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
 
       - name: Install Qt (Linux container)
         if: matrix.container != ''
@@ -225,6 +225,8 @@ jobs:
 
       # ── Windows: MSVC env (build-installer.ps1 prefers ninja, which needs
       #    cl.exe on PATH) + Inno Setup for the installer. ───────────────────────
+      # msvc-dev-cmd has no Node 24 release yet (ilammy/msvc-dev-cmd#94), so
+      # this step alone still logs the Node 20 warning; GitHub runs it on Node 24.
       - name: Set up MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
@@ -239,7 +241,7 @@ jobs:
       # busts when the script (its ffmpeg version/flags) changes.
       - name: Cache Linux build tools (FFmpeg + linuxdeploy)
         if: runner.os == 'Linux'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: dist/linux/.tools
           # Keyed on the FFmpeg version (bump the suffix to force a rebuild), not
@@ -254,7 +256,7 @@ jobs:
       # v3: first build for macOS 13 on the macos-26 SDK (v2 was minos 14.0).
       - name: Cache macOS build tools (FFmpeg)
         if: runner.os == 'macOS'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: dist/macos/.tools
           key: macos-tools-${{ runner.arch }}-ffmpeg6.1.1-v3
@@ -303,7 +305,7 @@ jobs:
         run: bash .github/scripts/check-cpu-baseline.sh "${{ matrix.sidecar }}"
 
       - name: Upload installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: installer-${{ runner.os }}-${{ runner.arch }}
           path: ${{ matrix.installer_glob }}
@@ -322,10 +324,10 @@ jobs:
     env:
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download all installers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: installer-*
           path: installers
