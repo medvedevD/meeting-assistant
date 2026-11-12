@@ -5,17 +5,27 @@ name: Qt CI
 # three OSes, and the IPC protocol version must stay single-source-of-truth.
 # This is what gates the ship.
 
+# Push runs only for the long-lived branches: a feature branch gets CI from its
+# pull request, and an unfiltered push ran every PR commit twice. Run it by hand
+# (workflow_dispatch) for a branch that has no PR yet.
 on:
   push:
+    branches: [main, develop]
   pull_request:
   workflow_dispatch:
+
+# A new commit on a PR cancels that PR's older run. Every other run gets a group
+# of its own, so pushes to main and develop are never cancelled or held back.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Fast, OS-independent gate: Rust PROTOCOL_VERSION == generated C++ kClientProtocol.
   protocol-version:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Enforce protocol-version single source of truth
         run: bash .github/scripts/check-protocol-version.sh
 
@@ -25,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Only bootstraps rustup: cargo then installs the version pinned in
       # rust-toolchain.toml (with rustfmt and clippy) on first use.
@@ -104,7 +114,7 @@ jobs:
           ln -sf /usr/bin/python3 /usr/local/bin/python
           python3 -m pip install --upgrade "cmake>=3.21" ninja
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # With no target, clang and CMake build for the runner's own OS (minos 26.0
       # on macos-26), not the macOS the app promises. packaging/macos/build-app.sh
@@ -185,7 +195,12 @@ jobs:
       # QT_ROOT_DIR/PATH so the rest of the job matches the host-runner action.
       - name: Install uv (Linux container)
         if: matrix.container != ''
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
+        with:
+          # uv caches only aqtinstall's packages here (about 1 MB after pruning),
+          # and with no lockfile to key on, the cache was restored but never saved
+          # again. The Python and Qt downloads never went through it.
+          enable-cache: false
 
       - name: Install Qt (Linux container)
         if: matrix.container != ''
@@ -350,7 +365,7 @@ jobs:
           fi
 
       - name: Upload app artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: meeting-assistant-${{ runner.os }}-${{ runner.arch }}
           path: dist/artifact

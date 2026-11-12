@@ -25,6 +25,23 @@ $Dist      = Join-Path $Repo "dist\windows"
 $Stage     = Join-Path $Dist "stage"
 $Profile   = if ($Debug) { "debug" } else { "release" }
 
+# installer.iss names the publisher's site, which Windows shows in Apps &
+# features. It once named an owner with no such repository, a 404 that only
+# an installed copy would show. In CI it must name the repository being built,
+# so check it before the long build. Local builds publish nothing and skip this.
+if ($env:GITHUB_REPOSITORY) {
+    $Iss  = Join-Path $ScriptDir "installer.iss"
+    $Want = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY"
+    $Have = ""
+    $Line = Select-String -Path $Iss -Pattern '^AppPublisherURL=(.*)$' |
+        Select-Object -First 1
+    if ($Line) { $Have = $Line.Matches[0].Groups[1].Value.Trim() }
+    # -ne ignores case, like GitHub does for owner and repository names.
+    if ($Have -ne $Want) {
+        throw "installer.iss: AppPublisherURL is '$Have', expected '$Want'"
+    }
+}
+
 function Find-QtPrefix {
     if ($env:CMAKE_PREFIX_PATH) { return $env:CMAKE_PREFIX_PATH }
     if ($env:QT_DIR)            { return $env:QT_DIR }
