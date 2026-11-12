@@ -47,10 +47,11 @@ cat > "$OUT" <<CASK
 #
 # Free (un-notarized) channel: the app is ad-hoc signed and NOT notarized (no
 # paid Apple Developer ID — see packaging/macos/HOMEBREW-SUNSET.md). The
-# postflight strips com.apple.quarantine so Gatekeeper does not wall off the app
-# on a clean machine. Lives in a SELF-HOSTED tap (homebrew/cask will not accept
-# an un-notarized cask). Install (Homebrew 6+ asks you to \`brew trust\` it once,
-# because the postflight runs a command to strip the quarantine flag):
+# postflight_steps strip com.apple.quarantine so Gatekeeper does not wall off
+# the app on a clean machine. Lives in a SELF-HOSTED tap (homebrew/cask will not
+# accept an un-notarized cask). Install (Homebrew 6+ loads casks from a
+# third-party tap only after you \`brew trust\` it once; run the command it
+# prints):
 #
 #   brew tap $OWNER_LC/meeting-assistant
 #   brew install --cask meeting-assistant
@@ -72,9 +73,11 @@ cask "meeting-assistant" do
   # Un-notarized: drop the quarantine xattr so the app launches on a clean Mac
   # without the Gatekeeper "cannot verify" wall. This is the entire reason the
   # cask exists for the free channel (see packaging/macos/HOMEBREW-SUNSET.md).
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/MeetingAssistant.app"]
+  # Declarative steps (the \`run\` step needs Homebrew 6.0.13+); {{appdir}} is a
+  # Homebrew template token expanded at install time, not Ruby interpolation.
+  postflight_steps do
+    run "/usr/bin/xattr",
+        args: ["-dr", "com.apple.quarantine", "{{appdir}}/MeetingAssistant.app"]
   end
 
   uninstall quit: "com.meeting-assistant.app"

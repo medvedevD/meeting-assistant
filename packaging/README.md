@@ -162,7 +162,7 @@ FFmpeg compliance mirrors Qt's (dynamic link + written offer + source URL) in
 
 - **macOS — Homebrew unsigned-cask sunset (~Sept 2026): TRACKED.** v1 is
   ad-hoc signed + un-notarized; the self-hosted cask removes quarantine in
-  `postflight`. Homebrew is sunsetting unsigned casks around **2026-09-01**.
+  `postflight_steps`. Homebrew is sunsetting unsigned casks around **2026-09-01**.
   Full risk, date, fallback (self-hosted tap) and exit (Apple Developer ID +
   notarization) → **[macos/HOMEBREW-SUNSET.md](macos/HOMEBREW-SUNSET.md)**.
   Early-spike result → **[macos/SPIKE-RESULTS.md](macos/SPIKE-RESULTS.md)**.

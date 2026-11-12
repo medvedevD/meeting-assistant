@@ -355,7 +355,7 @@ jobs:
           brew tap ${owner_lc}/meeting-assistant
           brew install --cask meeting-assistant
           \`\`\`
-          Homebrew 6+ asks you to \`brew trust\` the tap once — it strips the macOS quarantine flag for you. Approve it with the command Homebrew prints, then re-run the install.
+          Homebrew 6+ asks you to \`brew trust\` the tap once, as it does for every third-party tap. Run the command Homebrew prints, then re-run the install.
 
           **Or download the app:** grab \`MeetingAssistant-*.dmg\` below, open it, and drag the app onto the Programs (Applications) folder. The DMG window shows the one-time first-launch steps (if macOS blocks it: System Settings → Privacy & Security → Open Anyway).
 
