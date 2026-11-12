@@ -5,10 +5,20 @@ name: Qt CI
 # three OSes, and the IPC protocol version must stay single-source-of-truth.
 # This is what gates the ship.
 
+# Push runs only for the long-lived branches: a feature branch gets CI from its
+# pull request, and an unfiltered push ran every PR commit twice. Run it by hand
+# (workflow_dispatch) for a branch that has no PR yet.
 on:
   push:
+    branches: [main, develop]
   pull_request:
   workflow_dispatch:
+
+# A new commit on a PR cancels that PR's older run. Every other run gets a group
+# of its own, so pushes to main and develop are never cancelled or held back.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Fast, OS-independent gate: Rust PROTOCOL_VERSION == generated C++ kClientProtocol.
