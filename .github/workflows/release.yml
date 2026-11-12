@@ -200,6 +200,8 @@ jobs:
       - name: Install uv (Linux container)
         if: matrix.container != ''
         uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: false   # nothing worth caching: see qt-ci.yml
 
       - name: Install Qt (Linux container)
         if: matrix.container != ''

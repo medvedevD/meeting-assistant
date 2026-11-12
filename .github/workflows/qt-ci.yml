@@ -196,6 +196,11 @@ jobs:
       - name: Install uv (Linux container)
         if: matrix.container != ''
         uses: astral-sh/setup-uv@v7
+        with:
+          # uv caches only aqtinstall's packages here (about 1 MB after pruning),
+          # and with no lockfile to key on, the cache was restored but never saved
+          # again. The Python and Qt downloads never went through it.
+          enable-cache: false
 
       - name: Install Qt (Linux container)
         if: matrix.container != ''
