@@ -77,7 +77,7 @@ private:
 
 void SettingsSwitchesTest::initTestCase() {
     verifyEmbeddedQmldir(QStringLiteral(MA_SETTINGS_SWITCHES_QML_IMPORT_DIR));
-    // Qt Quick controls set up their accessibility only while it is active.
+    // Accessibility events go to the test, not to a platform bridge.
     QTestAccessibility::initialize();
 }
 
@@ -131,6 +131,12 @@ QQuickWindow *SettingsSwitchesTest::showPanels(const QString &draft) {
         qWarning().noquote() << component.errorString();
         return nullptr;
     }
+    // The offscreen platform has no accessibility bridge, so accessibility
+    // never turns on by itself. Until it does, Qt 6.7's controls have no
+    // accessible role and Qt Quick gives them no accessible interface (6.11
+    // gives one anyway). Announce it the way a screen reader starting up
+    // would, so every control sets up its role.
+    QAccessible::setActive(true);
     auto *window = qobject_cast<QQuickWindow *>(m_root.get());
     if (window && !QTest::qWaitForWindowExposed(window))
         return nullptr;
