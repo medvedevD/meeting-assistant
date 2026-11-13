@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use meeting_core::{ports::LlmProvider, CoreError};
+use meeting_core::{entities::ErrorClass, ports::LlmProvider, CoreError};
 
 use super::anthropic::AnthropicProvider;
 use super::config::{LlmConfig, ProviderKind};
@@ -51,14 +51,35 @@ fn openai_compat(cfg: &LlmConfig) -> OpenAiCompatProvider {
 
 /// Credential/connectivity probe for the "Test key" button: a one-line request
 /// to the configured model, built exactly as [`build_llm`] builds the provider,
-/// so it is accepted wherever a protocol request is.
+/// so it is accepted wherever a protocol request is. A failure is logged, since
+/// the settings screen shows only its class.
 pub async fn probe_llm(cfg: &LlmConfig) -> Result<(), CoreError> {
-    match cfg.kind {
+    let result = match cfg.kind {
         ProviderKind::Anthropic => anthropic(cfg).probe().await,
         ProviderKind::Gemini => gemini(cfg).probe().await,
         ProviderKind::Openai | ProviderKind::Mistral | ProviderKind::Ollama => {
             openai_compat(cfg).probe().await
         }
+    };
+    if let Err(e) = &result {
+        tracing::warn!(
+            provider = cfg.kind.as_str(),
+            model = %cfg.model,
+            error_class = ErrorClass::from_core_error(e).as_str(),
+            "LLM key check failed: {}",
+            without_key(&e.to_string(), &cfg.api_key)
+        );
+    }
+    result
+}
+
+/// `text` with every copy of `key` masked. Gemini sends the key in the URL,
+/// and a transport error quotes the URL.
+fn without_key(text: &str, key: &str) -> String {
+    if key.is_empty() {
+        text.to_string()
+    } else {
+        text.replace(key, "<api key>")
     }
 }
 
@@ -149,6 +170,103 @@ mod tests {
             })))
             .mount(server)
             .await;
+    }
+
+    /// Collects what the sidecar's `fmt` logger would write to its log.
+    #[derive(Clone, Default)]
+    struct LogBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogBuf {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl LogBuf {
+        /// Route this thread's events here until the guard drops; the tests
+        /// run on tokio's current-thread runtime.
+        fn capture(&self) -> tracing::subscriber::DefaultGuard {
+            let buf = self.clone();
+            let subscriber = tracing_subscriber::fmt()
+                .with_writer(move || buf.clone())
+                .with_ansi(false)
+                .finish();
+            tracing::subscriber::set_default(subscriber)
+        }
+
+        fn line_with(&self, needle: &str) -> String {
+            let text = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();
+            text.lines()
+                .find(|l| l.contains(needle))
+                .unwrap_or_else(|| panic!("no {needle:?} in the log:\n{text}"))
+                .to_string()
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_probe_is_logged_with_provider_model_and_class() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "error": {"message": "Unsupported value: 'temperature'"}
+            })))
+            .mount(&server)
+            .await;
+        let cfg = LlmConfig {
+            kind: ProviderKind::Openai,
+            model: "gpt-6-astra".into(),
+            max_tokens: 25000,
+            base_url: server.uri(),
+            api_key: "sk-test-secret".into(),
+        };
+        let log = LogBuf::default();
+        let _guard = log.capture();
+
+        assert!(probe_llm(&cfg).await.is_err());
+
+        let line = log.line_with("LLM key check failed");
+        assert!(line.contains("WARN"), "{line}");
+        assert!(line.contains("provider=\"openai\""), "{line}");
+        assert!(line.contains("model=gpt-6-astra"), "{line}");
+        assert!(line.contains("error_class=\"llm_rejected\""), "{line}");
+        assert!(line.contains("Unsupported value: 'temperature'"), "{line}");
+        assert!(!line.contains("sk-test-secret"), "{line}");
+    }
+
+    #[tokio::test]
+    async fn a_logged_probe_failure_never_carries_the_key() {
+        // Gemini puts the key in the URL, and reqwest quotes the URL when the
+        // connection fails.
+        let closed_port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let cfg = LlmConfig {
+            kind: ProviderKind::Gemini,
+            model: "gemini-2.5-pro".into(),
+            max_tokens: 8192,
+            base_url: format!("http://127.0.0.1:{closed_port}"),
+            api_key: "AIza-test-secret".into(),
+        };
+        let log = LogBuf::default();
+        let _guard = log.capture();
+
+        let err = probe_llm(&cfg).await.unwrap_err();
+        assert!(
+            err.to_string().contains("AIza-test-secret"),
+            "the premise changed, the error no longer quotes the key: {err}"
+        );
+
+        let line = log.line_with("LLM key check failed");
+        assert!(line.contains("error_class=\"network_timeout\""), "{line}");
+        assert!(line.contains("key=<api key>"), "{line}");
+        assert!(!line.contains("AIza-test-secret"), "{line}");
     }
 
     #[tokio::test]
