@@ -64,6 +64,9 @@ public:
         return QStringLiteral("http://127.0.0.1:%1").arg(m_server.serverPort());
     }
 
+    // Answer a recording start as macOS does without Screen Recording access.
+    bool deniesScreenCapture = false;
+
     // Returns the meeting as the list route reports it, ready for shell.show*().
     QVariantMap addMeeting(const QString &id, bool hasTranscript) {
         m_meetings[id] = Meeting{id, hasTranscript, QString()};
@@ -191,6 +194,13 @@ private:
                                           {QStringLiteral("recording"),
                                            QJsonObject{{QStringLiteral("source"), QStringLiteral("mixed")},
                                                        {QStringLiteral("echo_cancel"), false}}}})};
+        if (method == "POST" && path == QLatin1String("/api/v1/recordings") && deniesScreenCapture)
+            return {500, json(QJsonObject{
+                             {QStringLiteral("error"),
+                              QStringLiteral("recording error: ScreenCaptureKit error: No shareable content "
+                                             "available. Grant Screen Recording in "
+                                             "x-apple.systempreferences:com.apple.preference.security"
+                                             "?Privacy_ScreenCapture")}})};
         if (method == "POST" && path == QLatin1String("/api/v1/recordings")) {
             // What the macOS sidecar answers for a mixed recording: the mic by
             // name, and the system mix with an empty label for the GUI to name.
@@ -294,8 +304,23 @@ QQuickItem *findStack(QQuickItem *root) {
 
 // One running app: the real shell in a window, talking to a fake sidecar. Members
 // are ordered so the QML goes first and the sidecar it talks to goes last.
+// Stands in for main.cpp's ScreenCapturePermission, which would run tccutil.
+class FakeScreenCapturePermission final : public QObject {
+    Q_OBJECT
+    Q_PROPERTY(bool canReset READ canReset CONSTANT)
+
+public:
+    bool canReset() const { return true; }
+    Q_INVOKABLE bool reset() {
+        ++resets;
+        return true;
+    }
+    int resets = 0;
+};
+
 struct App {
     FakeSidecar sidecar;
+    FakeScreenCapturePermission permission;
     ApiClient api;
     PathUtils pathUtils;
     QQmlEngine engine;
@@ -312,6 +337,7 @@ struct App {
         QQmlContext *ctx = engine.rootContext();
         ctx->setContextProperty(QStringLiteral("api"), &api);
         ctx->setContextProperty(QStringLiteral("pathUtils"), &pathUtils);
+        ctx->setContextProperty(QStringLiteral("screenCapturePermission"), &permission);
         ctx->setContextProperty(QStringLiteral("appPreferences"), QVariant::fromValue<QObject *>(nullptr));
 
         QQmlComponent component(&engine);
@@ -440,6 +466,7 @@ private slots:
     void finishedJobUpdatesTheSidebarFromAnyScreen();
     void recordingNamesTheSystemMixInTheInterfaceLanguage();
     void typedTemplateIsUsedWithoutPressingEnter();
+    void permissionDialogResetsTheScreenRecordingGrant();
 };
 
 void MeetingFlowTest::initTestCase() {
@@ -623,6 +650,28 @@ void MeetingFlowTest::typedTemplateIsUsedWithoutPressingEnter() {
 
     QVERIFY(app.clickUntil(kGenerateMinutes, [&app] { return !app.sidecar.reprocessKinds().isEmpty(); }));
     QCOMPARE(app.sidecar.reprocessTemplates(), QStringList{QStringLiteral("Simple minutes")});
+}
+
+// After an update of the ad-hoc signed build macOS keeps the Screen Recording
+// grant for the old binary. The dialog told the user to remove the app from the
+// list and add it back, which did not help in the alpha.15 smoke run; resetting
+// the grant did. The dialog now offers that reset.
+void MeetingFlowTest::permissionDialogResetsTheScreenRecordingGrant() {
+    App app;
+    app.sidecar.deniesScreenCapture = true;
+    QVERIFY(app.start());
+
+    QMetaObject::invokeMethod(app.shell, "showNewRecording");
+    QTRY_COMPARE(app.pageName(), QStringLiteral("NewRecordingScreen"));
+    QMetaObject::invokeMethod(app.page(), "start", Q_ARG(QVariant, QStringLiteral("Планёрка")));
+
+    QTRY_VERIFY(app.visibleText(QStringLiteral("Нужно разрешение macOS")) != nullptr);
+    QVERIFY(app.visibleTextContaining(QStringLiteral("кнопкой «−»")) == nullptr);
+    QVERIFY(app.clickUntil(QStringLiteral("Сбросить разрешение"),
+                           [&app] { return app.permission.resets > 0; }));
+    QCOMPARE(app.permission.resets, 1);
+    QTRY_VERIFY(app.visibleTextContaining(QStringLiteral("Разрешение сброшено.")) != nullptr);
+    QVERIFY(app.visibleText(QStringLiteral("Сбросить разрешение")) == nullptr);
 }
 
 int main(int argc, char *argv[]) {

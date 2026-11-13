@@ -4,6 +4,7 @@
 #include "Language.h"
 #include "Logging.h"
 #include "PathUtils.h"
+#include "ScreenCapturePermission.h"
 #include "SidecarManager.h"
 
 #include <QGuiApplication>
@@ -68,6 +69,7 @@ int main(int argc, char *argv[]) {
     AppPreferences appPreferences(
         AppPreferences::firstRunPreviewFromEnvironment());
     PathUtils pathUtils;
+    ScreenCapturePermission screenCapturePermission;
 
     // Wire the client the moment the sidecar is Ready (handshake + version
     // gate + /health all passed).
@@ -93,6 +95,8 @@ int main(int argc, char *argv[]) {
         QStringLiteral("appPreferences"), &appPreferences);
     engine.rootContext()->setContextProperty(QStringLiteral("pathUtils"),
                                              &pathUtils);
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("screenCapturePermission"), &screenCapturePermission);
     engine.rootContext()->setContextProperty(QStringLiteral("appLanguage"),
                                              &language);
     engine.rootContext()->setContextProperty(QStringLiteral("controlsStyle"),

@@ -201,6 +201,13 @@ Page {
         return msg && msg.indexOf(scr.screenRecordingSettingsUrl) !== -1
     }
 
+    // "Reset the permission" in the dialog below: "", "done" or "failed".
+    property string permissionReset: ""
+    // Only a macOS app bundle has a grant to reset (main.cpp provides the helper).
+    readonly property bool canResetPermission:
+        typeof screenCapturePermission !== "undefined" && screenCapturePermission !== null
+        && screenCapturePermission.canReset
+
     Request {
         id: startReq
         onOk: function (j) {
@@ -214,6 +221,7 @@ Page {
         }
         onFail: function (s, e) {
             if (scr.isPermissionError(e)) {
+                scr.permissionReset = ""
                 permissionDialog.open()
                 scr.st = "idle"
                 return
@@ -265,6 +273,8 @@ Page {
 
         // The alpha is ad-hoc signed, so after an update macOS still holds the
         // grant for the previous binary: the switch shows on, the start fails.
+        // Removing the app in Settings and adding it back does not fix that;
+        // resetting the grant does (ScreenCapturePermission).
         Text {
             Layout.fillWidth: true
             wrapMode: Text.WordWrap
@@ -272,7 +282,30 @@ Page {
             font.family: Theme.fontUi
             font.pixelSize: Theme.fsBody
             color: Theme.ink3
-            text: qsTr("Если Meeting Assistant уже включён в настройках, удалите его из списка кнопкой «−» и добавьте заново: после обновления macOS помнит разрешение для прежней версии приложения.")
+            text: scr.canResetPermission
+                  ? qsTr("Если Meeting Assistant уже включён в настройках, сбросьте разрешение: после обновления macOS помнит его для прежней версии приложения. Затем снова начните запись, разрешите доступ в запросе macOS и согласитесь перезапустить приложение.")
+                  : qsTr("Если Meeting Assistant уже включён в настройках, сбросьте разрешение командой «tccutil reset ScreenCapture com.meeting-assistant.app» в Терминале: после обновления macOS помнит его для прежней версии приложения. Затем снова начните запись и разрешите доступ в запросе macOS.")
+        }
+
+        MeetyButton {
+            visible: scr.canResetPermission && scr.permissionReset !== "done"
+            iconName: "refresh"
+            text: qsTr("Сбросить разрешение")
+            onClicked: scr.permissionReset =
+                       screenCapturePermission.reset() ? "done" : "failed"
+        }
+
+        Text {
+            Layout.fillWidth: true
+            visible: scr.permissionReset.length > 0
+            wrapMode: Text.WordWrap
+            lineHeight: 1.35
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            color: scr.permissionReset === "done" ? Theme.ink2 : Theme.rec
+            text: scr.permissionReset === "done"
+                  ? qsTr("Разрешение сброшено. Закройте окно, начните запись снова и разрешите доступ, когда macOS спросит.")
+                  : qsTr("Не удалось сбросить разрешение. Выполните в Терминале: tccutil reset ScreenCapture com.meeting-assistant.app")
         }
 
         footer: MeetyDialogActions {

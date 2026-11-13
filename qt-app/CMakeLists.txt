@@ -68,6 +68,7 @@ qt_add_executable(meeting-assistant-qt
     src/ApiClient.h        src/ApiClient.cpp
     src/JobPoller.h        src/JobPoller.cpp
     src/PathUtils.h
+    src/ScreenCapturePermission.h
     "${_gen_header}")
 
 # macOS: ship as MeetingAssistant.app. The Info.plist carries the
