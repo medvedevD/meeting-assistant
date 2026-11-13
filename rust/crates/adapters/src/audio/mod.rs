@@ -1,4 +1,5 @@
 mod cpal_capture;
+pub(crate) use cpal_capture::is_scratch_track;
 pub use cpal_capture::{CpalAudioCapture, CpalAudioDevices, CpalLevelMonitor};
 
 /// Crash-safe recording recovery — startup pass that finalizes orphaned WAVs

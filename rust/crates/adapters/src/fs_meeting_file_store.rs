@@ -2,6 +2,8 @@ use async_trait::async_trait;
 use meeting_core::{ports::MeetingFileStore, CoreError};
 use std::path::{Path, PathBuf};
 
+use crate::audio::is_scratch_track;
+
 /// True for the Windows errors raised when a file is still held open by another
 /// process: ERROR_SHARING_VIOLATION (32) and ERROR_LOCK_VIOLATION (33). On other
 /// platforms an open file can be unlinked, so this is always false.
@@ -120,6 +122,7 @@ impl MeetingFileStore for FsMeetingFileStore {
                     .and_then(|e| e.to_str())
                     .map(|e| AUDIO_EXTS.contains(&e.to_ascii_lowercase().as_str()))
                     .unwrap_or(false)
+                    && !is_scratch_track(&path)
                 {
                     out.push(path);
                     if out.len() >= HARD_CAP {
@@ -149,6 +152,40 @@ mod tests {
     use super::*;
     use std::cell::Cell;
     use std::io;
+
+    /// "Из папки" offered the legs of a "Both" recording as files to import
+    /// (smoke test of v0.1.0-alpha.14). They are not recordings: stop or the
+    /// recovery pass mixes them into the meeting's `recording.wav`.
+    #[tokio::test]
+    async fn listing_skips_a_recordings_scratch_tracks() {
+        let root = tempfile::tempdir().unwrap();
+        let meeting = root.path().join("2026-11-12 Standup");
+        std::fs::create_dir(&meeting).unwrap();
+        for name in [
+            "recording.wav",
+            "recording.mic_tmp.wav",
+            "recording.sys_tmp.wav",
+            "recording.mix_tmp.wav",
+            "RECORDING.MIC_TMP.WAV",
+        ] {
+            std::fs::write(meeting.join(name), b"RIFF").unwrap();
+        }
+        std::fs::write(root.path().join("interview.m4a"), b"").unwrap();
+
+        let mut found = FsMeetingFileStore
+            .list_audio_files(root.path(), 4)
+            .await
+            .unwrap();
+        found.sort();
+
+        assert_eq!(
+            found,
+            vec![
+                meeting.join("recording.wav"),
+                root.path().join("interview.m4a"),
+            ]
+        );
+    }
 
     // Regression (Windows): a recording deletion that races the media player's
     // handle release fails the first attempt(s) with ERROR_SHARING_VIOLATION (os

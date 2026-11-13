@@ -989,15 +989,35 @@ fn ffmpeg_program() -> std::ffi::OsString {
         .unwrap_or_else(|| std::ffi::OsString::from("ffmpeg"))
 }
 
+/// Extensions of the scratch tracks a recording writes beside its
+/// `recording.wav`: the two legs of a mixed recording, and the file recovery
+/// mixes them into before renaming it over `recording.wav`.
+const MIC_LEG_EXT: &str = "mic_tmp.wav";
+const SYS_LEG_EXT: &str = "sys_tmp.wav";
+pub(crate) const MIX_TMP_EXT: &str = "mix_tmp.wav";
+
 /// Where a mixed ("Both") recording keeps its two legs until they are mixed
 /// into `output_path`: `recording.mic_tmp.wav` and `recording.sys_tmp.wav`.
 /// Recovery looks for the same names when a stop or the core failed before the
 /// mix ran.
 pub(crate) fn mixed_leg_paths(output_path: &Path) -> (PathBuf, PathBuf) {
     (
-        output_path.with_extension("mic_tmp.wav"),
-        output_path.with_extension("sys_tmp.wav"),
+        output_path.with_extension(MIC_LEG_EXT),
+        output_path.with_extension(SYS_LEG_EXT),
     )
+}
+
+/// Whether `path` is one of a recording's scratch tracks rather than a
+/// recording: an unfinished leg, which stop or recovery mixes into the
+/// meeting's `recording.wav`, or recovery's half-written mix.
+pub(crate) fn is_scratch_track(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let name = name.to_ascii_lowercase();
+    [MIC_LEG_EXT, SYS_LEG_EXT, MIX_TMP_EXT]
+        .iter()
+        .any(|ext| name.ends_with(&format!(".{ext}")))
 }
 
 /// Mix the mic and system legs of a mixed recording into `out` with this

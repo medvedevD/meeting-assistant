@@ -358,7 +358,7 @@ fn recover_mixed_legs(audio_path: &Path, mix: LegMixer) -> LegsRecovery {
 
     let reason = match (&mic_len, &sys_len) {
         (Ok(_), Ok(_)) => {
-            let mix_tmp = audio_path.with_extension("mix_tmp.wav");
+            let mix_tmp = audio_path.with_extension(super::cpal_capture::MIX_TMP_EXT);
             let mixed = mix(&mic, &sys, &mix_tmp)
                 .and_then(|()| std::fs::rename(&mix_tmp, audio_path).map_err(|e| e.to_string()));
             match mixed {
