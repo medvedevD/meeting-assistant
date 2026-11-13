@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::errors::{classify_http, classify_transport};
 use super::usage::token_usage;
+use super::PROBE_PROMPT;
 
 /// Provider for any OpenAI-compatible Chat Completions endpoint:
 /// OpenAI/ChatGPT, Mistral, and Ollama (local) all speak this wire format.
@@ -88,16 +89,16 @@ impl OpenAiCompatProvider {
         }
     }
 
-    /// "Test key" check: the request `generate` sends, cut to one output token,
-    /// against the configured model. Listing `/models` is not enough — it
+    /// "Test key" check: the request `generate` sends, with the same model and
+    /// token cap, on a one-line prompt. Listing `/models` is not enough — it
     /// succeeds for a valid key even when the model is outside the
     /// subscription tier, which then only fails at protocol generation.
     pub async fn probe(&self) -> Result<(), CoreError> {
         let body = self.chat_request(
-            1,
+            self.max_tokens,
             vec![ChatMessage {
                 role: "user",
-                content: "ping",
+                content: PROBE_PROMPT,
             }],
         );
         let url = format!("{}/chat/completions", self.base_url);
@@ -341,22 +342,63 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn probe_requests_one_token_from_the_configured_model() {
+    async fn probe_asks_the_configured_model_with_the_generation_token_cap() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/chat/completions"))
-            .and(body_partial_json(
-                json!({"model": "gpt-4o-mini", "max_tokens": 1}),
-            ))
+            .and(body_partial_json(json!({
+                "model": "mistral-small-latest",
+                "max_tokens": 4096,
+                "messages": [{"role": "user", "content": PROBE_PROMPT}]
+            })))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "choices": [{"message": {"role": "assistant", "content": "p"}}]
+                "choices": [{"message": {"role": "assistant", "content": "OK"}}]
             })))
             .expect(1)
             .mount(&server)
             .await;
 
-        let provider = OpenAiCompatProvider::new("OpenAI", "k", "gpt-4o-mini", 4096, server.uri());
+        let provider =
+            OpenAiCompatProvider::new("mistral", "k", "mistral-small-latest", 4096, server.uri());
         assert!(provider.probe().await.is_ok());
+    }
+
+    /// A reasoning model spends the cap on thinking before it writes anything,
+    /// and rejects a cap too small for that. Generation with the configured
+    /// cap works, so the probe must pass too (smoke test of v0.1.0-alpha.14:
+    /// "Test" failed for gpt-6-astra while protocols generated fine).
+    #[tokio::test]
+    async fn probe_passes_for_a_reasoning_model_that_rejects_a_tiny_cap() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_partial_json(json!({"max_completion_tokens": 25000})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{"message": {"role": "assistant", "content": "OK"}}]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(reasoning_cap_too_small()))
+            .mount(&server)
+            .await;
+
+        let provider = OpenAiCompatProvider::new("openai", "k", "gpt-6-astra", 25000, server.uri())
+            .with_max_completion_tokens();
+        provider.generate("transcript", None).await.unwrap();
+        provider.probe().await.unwrap();
+    }
+
+    /// What a reasoning model answers to a cap it can't finish in.
+    fn reasoning_cap_too_small() -> serde_json::Value {
+        json!({"error": {
+            "message": "Could not finish the message because max_tokens or model \
+                        output limit was reached. Please try again with higher max_tokens.",
+            "type": "invalid_request_error",
+            "param": null,
+            "code": null
+        }})
     }
 
     #[tokio::test]
@@ -444,16 +486,7 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "choices": [{"message": {"role": "assistant", "content": "# P"}}]
             })))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("POST"))
-            .and(path("/chat/completions"))
-            .and(body_partial_json(json!({"max_completion_tokens": 1})))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "choices": [{"message": {"role": "assistant", "content": ""}}]
-            })))
-            .expect(1)
+            .expect(2)
             .mount(&server)
             .await;
 

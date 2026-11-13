@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::errors::{classify_http, classify_transport};
 use super::usage::token_usage;
+use super::PROBE_PROMPT;
 
 /// Google Gemini provider (Generative Language API). Distinct wire format from
 /// the OpenAI-compatible providers: model is in the URL path, key is a query
@@ -43,16 +44,17 @@ impl GeminiProvider {
         }
     }
 
-    /// "Test key" check: a one-token `generateContent` against the configured
-    /// model, so a model the key can't use fails here rather than only at
-    /// protocol generation (listing models succeeds regardless).
+    /// "Test key" check: a one-line `generateContent` against the configured
+    /// model with the token cap `generate` uses, so a model the key can't use
+    /// fails here rather than only at protocol generation (listing models
+    /// succeeds regardless).
     pub async fn probe(&self) -> Result<(), CoreError> {
         let body = GenerateContentRequest {
             contents: vec![Content {
-                parts: vec![Part { text: "ping" }],
+                parts: vec![Part { text: PROBE_PROMPT }],
             }],
             generation_config: GenerationConfig {
-                max_output_tokens: 1,
+                max_output_tokens: self.max_tokens,
             },
         };
         let url = format!(
@@ -345,13 +347,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn probe_requests_one_token_from_the_configured_model() {
+    async fn probe_asks_the_configured_model_with_the_generation_token_cap() {
+        // Thinking models spend the cap on thoughts first: a smaller cap than
+        // `generate` uses could fail where a protocol request succeeds.
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path_regex(r"/models/gemini-2\.5-flash:generateContent"))
-            .and(body_partial_json(
-                json!({"generationConfig": {"maxOutputTokens": 1}}),
-            ))
+            .and(body_partial_json(json!({
+                "contents": [{"parts": [{"text": PROBE_PROMPT}]}],
+                "generationConfig": {"maxOutputTokens": 4096}
+            })))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"candidates": []})))
             .expect(1)
             .mount(&server)

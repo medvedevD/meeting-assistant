@@ -40,9 +40,10 @@ zeroize = "1"
 getrandom = "0.2"
 
 # Portable default: CPU-only Whisper on every target except macOS. CUDA/Vulkan
-# layer on top of this via the opt-in features below.
+# layer on top of this via the opt-in features below. `tracing_backend` brings
+# whisper.cpp's own log into `tracing` (see `route_whisper_cpp_logs`).
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-whisper-rs = "0.16"
+whisper-rs = { version = "0.16", features = ["tracing_backend"] }
 
 # macOS system-audio capture via ScreenCaptureKit (audio-only; macOS 13.0 floor).
 # QtMultimedia/cpal cannot expose a macOS loopback device — see section-05.
@@ -51,7 +52,7 @@ screencapturekit = { version = "=2.1.0", features = ["macos_13_0"] }
 keyring = { version = "3", features = ["apple-native"] }
 # Metal is on by default for macOS: it ships with the OS (no runtime install)
 # and needs no extra notarization/signing surface. This is the "cheapest win".
-whisper-rs = { version = "0.16", features = ["metal"] }
+whisper-rs = { version = "0.16", features = ["metal", "tracing_backend"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
@@ -76,5 +77,6 @@ whisper-vulkan = ["whisper-rs/vulkan"]
 [dev-dependencies]
 meeting-core = { path = "../core", features = ["fakes"] }
 wiremock = { workspace = true }
+tracing-subscriber = { workspace = true }
 tokio = { version = "1", features = ["full", "test-util"] }
 tempfile = "3"

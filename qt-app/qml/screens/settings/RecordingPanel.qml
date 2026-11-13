@@ -235,7 +235,16 @@ ScrollView {
             Item { Layout.fillWidth: true }
             MeetySwitch {
                 id: echoSwitch
-                onToggled: { panel.r().echo_cancel = checked; scr.touch() }
+                objectName: "echoSwitch"
+                // Any change of `checked`, not just `toggled`: an accessibility
+                // toggle (VoiceOver) sets `checked` without emitting `toggled`.
+                // load() sets it to what the draft already holds.
+                onCheckedChanged: {
+                    if (checked === (panel.r().echo_cancel === true))
+                        return
+                    panel.r().echo_cancel = checked
+                    scr.touch()
+                }
             }
         }
     }
