@@ -41,6 +41,7 @@ pub async fn start(
     State(state): State<Arc<AppState>>,
     Json(req): Json<StartRequest>,
 ) -> Result<(StatusCode, Json<MeetingResponse>), (StatusCode, String)> {
+    let source = req.source;
     let (meeting, resolved) = start_recording(
         Arc::clone(&state.audio_capture),
         Arc::clone(&state.meeting_repo),
@@ -54,7 +55,10 @@ pub async fn start(
         },
     )
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| {
+        tracing::error!(?source, "start recording failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+    })?;
 
     Ok((
         StatusCode::CREATED,
@@ -80,6 +84,9 @@ pub async fn stop(
     .await
     .map_err(|e| {
         use meeting_core::CoreError;
+        // The GUI only shows that the stop failed; the log is where the cause
+        // is read later, so it goes there with the session it belongs to.
+        tracing::error!(meeting_id = %id, "stop recording failed: {e}");
         match e {
             CoreError::NotFound(_) => (StatusCode::NOT_FOUND, e.to_string()),
             CoreError::Recording(_) => (StatusCode::CONFLICT, e.to_string()),
@@ -333,5 +340,92 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    // ── logging ──────────────────────────────────────────────────────────────
+
+    /// Collects what the sidecar's `fmt` logger would write to stderr.
+    #[derive(Clone, Default)]
+    struct LogBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for LogBuf {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl LogBuf {
+        /// Route this thread's events here until the guard drops. The tests
+        /// run on tokio's current-thread runtime, so the handler's events are
+        /// on this thread.
+        fn capture(&self) -> tracing::subscriber::DefaultGuard {
+            let buf = self.clone();
+            let subscriber = tracing_subscriber::fmt()
+                .with_writer(move || buf.clone())
+                .with_ansi(false)
+                .finish();
+            tracing::subscriber::set_default(subscriber)
+        }
+
+        fn text(&self) -> String {
+            String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_stop_is_logged_as_an_error_with_the_meeting_id() {
+        let log = LogBuf::default();
+        let _guard = log.capture();
+        let app = make_app_with(FakeAudioCapture::new(), FakeMeetingRepo::new());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/recordings/meeting-4711/stop")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+
+        let text = log.text();
+        let line = text
+            .lines()
+            .find(|l| l.contains("stop recording failed"))
+            .unwrap_or_else(|| panic!("no stop error in the log:\n{text}"));
+        assert!(line.contains("ERROR"), "{line}");
+        assert!(line.contains("meeting_id=meeting-4711"), "{line}");
+        assert!(line.contains("session not found: meeting-4711"), "{line}");
+    }
+
+    #[tokio::test]
+    async fn failed_start_is_logged_as_an_error() {
+        let log = LogBuf::default();
+        let _guard = log.capture();
+        let app = make_app_with(
+            FakeAudioCapture::failing_start("screen recording permission denied"),
+            FakeMeetingRepo::new(),
+        );
+
+        let response = post_start(app, serde_json::json!({ "source": "mixed" })).await;
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let text = log.text();
+        let line = text
+            .lines()
+            .find(|l| l.contains("start recording failed"))
+            .unwrap_or_else(|| panic!("no start error in the log:\n{text}"));
+        assert!(line.contains("ERROR"), "{line}");
+        assert!(
+            line.contains("screen recording permission denied"),
+            "{line}"
+        );
+        assert!(line.contains("source=Mixed"), "{line}");
     }
 }
