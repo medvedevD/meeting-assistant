@@ -134,7 +134,7 @@ pub async fn import(
 ) -> Result<(StatusCode, Json<ImportResponse>), (StatusCode, Json<ConflictResponse>)> {
     let source = PathBuf::from(&req.path);
 
-    // Dedup by audio_path (decision #10): if this exact path is already a
+    // Dedup by audio_path: if this exact path is already a
     // meeting, return 409 pointing at it instead of creating a duplicate.
     if let Ok(Some(existing)) = state.meeting_repo.find_by_audio_path(&source).await {
         return Err((
@@ -232,7 +232,7 @@ pub async fn reprocess(
     let job = match req.kind.as_str() {
         "transcribe" => {
             let then_protocol = req.then_protocol.unwrap_or(false);
-            // Resolve the configured default template now (decision #3) so the
+            // Resolve the configured default template now so the
             // chained protocol job the worker enqueues carries a ready name.
             // Only meaningful when chaining; the transcription step ignores it.
             let template_name = if then_protocol {
@@ -250,7 +250,7 @@ pub async fn reprocess(
             .await
         }
         "protocol" => {
-            // Decision #3: resolve the configured default template in the API
+            // Resolve the configured default template in the API
             // layer before the job is enqueued, so the worker's use-case call
             // receives a ready template name and settings never reach the core.
             let template_name = req.template_name.or_else(|| (state.default_template)());
@@ -553,7 +553,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
-    // ── Phase 3: import / scan / reprocess / delete ─────────────────────────
+    // ── import / scan / reprocess / delete ──────────────────────────────────
 
     fn make_app_full(
         repo: std::sync::Arc<FakeMeetingRepo>,

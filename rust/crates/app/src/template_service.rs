@@ -11,7 +11,7 @@ use meeting_core::CoreError;
 /// JSON settings store. Validation lives in the core use-cases; this layer maps
 /// `CoreError` onto the wire error and owns the cross-cutting concern the core
 /// can't see — clearing a dangling `default_template` when its template is
-/// deleted (plan decision #7).
+/// deleted.
 pub struct AppTemplateService {
     templates: Arc<dyn TemplateLoader>,
     settings_store: Arc<JsonSettingsStore>,
@@ -95,7 +95,7 @@ impl TemplateService for AppTemplateService {
             dirty = true;
         }
 
-        // Decision #7: if the deleted template was the configured default, clear
+        // If the deleted template was the configured default, clear
         // the reference (the app falls back to the built-in default) and tell
         // the client so it can surface a toast.
         let mut notice = None;

@@ -46,7 +46,7 @@ getrandom = "0.2"
 whisper-rs = { version = "0.16", features = ["tracing_backend"] }
 
 # macOS system-audio capture via ScreenCaptureKit (audio-only; macOS 13.0 floor).
-# QtMultimedia/cpal cannot expose a macOS loopback device — see section-05.
+# QtMultimedia/cpal cannot expose a macOS loopback device.
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = { version = "=2.1.0", features = ["macos_13_0"] }
 keyring = { version = "3", features = ["apple-native"] }

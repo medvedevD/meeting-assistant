@@ -44,8 +44,8 @@ Page {
         return "idle"
     }
 
-    // Per-generation template override, seeded from the server default
-    // (decision #13). Editing it does NOT change the global default.
+    // Per-generation template override, seeded from the server default.
+    // Editing it does NOT change the global default.
     property string templateName: ""
     Connections {
         target: SettingsStore

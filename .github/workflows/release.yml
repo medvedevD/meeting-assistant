@@ -367,7 +367,7 @@ jobs:
 
           Windows and Linux installers are attached below. They need a CPU with AVX2: Intel Haswell (2013) or AMD Excavator (2015) and later. This is an unsigned / ad-hoc-signed alpha for cross-OS self-testing; Windows may show SmartScreen. Protocol generation needs your own API key in Settings.
 
-          The durable macOS public-distribution fix remains Developer ID signing + notarization/stapling (see packaging/macos/HOMEBREW-SUNSET.md).
+          The durable macOS public-distribution fix remains Developer ID signing + notarization/stapling (see "Signing and distribution" in packaging/README.md).
           EOF
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \

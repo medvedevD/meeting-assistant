@@ -4,7 +4,7 @@
 #   →  linuxdeploy + the Qt plugin (bundles Qt6 + the QML runtime)
 #   →  MeetingAssistant-<arch>.AppImage
 #
-# $0 cost, no signing gate (locked decision). System audio already works on
+# $0 cost, no signing gate. System audio already works on
 # Linux via `parec` (PulseAudio) — no extra entitlement/permission plumbing.
 #
 # Usage: build-appimage.sh [--debug]

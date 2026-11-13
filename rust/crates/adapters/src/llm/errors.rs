@@ -1,7 +1,7 @@
 use meeting_core::CoreError;
 
 /// Map a non-2xx HTTP status from an LLM provider to a classified [`CoreError`].
-/// The classification drives the pipeline error banners (Phase 4), so it must
+/// The classification drives the pipeline error banners, so it must
 /// tell apart "the key is wrong" (401) from "the key is fine but this model is
 /// not yours" (403/404) — conflating them sends the user to re-enter a working
 /// key. The provider's own message is kept (not the raw JSON body) so the UI

@@ -97,7 +97,7 @@ impl PipelineStage {
 }
 
 /// Classified terminal failure. This is the **only** progress-related value
-/// persisted in the DB (decision #11); the stage/percent live in memory.
+/// persisted in the DB; the stage/percent live in memory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorClass {

@@ -20,7 +20,7 @@ use tower_governor::{
 pub use meeting_core::LiveJobs;
 
 /// Resolves the configured `default_template` name when a protocol request
-/// omits one. Decision #3: settings never leak into the core; the API layer
+/// omits one. Settings never leak into the core; the API layer
 /// resolves the name (reading the live settings store) **before** calling the
 /// `generate_protocol` use-case, which only ever sees a ready `template_name`.
 pub type DefaultTemplateFn = Arc<dyn Fn() -> Option<String> + Send + Sync>;
@@ -55,7 +55,7 @@ pub struct AppState {
     /// job at its next safe checkpoint.
     pub progress: LiveJobs,
     /// Resolves the configured default template when a protocol request omits
-    /// one (decision #3 — the API layer resolves it before the use-case runs).
+    /// one (the API layer resolves it before the use-case runs).
     pub default_template: DefaultTemplateFn,
 }
 

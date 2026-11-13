@@ -3,10 +3,10 @@ pub(crate) use cpal_capture::is_scratch_track;
 pub use cpal_capture::{CpalAudioCapture, CpalAudioDevices, CpalLevelMonitor};
 
 /// Crash-safe recording recovery — startup pass that finalizes orphaned WAVs
-/// and reconciles missing DB rows (section-06).
+/// and reconciles missing DB rows.
 pub mod recovery;
 pub use recovery::{run_recovery, RecoveryReport, WavRecovery};
 
-/// macOS system-audio backend (ScreenCaptureKit, audio-only). See section-05.
+/// macOS system-audio backend (ScreenCaptureKit, audio-only).
 #[cfg(target_os = "macos")]
 mod sck_capture;

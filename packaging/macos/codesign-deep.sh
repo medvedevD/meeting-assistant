@@ -11,13 +11,12 @@
 #     not signed at all" / "nested code is modified or invalid").
 #   * `codesign --deep` exists but Apple explicitly discourages it (it skips
 #     order/seal correctness for helpers). We sign explicitly inside-out
-#     instead, which is the section-07-mandated "sign the helper first, then
-#     the app" path done thoroughly.
+#     instead: helper first, then the app.
 #
-# v1 = ad-hoc, NO hardened runtime, NO Apple Developer ID (locked decision).
-# The entitlements are embedded but inert until the documented fast-follow
-# (buy Developer ID → add `--options runtime` → notarize). See
-# packaging/macos/HOMEBREW-SUNSET.md.
+# Ad-hoc only: no hardened runtime and no Apple Developer ID. The entitlements
+# are embedded but inert until the move to a Developer ID (add
+# `--options runtime`, then notarize). See "Signing and distribution" in
+# packaging/README.md.
 #
 # Usage: codesign-deep.sh /path/to/MeetingAssistant.app
 set -euo pipefail
@@ -75,5 +74,5 @@ if spctl --assess --type execute --verbose=4 "$APP" 2>&1; then
     echo "  (unexpected) spctl accepted the bundle"
 else
     echo "  spctl rejected as expected → Homebrew Cask 'no_quarantine' is what"
-    echo "  makes this launch on a clean machine (see HOMEBREW-SUNSET.md)."
+    echo "  makes this launch on a clean machine (see packaging/README.md)."
 fi

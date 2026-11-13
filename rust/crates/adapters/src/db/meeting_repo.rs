@@ -220,7 +220,7 @@ impl MeetingRepo for SqliteMeetingRepo {
         tokio::task::spawn_blocking(move || {
             let conn = db.conn.lock().unwrap();
             // audio_path is NOT NULL; an empty string is the "audio removed"
-            // sentinel (see Phase 3 deviation note). Transcript/protocol kept.
+            // sentinel. Transcript/protocol kept.
             conn.execute(
                 "UPDATE meetings SET audio_path='' WHERE id=?1",
                 rusqlite::params![id],

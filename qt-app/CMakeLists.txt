@@ -72,10 +72,10 @@ qt_add_executable(meeting-assistant-qt
     "${_gen_header}")
 
 # macOS: ship as MeetingAssistant.app. The Info.plist carries the
-# NSScreenCaptureUsageDescription that section-05's ScreenCaptureKit path
+# NSScreenCaptureUsageDescription that the ScreenCaptureKit path
 # requires (without it macOS kills the process with no TCC prompt).
 #
-# OFF by default so the section-03 dev workflow (run-qt.sh expects a plain
+# OFF by default so the dev workflow (run-qt.sh expects a plain
 # `meeting-assistant-qt` executable) is untouched. packaging/macos/build-app.sh
 # configures with -DMA_MACOS_APP_BUNDLE=ON for the real artefact.
 option(MA_MACOS_APP_BUNDLE "Build MeetingAssistant.app bundle (packaging)" OFF)
@@ -111,12 +111,12 @@ endif()
 
 target_include_directories(meeting-assistant-qt PRIVATE "${_gen_dir}")
 
-# SettingsStore is a QML singleton (decision #12): one shared server-settings
+# SettingsStore is a QML singleton: one shared server-settings
 # cache reachable from any screen as `SettingsStore`.
 set_source_files_properties(qml/SettingsStore.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE)
 
-# Theme is the redesign's design-token singleton (qt-redesign Phase 1):
+# Theme is the design-token singleton,
 # reachable from any screen as `Theme`.
 set_source_files_properties(qml/theme/Theme.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE)
@@ -215,7 +215,7 @@ function(ma_add_qt_base_translation target)
 endfunction()
 ma_add_qt_base_translation(meeting-assistant-qt)
 
-# Bundled design fonts (qt-redesign): variable TTFs registered as :/fonts/*,
+# Bundled design fonts: variable TTFs registered as :/fonts/*,
 # loaded by Theme.qml's FontLoaders. All OFL-licensed: the license must travel
 # with the fonts, so the install rules below ship every file in MA_FONT_LICENSES.
 # tests/serif_typeface loads the same MA_FONT_FILES.
@@ -267,7 +267,7 @@ if(WIN32)
     target_link_libraries(meeting-assistant-qt PRIVATE kernel32)
 endif()
 
-# ── Install rules (section-07 packaging) ─────────────────────────────────────
+# ── Install rules (packaging) ────────────────────────────────────────────────
 # Lay out the two-binary bundle so SidecarManager::locateSidecar() always finds
 # meeting-server next to the GUI (it resolves applicationDirPath()):
 #   macOS    MeetingAssistant.app/Contents/MacOS/{MeetingAssistant,meeting-server}
@@ -310,11 +310,11 @@ else() # Linux (AppImage AppDir / generic prefix)
     ma_install_licenses(share/doc/meeting-assistant/licenses)
 endif()
 
-# ── Offscreen Qt smoke test (section-08) ─────────────────────────────────────
-# OFF by default so the section-03 dev workflow and section-07 packaging build
-# only the GUI. The section-08 CI matrix configures with -DMA_BUILD_TESTS=ON
-# and runs it via ctest under QT_QPA_PLATFORM=offscreen.
-option(MA_BUILD_TESTS "Build the offscreen Qt boot smoke test (section-08)" OFF)
+# ── Qt tests ─────────────────────────────────────────────────────────────────
+# OFF by default so the dev workflow and packaging build only the GUI. CI
+# configures with -DMA_BUILD_TESTS=ON and runs them via ctest under
+# QT_QPA_PLATFORM=offscreen.
+option(MA_BUILD_TESTS "Build the Qt tests" OFF)
 if(MA_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

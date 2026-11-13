@@ -1,7 +1,7 @@
-//! Sidecar contract tests (Qt-migration section-08).
+//! Sidecar contract tests.
 //!
 //! These spawn the **real `meeting-server` binary** (the same artefact the Qt
-//! GUI launches) and assert the lifecycle/protocol contract section-02
+//! GUI launches) and assert the lifecycle/protocol contract the sidecar
 //! promises the client: a single JSON handshake as the first stdout bytes,
 //! logs on stderr only, bearer-gated `/api/*`, loopback-only bind,
 //! `/version`, parent-death reaping (POSIX pipe EOF + `--parent-pid` poll),
@@ -72,7 +72,7 @@ fn isolated_server(dir: &Path) -> Command {
 }
 
 /// The one machine-readable line `meeting-server` prints to stdout before it
-/// serves anything. Mirrors the section-02 wire shape.
+/// serves anything.
 #[derive(Debug, serde::Deserialize)]
 struct Handshake {
     ready: bool,
@@ -388,7 +388,7 @@ fn every_api_route_is_bearer_gated_401_without_token() {
     let s = Sidecar::spawn();
     let c = client();
 
-    // (method, path) for each auth-gated route, including the Phase 1–5 additions:
+    // (method, path) for each auth-gated route, including
     // settings*, templates*, meetings/{import,scan,:id/reprocess,:id}.
     let routes: &[(&str, &str)] = &[
         ("POST", "/api/v1/jobs"),

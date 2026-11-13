@@ -1,5 +1,5 @@
-// Phase-1 checkpoint view: renders the Meety palette + typography from Theme.qml
-// so the design tokens can be approved before screens are restyled. Reachable
+// Dev view: renders the Meety palette + typography from Theme.qml and the
+// reusable components, to check design tokens in one place. Reachable
 // only when MEETY_THEME_GALLERY=1 (see Main.qml); not part of the real nav.
 import QtQuick
 import QtQuick.Controls
@@ -171,7 +171,7 @@ Rectangle {
 
             Rectangle { Layout.fillWidth: true; Layout.leftMargin: 40; Layout.rightMargin: 40; height: 1; color: Theme.rule }
 
-            // ── components (Phase 2 — the real reusable widgets) ─────────────
+            // ── components (the real reusable widgets) ─────────────────────────
             ColumnLayout {
                 Layout.leftMargin: 40
                 Layout.rightMargin: 40

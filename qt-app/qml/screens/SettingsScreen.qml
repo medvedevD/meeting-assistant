@@ -1,9 +1,9 @@
 // SettingsScreen — macOS-style category sidebar (ListView) + StackLayout of
-// panels (Phase 5, decision #12/#13). Server-side settings are the single
+// panels. Server-side settings are the single
 // source of truth: the screen pulls the snapshot via the SettingsStore
 // singleton into an editable `draft`, the panels mutate it, and a single
 // "Сохранить" button PUTs the whole document. db_path / meetings_dir changes
-// are restart-required (decision #2) → a banner, applied on next launch. The
+// are restart-required → a banner, applied on next launch. The
 // interface language is not a server setting: LanguagePanel stores it directly,
 // and it shares that banner.
 import QtQuick

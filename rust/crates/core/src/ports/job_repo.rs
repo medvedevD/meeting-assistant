@@ -44,7 +44,7 @@ pub trait JobRepo: Send + Sync {
         now_ts: i64,
     ) -> Result<(), CoreError>;
     /// Permanently fail the job (max attempts exhausted). `error_class` is the
-    /// classified cause persisted for the UI (decision #11); `None` when the
+    /// classified cause persisted for the UI; `None` when the
     /// cause is not classifiable.
     async fn mark_permanently_failed(
         &self,

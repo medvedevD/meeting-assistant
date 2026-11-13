@@ -86,7 +86,7 @@ pub async fn status(
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("job {id} not found")))?;
 
     // Merge the persisted job (status + error_class) with the live in-memory
-    // progress, present only while the job is mid-flight (decision #11).
+    // progress, present only while the job is mid-flight.
     let mut resp: JobResponse = job.into();
     resp.progress = state.progress.get(&id).map(|e| e.value().progress.clone());
 

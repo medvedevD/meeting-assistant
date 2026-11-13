@@ -2,8 +2,8 @@
 // Import path → MeetingStore.importFile (POST /api/v1/meetings/import, with
 // dedup + auto-transcribe). Three ways in: drag&drop (text/uri-list), the
 // "Импорт файла" FileDialog, and "Из папки" (GET /meetings/scan → checkbox
-// list). Recording defaults come from the server-side SettingsStore now
-// (decision #13); the radio/switch here are a per-recording override.
+// list). Recording defaults come from the server-side SettingsStore; the
+// radio/switch here are a per-recording override.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts

@@ -25,7 +25,7 @@ The previous run is kept as `…log.prev`. Grab this on any failure:
 ## Install and open
 
 Follow [`docs/INSTALL.md`](../docs/INSTALL.md). On macOS, do not run the app directly
-from inside the DMG; see also [`macos/HOMEBREW-SUNSET.md`](macos/HOMEBREW-SUNSET.md). On
+from inside the DMG; see also "Signing and distribution" in [`README.md`](README.md). On
 Windows, see [`windows/SMARTSCREEN.md`](windows/SMARTSCREEN.md). On Linux, if the
 AppImage fails to launch, run it from a terminal to see stderr.
 

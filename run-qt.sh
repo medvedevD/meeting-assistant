@@ -149,7 +149,7 @@ if [[ -z "$GUI_BIN" || ! -x "$GUI_BIN" ]]; then
 fi
 
 # Co-locate the sidecar with the GUI — SidecarManager looks in
-# applicationDirPath() (mirrors the section-07 packaging layout).
+# applicationDirPath() (mirrors the packaging layout).
 cp -f "$SIDECAR" "$(dirname "$GUI_BIN")/meeting-server"
 echo "✓ Sidecar staged next to GUI: $(dirname "$GUI_BIN")/meeting-server"
 

@@ -1,4 +1,4 @@
-# Packaging — Meeting Assistant (section-07)
+# Packaging — Meeting Assistant
 
 Ships v1 as a **two-binary bundle** on macOS / Linux / Windows: the Qt Quick
 GUI (`meeting-assistant-qt`, `MeetingAssistant` on macOS) plus the Rust
@@ -92,7 +92,7 @@ place `meeting-server` **in the same directory as the GUI executable**:
 `SidecarManager::locateSidecar()` resolves `QCoreApplication::applicationDirPath()`,
 so this layout is the contract. None of the three Qt deploy tools
 (`macdeployqt` / `linuxdeploy-plugin-qt` / `windeployqt`) bundle the helper —
-the CMake rule is what does, and the macOS spike validated it.
+the CMake rule is what does.
 
 ## Version pinning (both binaries, one revision)
 
@@ -100,7 +100,7 @@ Both binaries are built **from the same checkout in the same recipe run** and
 carry the same version (`0.1.0`: `qt-app` `project(... VERSION)` /
 `MACOSX_BUNDLE_*`; `meeting-server` `CARGO_PKG_VERSION`). They are never
 shipped independently. The **runtime safety net** is the IPC protocol-version
-handshake (sections 02/03): the sidecar reports `protocol` /
+handshake: the sidecar reports `protocol` /
 `min_protocol` / `build`; the GUI's compiled-in `kClientProtocol`
 ([generated](../qt-app/cmake/GenClientProtocol.cmake) from the Rust single
 source of truth) must be in range or `SidecarManager` refuses to proceed
@@ -158,21 +158,46 @@ backend so a missing plugin fails the build instead of shipping a dead player:
 FFmpeg compliance mirrors Qt's (dynamic link + written offer + source URL) in
 `FFmpeg-LGPLv2.1-NOTICE.txt`.
 
-## Per-OS gate status & documented exits
+## Signing and distribution
 
-- **macOS — Homebrew unsigned-cask sunset (~Sept 2026): TRACKED.** v1 is
-  ad-hoc signed + un-notarized; the self-hosted cask removes quarantine in
-  `postflight_steps`. Homebrew is sunsetting unsigned casks around **2026-09-01**.
-  Full risk, date, fallback (self-hosted tap) and exit (Apple Developer ID +
-  notarization) → **[macos/HOMEBREW-SUNSET.md](macos/HOMEBREW-SUNSET.md)**.
-  Early-spike result → **[macos/SPIKE-RESULTS.md](macos/SPIKE-RESULTS.md)**.
-- **macOS — Screen-Recording TCC** uses ad-hoc identity, so the grant resets
-  per update until a stable Developer ID lands (same exit as above; accepted,
-  section-05). Required `NSScreenCaptureUsageDescription` is in the signed
-  `Info.plist`.
-- **Windows — unsigned/SmartScreen: documented.** One-click bypass; exit is an
-  OV/EV cert → **[windows/SMARTSCREEN.md](windows/SMARTSCREEN.md)**.
-- **Linux — no gate.** AppImage, $0, no signing. System audio via `parec`.
+- **macOS: ad-hoc signed, not notarized.** There is no paid Apple Developer ID, so
+  `spctl` rejects the bundle and Gatekeeper blocks a quarantined copy.
+  - **Homebrew** is the main install path. `homebrew/cask` only takes signed and
+    notarized apps, so the cask lives in the self-hosted tap
+    `medvedevD/homebrew-meeting-assistant`. `render-release-cask.sh` generates it for
+    each release and `release.yml` publishes it; there is no static `.rb` here. Its
+    `postflight_steps` strip `com.apple.quarantine`, so the app opens without the
+    Gatekeeper wall. Homebrew 6+ asks the user to `brew trust` the tap once, as it does
+    for every third-party tap.
+  - **The DMG** needs the one-time *Open Anyway* step that
+    [`docs/INSTALL.md`](../docs/INSTALL.md) describes.
+  - **Screen Recording** permission does not carry over to an update. An ad-hoc
+    signature changes with every build and macOS keeps the grant for the previous one,
+    so the switch shows on but recording fails until the user removes the app from the
+    list and adds it again. The recording screen and the release notes say so.
+    `NSScreenCaptureUsageDescription` is in the signed `Info.plist`, which is what
+    makes macOS ask instead of killing the process.
+- **macOS exit: Developer ID.** It removes the Gatekeeper step and keeps the Screen
+  Recording grant across updates. It is a configuration change:
+  1. `codesign-deep.sh`: set `IDENTITY` to the Developer ID Application certificate and
+     add `--options runtime`. `entitlements.plist` is already embedded.
+  2. Notarize and staple the `.app` and the `.dmg` (`xcrun notarytool submit --wait`,
+     then `xcrun stapler staple`).
+  3. Submit the cask to `homebrew/cask` and drop the quarantine `postflight_steps`; keep the
+     self-hosted tap as a mirror.
+- **Windows: unsigned.** SmartScreen asks once, and *More info → Run anyway* gets past
+  it. The exit is an OV or EV certificate: [windows/SMARTSCREEN.md](windows/SMARTSCREEN.md).
+- **Linux: no gate.** AppImage, no signing. System audio comes from `parec`.
+
+### macOS signing pitfalls
+
+- **Sign inside out**: frameworks, then dylibs and plugins, then the helper, the main
+  executable, and last the bundle. `codesign --deep` does not reliably seal a nested
+  helper, so `codesign-deep.sh` signs each layer itself.
+- **Keep `entitlements.plist` free of comments.** `codesign --entitlements` parses it
+  with AMFI's restricted parser, which rejects XML comments.
+- **`macdeployqt` does not copy `meeting-server`.** The CMake `install()` rule puts it
+  in the bundle.
 
 ## Layout
 
@@ -183,7 +208,7 @@ packaging/
   assets/                       app icons + macOS DMG background
   LICENSES/                     Qt LGPLv3 written offer + license text (bundled)
   macos/   Info.plist.in  entitlements.plist  codesign-deep.sh  build-app.sh
-           check-bundle.sh  render-release-cask.sh  HOMEBREW-SUNSET.md  SPIKE-RESULTS.md
+           check-bundle.sh  render-release-cask.sh  make-dmg-background.swift
   linux/   build-appimage.sh  meeting-assistant.desktop
   windows/ build-installer.ps1  installer.iss  SMARTSCREEN.md
 ```
