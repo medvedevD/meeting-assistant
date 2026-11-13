@@ -1,4 +1,4 @@
-//! Crash-safe recording recovery (Qt-migration section-06).
+//! Crash-safe recording recovery.
 //!
 //! `cpal_capture` streams f32 samples to disk through `hound::WavWriter` +
 //! `BufWriter`. The RIFF/`data` chunk lengths are only patched by

@@ -26,7 +26,7 @@ fn derive_name(source: &Path) -> String {
 ///
 /// - `copy = true` (drag&drop / FileDialog import): the source is copied into
 ///   `recordings_dir/<id>/` and the meeting points at the copy; the original
-///   stays untouched (decision #9).
+///   stays untouched.
 /// - `copy = false` ("Из папки" registration): the file is registered in place
 ///   and the meeting points at the original path.
 ///

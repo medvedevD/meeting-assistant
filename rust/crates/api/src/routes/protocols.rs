@@ -25,7 +25,7 @@ pub async fn generate(
     State(state): State<Arc<AppState>>,
     Json(req): Json<GenerateRequest>,
 ) -> Result<(StatusCode, Json<GenerateResponse>), (StatusCode, String)> {
-    // Decision #3: when the request omits a template, resolve the configured
+    // When the request omits a template, resolve the configured
     // `default_template` here (API layer) so the use-case stays settings-free.
     let template_name = req
         .template_name
@@ -189,7 +189,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolves_default_template_when_request_omits_one() {
-        // Decision #3: with no `template_name` in the request, the API layer
+        // With no `template_name` in the request, the API layer
         // falls back to the configured default. The FakeTemplateLoader only
         // knows "Ретро"; if the default weren't resolved, the use-case would
         // hit the built-in prompt and the loader would never be consulted —

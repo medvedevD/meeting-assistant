@@ -71,8 +71,7 @@ impl AppSettingsService {
 
 /// Project the secret store's at-rest location onto the sanitized snapshot so
 /// the UI can disclose it honestly. `mechanism`/`path` are mutually exclusive:
-/// a keystore reports its mechanism, a file backend reports its path. Phase 1
-/// ships `keyring` and `plaintext`; `vault`/`locked` arrive in a later phase.
+/// a keystore reports its mechanism, a file backend reports its path.
 fn secret_storage_view(status: SecretStatus) -> Value {
     match status {
         SecretStatus::Keyring {

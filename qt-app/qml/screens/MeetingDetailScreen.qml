@@ -1,6 +1,5 @@
-// MeetingDetailScreen — Meety redesign (qt-redesign Phase 3). Content-bar +
-// Editorial protocol render in a centred reading column. Behaviour (reprocess /
-// delete / progress) unchanged.
+// MeetingDetailScreen — content bar + protocol rendered in a centred reading
+// column, with reprocess / delete / progress.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts

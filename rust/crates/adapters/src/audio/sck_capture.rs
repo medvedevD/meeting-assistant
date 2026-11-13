@@ -16,7 +16,7 @@
 //! * the content filter references a display only because ScreenCaptureKit
 //!   requires a content source to exist — we request no frames from it.
 //!
-//! ## Footguns (documented in code, per section-05)
+//! ## Footguns
 //!
 //! * **Frame-drop:** with audio enabled but no screen output, ScreenCaptureKit
 //!   will drop audio frames unless the (unused) video path is throttled. We do

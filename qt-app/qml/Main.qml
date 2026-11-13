@@ -12,7 +12,7 @@ ApplicationWindow {
     title: qsTr("Meeting Assistant")
     color: Theme.paper
 
-    // qt-redesign Phase-1 sign-off: MEETY_THEME_GALLERY=1 shows the token
+    // MEETY_THEME_GALLERY=1 shows the token
     // gallery instead of the app shell. Dev-only; never reached in production.
     Loader {
         anchors.fill: parent
@@ -21,9 +21,8 @@ ApplicationWindow {
         z: 1000
     }
 
-    // Skeleton shell (section-03). Real screens land in section-04; this view
-    // exists to prove the boundary: Fusion enforced, sidecar lifecycle states,
-    // version gate, authenticated ApiClient.
+    // One page per sidecar lifecycle state: starting, ready (the app itself),
+    // and a backdrop for a failed or incompatible sidecar.
     StackLayout {
         anchors.fill: parent
         currentIndex: {
@@ -79,7 +78,7 @@ ApplicationWindow {
             }
         }
 
-        // ── 1: ready (the real app — section-04 screens) ────────────────────
+        // ── 1: ready (the real app) ─────────────────────────────────────────
         AppShell {}
 
         // ── 2: terminal failure backdrop (dialog draws on top) ──────────────

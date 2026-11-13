@@ -7,7 +7,7 @@
 .vscode/
 .qtcreator/
 
-# Qt migration build outputs (section-07 packaging)
+# Qt build and packaging outputs
 /dist/
 /qt-app/build/
 /qt-app/build-*-pkg/

@@ -1,4 +1,4 @@
-# Offscreen Qt boot smoke (section-08). Compiles the real GUI controller
+# Offscreen Qt boot smoke. Compiles the real GUI controller
 # sources (SidecarManager + ApiClient — the same files main.cpp builds, so no
 # logic can drift between the shipped app and the test) plus the generated
 # ClientProtocol.h, and runs them headlessly against a real meeting-server.
