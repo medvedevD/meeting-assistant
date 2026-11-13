@@ -38,7 +38,7 @@ ScrollView {
         langBox.setValue(tr.language || "auto")
         beamSpin.value = tr.beam_size || 1
         threadsSpin.value = tr.n_threads || 0
-        gpuSwitch.checked = backendAccelerated() && tr.use_gpu !== false
+        gpuSwitch.checked = gpuOn()
         refreshModels()
     }
     function catalogPath(model) {
@@ -158,6 +158,11 @@ ScrollView {
     }
     function backendAccelerated() {
         return backend() !== "cpu"
+    }
+    // What the GPU switch shows for the draft: off on a CPU-only build, whatever
+    // `use_gpu` says, so the setting survives for an accelerated build.
+    function gpuOn() {
+        return backendAccelerated() && t().use_gpu !== false
     }
     function backendLabel() {
         switch (backend()) {
@@ -1072,8 +1077,17 @@ ScrollView {
             dividerVisible: false
             MeetySwitch {
                 id: gpuSwitch
+                objectName: "gpuSwitch"
                 enabled: panel.backendAccelerated()
-                onToggled: { panel.t().use_gpu = checked; scr.touch() }
+                // Any change of `checked`, not just `toggled`: an accessibility
+                // toggle (VoiceOver) sets `checked` without emitting `toggled`.
+                // load() sets it to what the draft already implies.
+                onCheckedChanged: {
+                    if (checked === panel.gpuOn())
+                        return
+                    panel.t().use_gpu = checked
+                    scr.touch()
+                }
             }
         }
     }
