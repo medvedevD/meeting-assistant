@@ -249,12 +249,14 @@ fn resolve_mic_leg(requested: Option<&str>) -> Result<ResolvedLeg, String> {
 
 // ── System-leg resolution ─────────────────────────────────────────────────────
 
-/// macOS has no per-output handle (ScreenCaptureKit captures the aggregate mix).
+/// macOS has no per-output handle (ScreenCaptureKit captures the aggregate mix),
+/// so there is no device name to show. The label stays empty and the GUI names
+/// the leg in the user's language: the backend holds no UI text.
 #[cfg(target_os = "macos")]
 fn resolve_system_leg(_requested: Option<&str>) -> Result<ResolvedLeg, String> {
     Ok(ResolvedLeg {
         id: String::new(),
-        label: "System audio".to_string(),
+        label: String::new(),
     })
 }
 
@@ -1660,6 +1662,15 @@ mod tests {
                 "mic-only must not resolve a system leg"
             );
         }
+    }
+
+    /// The recording line showed the English "System audio" in the Russian UI.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_system_leg_has_no_label_so_the_gui_names_it() {
+        let resolved = resolve_devices(&system_spec()).unwrap();
+        assert_eq!(resolved.devices.system.as_deref(), Some(""));
+        assert_eq!(resolved.devices.mic, None);
     }
 
     #[test]

@@ -119,7 +119,8 @@ Page {
         if (scr.resolvedMic.length)
             parts.push(qsTr("🎙 %1").arg(scr.resolvedMic))
         if (source === "system" || source === "mixed") {
-            // macOS has no concrete system device; show a generic label.
+            // macOS has no concrete system device: the server sends an empty
+            // label and the leg is named here, in the interface language.
             parts.push(qsTr("🔊 %1").arg(
                 scr.resolvedSystem.length ? scr.resolvedSystem : qsTr("Системный звук")))
         }
