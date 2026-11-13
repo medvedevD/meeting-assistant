@@ -13,7 +13,9 @@
 //      (`visible: sidecar.state === SidecarManager.Incompatible`), so this is
 //      the blocking-dialog path asserted without a window;
 //   3. the server's crash recovery stays inside the test's sandbox, so running
-//      this test can never rewrite a developer's real recordings.
+//      this test can never rewrite a developer's real recordings;
+//   4. a failed request reaches the GUI's log stream from both sides: the
+//      client's warning and the server's own error, relayed over stderr.
 //
 // The sidecar path comes from MA_SIDECAR (SidecarManager::locateSidecar reads
 // it); the CMake `add_test` points it at the cargo-built binary. Everything the
@@ -30,6 +32,7 @@
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -72,6 +75,29 @@ QByteArray readFile(const QString &path) {
     QFile file(path);
     return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
 }
+
+// What the process logs while collectMessages() is installed. The GUI's file
+// logger (Logging.cpp) tees this same stream into meeting-assistant.log.
+QStringList g_messages;
+QtMessageHandler g_chainedHandler = nullptr;
+
+void collectMessages(QtMsgType type, const QMessageLogContext &ctx,
+                     const QString &msg) {
+    g_messages.append(msg);
+    if (g_chainedHandler)
+        g_chainedHandler(type, ctx, msg);
+}
+
+bool logged(const QStringList &needles) {
+    for (const QString &msg : g_messages) {
+        bool all = true;
+        for (const QString &needle : needles)
+            all = all && msg.contains(needle);
+        if (all)
+            return true;
+    }
+    return false;
+}
 } // namespace
 
 class SmokeTest : public QObject {
@@ -82,6 +108,7 @@ private slots:
     void handshakeHealthAndMeetingsFetch();
     void versionMismatchTriggersBlockingDialogPath();
     void crashRecoveryStaysInsideTheSandbox();
+    void failedStopIsLogged();
 
 private:
     QTemporaryDir m_sandbox;
@@ -238,6 +265,42 @@ void SmokeTest::crashRecoveryStaysInsideTheSandbox() {
 
     QCOMPARE(QFileInfo(configured).size(), kFinalizedWavBytes);
     QCOMPARE(readFile(atDefault), crashedRecording());
+}
+
+// 4 — a stop the server refuses (409, as when the capture could not be
+//     closed) is in the log from both sides, so a tester's log explains it.
+void SmokeTest::failedStopIsLogged() {
+    SidecarManager sidecar;
+    ApiClient api;
+    QObject::connect(&sidecar, &SidecarManager::ready, &api,
+                     &ApiClient::configure);
+    sidecar.start();
+    QTRY_VERIFY_WITH_TIMEOUT(sidecar.state() == SidecarManager::Ready,
+                             kReadyTimeoutMs);
+
+    g_messages.clear();
+    g_chainedHandler = qInstallMessageHandler(collectMessages);
+    const auto restore =
+        qScopeGuard([] { qInstallMessageHandler(g_chainedHandler); });
+
+    QSignalSpy failed(&api, &ApiClient::requestFailed);
+    const QString path =
+        QStringLiteral("/api/v1/recordings/no-such-session/stop");
+    api.post(path, {});
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, 15000);
+    QCOMPARE(failed.first().at(2).toInt(), 409);
+
+    QTRY_VERIFY_WITH_TIMEOUT(
+        logged({QStringLiteral("ApiClient: POST ") + path,
+                QStringLiteral("failed (HTTP 409)")}),
+        5000);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        logged({QStringLiteral("[meeting-server]"), QStringLiteral("ERROR"),
+                QStringLiteral("stop recording failed"),
+                QStringLiteral("meeting_id=no-such-session")}),
+        5000);
+
+    sidecar.shutdown();
 }
 
 // QGuiApplication (not guiless): exercise the real GUI Qt stack under the

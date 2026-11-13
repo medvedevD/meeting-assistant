@@ -77,7 +77,7 @@ cargo test --manifest-path rust/Cargo.toml -p <crate-name> <test_name>
 ctest --test-dir qt-app/build
 ```
 
-A test that spawns `meeting-server` must keep it away from the developer's real data, because its startup recovery pass rewrites damaged WAVs in the recordings dir. `XDG_*` is not enough: the recordings dir defaults to the OS Documents folder, and on Windows no env var moves it. Point `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME` and `HOME` at temp dirs, write a `settings.json` whose `paths.meetings_dir` is a temp dir, and set `MEETING_ASSISTANT_KEYRING_DISABLE=1`. `isolated_server` in `sidecar_contract.rs` and `initTestCase` in `tst_smoke.cpp` do this.
+A test that spawns `meeting-server` must keep it away from the developer's real data, because its startup recovery pass rewrites damaged WAVs in the recordings dir and turns a mixed recording's left-over legs into its `recording.wav`. `XDG_*` is not enough: the recordings dir defaults to the OS Documents folder, and on Windows no env var moves it. Point `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME` and `HOME` at temp dirs, write a `settings.json` whose `paths.meetings_dir` is a temp dir, and set `MEETING_ASSISTANT_KEYRING_DISABLE=1`. `isolated_server` in `sidecar_contract.rs` and `initTestCase` in `tst_smoke.cpp` do this.
 
 ### Regression Tests
 

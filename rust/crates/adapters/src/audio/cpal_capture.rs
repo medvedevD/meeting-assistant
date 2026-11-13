@@ -249,12 +249,14 @@ fn resolve_mic_leg(requested: Option<&str>) -> Result<ResolvedLeg, String> {
 
 // ── System-leg resolution ─────────────────────────────────────────────────────
 
-/// macOS has no per-output handle (ScreenCaptureKit captures the aggregate mix).
+/// macOS has no per-output handle (ScreenCaptureKit captures the aggregate mix),
+/// so there is no device name to show. The label stays empty and the GUI names
+/// the leg in the user's language: the backend holds no UI text.
 #[cfg(target_os = "macos")]
 fn resolve_system_leg(_requested: Option<&str>) -> Result<ResolvedLeg, String> {
     Ok(ResolvedLeg {
         id: String::new(),
-        label: "System audio".to_string(),
+        label: String::new(),
     })
 }
 
@@ -867,8 +869,7 @@ fn record_mixed(
         None => default_pulse_source().ok_or_else(|| "no default input source".to_string())?,
     };
 
-    let mic_tmp = output_path.with_extension("mic_tmp.wav");
-    let sys_tmp = output_path.with_extension("sys_tmp.wav");
+    let (mic_tmp, sys_tmp) = mixed_leg_paths(&output_path);
 
     let (mic_stop_tx, mic_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let (sys_stop_tx, sys_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
@@ -894,12 +895,7 @@ fn record_mixed(
         .join()
         .map_err(|_| "sys thread panicked".to_string())??;
 
-    ffmpeg_mix(
-        &mic_tmp,
-        &sys_tmp,
-        &output_path,
-        &build_mix_filter(echo_cancel),
-    )?;
+    mix_legs(&mic_tmp, &sys_tmp, &output_path, echo_cancel)?;
 
     let _ = std::fs::remove_file(&mic_tmp);
     let _ = std::fs::remove_file(&sys_tmp);
@@ -993,6 +989,43 @@ fn ffmpeg_program() -> std::ffi::OsString {
         .unwrap_or_else(|| std::ffi::OsString::from("ffmpeg"))
 }
 
+/// Where a mixed ("Both") recording keeps its two legs until they are mixed
+/// into `output_path`: `recording.mic_tmp.wav` and `recording.sys_tmp.wav`.
+/// Recovery looks for the same names when a stop or the core failed before the
+/// mix ran.
+pub(crate) fn mixed_leg_paths(output_path: &Path) -> (PathBuf, PathBuf) {
+    (
+        output_path.with_extension("mic_tmp.wav"),
+        output_path.with_extension("sys_tmp.wav"),
+    )
+}
+
+/// Mix the mic and system legs of a mixed recording into `out` with this
+/// platform's filter, as `record_mixed` does at stop.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub(crate) fn mix_legs(
+    mic: &Path,
+    sys: &Path,
+    out: &Path,
+    echo_cancel: bool,
+) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    let filter = build_mix_filter(echo_cancel);
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    let filter = build_mix_filter_resync(echo_cancel);
+    ffmpeg_mix(mic, sys, out, &filter)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+pub(crate) fn mix_legs(
+    _mic: &Path,
+    _sys: &Path,
+    _out: &Path,
+    _echo_cancel: bool,
+) -> Result<(), String> {
+    Err("mixed audio capture is not yet supported on this platform".to_string())
+}
+
 /// Mix two WAV files into one using ffmpeg with the given `-filter_complex`.
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn ffmpeg_mix(a: &Path, b: &Path, out: &Path, filter: &str) -> Result<(), String> {
@@ -1035,8 +1068,7 @@ fn record_mixed(
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let mic_tmp = output_path.with_extension("mic_tmp.wav");
-    let sys_tmp = output_path.with_extension("sys_tmp.wav");
+    let (mic_tmp, sys_tmp) = mixed_leg_paths(&output_path);
 
     let (mic_stop_tx, mic_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let (sys_stop_tx, sys_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
@@ -1064,12 +1096,7 @@ fn record_mixed(
         .join()
         .map_err(|_| "sys thread panicked".to_string())??;
 
-    ffmpeg_mix(
-        &mic_tmp,
-        &sys_tmp,
-        &output_path,
-        &build_mix_filter_resync(echo_cancel),
-    )?;
+    mix_legs(&mic_tmp, &sys_tmp, &output_path, echo_cancel)?;
 
     let _ = std::fs::remove_file(&mic_tmp);
     let _ = std::fs::remove_file(&sys_tmp);
@@ -1109,8 +1136,7 @@ fn record_mixed(
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let mic_tmp = output_path.with_extension("mic_tmp.wav");
-    let sys_tmp = output_path.with_extension("sys_tmp.wav");
+    let (mic_tmp, sys_tmp) = mixed_leg_paths(&output_path);
 
     let (mic_stop_tx, mic_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let (sys_stop_tx, sys_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
@@ -1154,12 +1180,7 @@ fn record_mixed(
         return Err(e);
     }
 
-    let mix = ffmpeg_mix(
-        &mic_tmp,
-        &sys_tmp,
-        &output_path,
-        &build_mix_filter_resync(echo_cancel),
-    );
+    let mix = mix_legs(&mic_tmp, &sys_tmp, &output_path, echo_cancel);
     cleanup();
     mix
 }
@@ -1641,6 +1662,15 @@ mod tests {
                 "mic-only must not resolve a system leg"
             );
         }
+    }
+
+    /// The recording line showed the English "System audio" in the Russian UI.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_system_leg_has_no_label_so_the_gui_names_it() {
+        let resolved = resolve_devices(&system_spec()).unwrap();
+        assert_eq!(resolved.devices.system.as_deref(), Some(""));
+        assert_eq!(resolved.devices.mic, None);
     }
 
     #[test]
