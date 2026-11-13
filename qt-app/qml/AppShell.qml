@@ -1,6 +1,5 @@
 // Ready-state shell: persistent meeting sidebar + a StackView content pane.
-// Sidebar restyled to the Meety design (qt-redesign Phase 3): wordmark + local
-// search filter + date-grouped rows + footer. Navigation logic unchanged.
+// Sidebar: wordmark + local search filter + date-grouped rows + footer.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts

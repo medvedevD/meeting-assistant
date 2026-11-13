@@ -1,5 +1,5 @@
 //! `meeting-server` — the Rust core run as a loopback-HTTP sidecar for the Qt
-//! GUI (section-02 of the Qt migration).
+//! GUI.
 //!
 //! Lifecycle / protocol contract:
 //! - binds `127.0.0.1:0` (OS-chosen ephemeral port); hard-refuses any
@@ -12,7 +12,7 @@
 //! - exits cleanly when its parent GUI dies (POSIX: inherited-pipe EOF —
 //!   race-free — or `--parent-pid` `kill(pid,0)` poll; Windows: `--parent-pid`
 //!   `OpenProcess` poll, with the GUI-side Job Object as the preferred
-//!   kernel-enforced mechanism — see section-03);
+//!   kernel-enforced mechanism);
 //! - enforces single-instance via the same flock the FFI app uses, exiting
 //!   with a distinct code on contention;
 //! - shuts down gracefully on SIGTERM/SIGINT.
@@ -181,7 +181,7 @@ async fn run(args: Args) -> Result<()> {
             handles.templates.clone(),
             handles.settings_store.clone(),
         ));
-    // Resolver for the API-layer `default_template` fallback (decision #3):
+    // Resolver for the API-layer `default_template` fallback:
     // reads the live settings store so a hot-swapped default is picked up.
     let default_template: meeting_api::DefaultTemplateFn = {
         let store = handles.settings_store.clone();
@@ -196,7 +196,7 @@ async fn run(args: Args) -> Result<()> {
     let settings_service: std::sync::Arc<dyn meeting_api::SettingsService> =
         std::sync::Arc::new(settings_service::AppSettingsService::new(handles));
 
-    // ── Crash-safe recording recovery (section-06) ────────────────────────────
+    // ── Crash-safe recording recovery ─────────────────────────────────────────
     // A previous core may have been killed mid-recording, leaving an
     // unfinalized WAV (unplayable) and possibly no `meetings` row. Finalize
     // those WAVs and reconcile their rows before we serve, so recovered
@@ -253,7 +253,7 @@ async fn run(args: Args) -> Result<()> {
     // announce readiness. Polling the handler only inside the axum
     // graceful-shutdown future left a startup window where SIGTERM killed the
     // sidecar with a signal exit instead of our graceful exit(0) —
-    // section-08's SIGTERM contract test caught exactly this race on Linux CI.
+    // the SIGTERM contract test caught exactly this race on Linux CI.
     #[cfg(unix)]
     let (mut sig_term, mut sig_int) = {
         use tokio::signal::unix::{signal, SignalKind};
@@ -339,7 +339,7 @@ fn exit_without_destructors(code: i32) -> ! {
 /// Watchdogs use `Notify::notify_one`, **not** `notify_waiters`: the pipe-EOF
 /// path can fire before `axum::serve` has polled the shutdown future and
 /// registered as a waiter. `notify_waiters` stores no permit, so that wakeup
-/// would be lost and the sidecar would never exit (it was — section-08's
+/// would be lost and the sidecar would never exit (it was — the
 /// pipe-EOF contract test caught exactly this race). `notify_one` stores a
 /// permit when no waiter is registered yet, so the next `notified()` poll
 /// completes immediately. There is exactly one consumer (the shutdown
@@ -403,8 +403,8 @@ fn parent_alive(pid: i32) -> bool {
 
 #[cfg(windows)]
 fn parent_alive(pid: i32) -> bool {
-    // Companion to the GUI-side Job Object (section-03, the preferred
-    // kernel-enforced mechanism); this poll is the documented fallback.
+    // Companion to the GUI-side Job Object (the preferred kernel-enforced
+    // mechanism); this poll is the documented fallback.
     use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
     use windows_sys::Win32::System::Threading::{
         OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,

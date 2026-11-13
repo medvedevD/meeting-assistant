@@ -97,8 +97,8 @@ int main(int argc, char *argv[]) {
                                              &language);
     engine.rootContext()->setContextProperty(QStringLiteral("controlsStyle"),
                                               QQuickStyle::name());
-    // qt-redesign Phase-1 dev affordance: MEETY_THEME_GALLERY=1 swaps the root
-    // view for the Theme token gallery (palette + typography) for sign-off.
+    // Dev affordance: MEETY_THEME_GALLERY=1 swaps the root view for the Theme
+    // token gallery (palette + typography).
     engine.rootContext()->setContextProperty(
         QStringLiteral("themeGalleryEnabled"),
         qEnvironmentVariableIsSet("MEETY_THEME_GALLERY"));

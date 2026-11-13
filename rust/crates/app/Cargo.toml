@@ -8,7 +8,7 @@ license.workspace = true
 name = "meeting-assistant"
 path = "src/main.rs"
 
-# Loopback-HTTP sidecar for the Qt GUI (section-02). Shares container.rs with
+# Loopback-HTTP sidecar for the Qt GUI. Shares container.rs with
 # the legacy CLI binary via a `#[path]` include (no lib target in this crate).
 [[bin]]
 name = "meeting-server"
@@ -50,7 +50,7 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
-# Section-08 sidecar contract tests spawn the real `meeting-server` binary and
+# Sidecar contract tests spawn the real `meeting-server` binary and
 # talk to it over loopback HTTP.
 [dev-dependencies]
 serde = { workspace = true }

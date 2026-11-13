@@ -25,8 +25,8 @@ pub use transcription_model_service::{
 /// breaking mismatch.
 ///
 /// The C++/Qt client constant is generated from this value at build time
-/// (section-03) or guarded by a CI equality check (section-08); never define it
-/// twice by hand.
+/// (`qt-app/cmake/GenClientProtocol.cmake`) and guarded by a CI equality check
+/// (`.github/scripts/check-protocol-version.sh`); never define it twice by hand.
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Oldest protocol version this server can still serve a client speaking.

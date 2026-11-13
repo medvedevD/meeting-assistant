@@ -1,4 +1,4 @@
-// 3-step pipeline progress (Phase 5). Driven by a JobPoller polling
+// 3-step pipeline progress. Driven by a JobPoller polling
 // `GET /api/v1/jobs/:id`: the merged response carries live `progress`
 // {stage, sub, percent} (in-memory) while active and a terminal `error_class`
 // on failure. Collapses the 7 backend PipelineStage values into 3 visible

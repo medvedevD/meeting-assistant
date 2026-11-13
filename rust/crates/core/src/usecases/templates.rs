@@ -2,7 +2,7 @@
 //!
 //! The template **name is also its file name** on disk, so every mutating
 //! operation funnels through [`validate_template_name`] first. The validation
-//! is a strict whitelist (decision #8 in the legacy-feature-port plan): Unicode
+//! is a strict whitelist: Unicode
 //! letters/digits, space, `-` and `_`, at most 100 chars, and the name must
 //! survive sanitisation unchanged. That last rule is what blocks path traversal
 //! (`../../evil`, `a/b`, `C:\x`) and other surprises — any character that is not

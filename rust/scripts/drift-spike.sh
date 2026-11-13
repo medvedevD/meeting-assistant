@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# section-05 — macOS mic↔system clock-drift spike runner.
+# macOS mic↔system clock-drift spike runner.
 #
 # Captures macOS *system* audio (ScreenCaptureKit) and the *mic* (cpal)
 # simultaneously, then prints how far the two independent audio clocks drift
@@ -13,7 +13,7 @@
 # permission you must quit & reopen the terminal once for it to take effect.
 #
 # Usage:
-#   rust/scripts/drift-spike.sh            # 60-minute spike (the section-05 spike)
+#   rust/scripts/drift-spike.sh            # 60-minute spike
 #   rust/scripts/drift-spike.sh 120        # short smoke run (seconds)
 set -euo pipefail
 cd "$(dirname "$0")/../.."

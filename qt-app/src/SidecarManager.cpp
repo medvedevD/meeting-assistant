@@ -117,7 +117,7 @@ QString SidecarManager::locateSidecar() const {
 #ifdef Q_OS_WIN
     name += QStringLiteral(".exe");
 #endif
-    // The packaging layout (section-07) always places the sidecar in the same
+    // The packaging layout always places the sidecar in the same
     // directory as the GUI executable (macOS: Contents/MacOS, Linux: AppDir,
     // Windows: install dir).
     return QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(name);

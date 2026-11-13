@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Benchmark whisper transcription across all available GGML models.
 #
-# Usage: ./scripts/bench_transcribe.sh [--build] [FILE]
+# Usage: ./scripts/bench_transcribe.sh [--build] FILE
 #   --build   Rebuild release binary before running
 #   FILE      Audio file to transcribe (WAV)
 #
@@ -16,7 +16,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RUST_DIR="$SCRIPT_DIR/.."
 BIN="$RUST_DIR/target/release/meeting-assistant"
 MODELS_DIR="${MODELS_DIR:-$HOME/.local/share/meeting-assistant/models}"
-DEFAULT_FILE="/home/dmitry/Документы/meeting-assistant/2026-05-10_16-02_1910df7a/recording.wav"
 
 BUILD=false
 AUDIO_FILE=""
@@ -29,7 +28,10 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-AUDIO_FILE="${AUDIO_FILE:-$DEFAULT_FILE}"
+if [ -z "$AUDIO_FILE" ]; then
+    echo "Usage: $0 [--build] FILE"
+    exit 1
+fi
 
 # --- Build ---
 if $BUILD; then

@@ -1,4 +1,4 @@
-// Server-side settings cache (decision #12): the single source of truth is the
+// Server-side settings cache: the single source of truth is the
 // sidecar's `GET/PUT /api/v1/settings`. A QML singleton so any screen can read
 // the current snapshot (recording defaults, default_template, llm.active) and
 // call apply() to persist — replacing the old per-screen QtCore.Settings.

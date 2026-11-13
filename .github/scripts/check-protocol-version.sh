@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# M3 single-source-of-truth guard (Qt-migration section-08).
+# Single-source-of-truth guard for the IPC protocol version.
 #
 # The IPC protocol version is defined ONCE, in Rust
 # (rust/crates/api/src/lib.rs `PROTOCOL_VERSION`). The Qt client's
