@@ -926,6 +926,10 @@ The interface uses protocol %1, but the core supports only %2–%3.</translation
         <translation>To record system audio, macOS requires the Screen Recording permission. Despite the name, Meeting Assistant records only audio and never takes screenshots.</translation>
     </message>
     <message>
+        <source>Если Meeting Assistant уже включён в настройках, удалите его из списка кнопкой «−» и добавьте заново: после обновления macOS помнит разрешение для прежней версии приложения.</source>
+        <translation>If Meeting Assistant is already on in Settings, remove it from the list with the “−” button and add it again: after an update, macOS keeps the permission for the previous version of the app.</translation>
+    </message>
+    <message>
         <source>Отмена</source>
         <translation>Cancel</translation>
     </message>

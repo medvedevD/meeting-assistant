@@ -263,6 +263,18 @@ Page {
             text: qsTr("Для записи системного звука macOS требует разрешение «Запись экрана» (Screen Recording). Несмотря на название, Meeting Assistant записывает только звук и никогда не делает снимки экрана.")
         }
 
+        // The alpha is ad-hoc signed, so after an update macOS still holds the
+        // grant for the previous binary: the switch shows on, the start fails.
+        Text {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            lineHeight: 1.35
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            color: Theme.ink3
+            text: qsTr("Если Meeting Assistant уже включён в настройках, удалите его из списка кнопкой «−» и добавьте заново: после обновления macOS помнит разрешение для прежней версии приложения.")
+        }
+
         footer: MeetyDialogActions {
             dialog: permissionDialog
             cancelText: qsTr("Отмена")
