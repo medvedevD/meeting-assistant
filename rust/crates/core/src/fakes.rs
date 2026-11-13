@@ -586,11 +586,21 @@ pub struct FakeAudioCapture {
     /// Each entry is `(session_id, spec)` in call order.
     pub started: Mutex<Vec<(String, CaptureSpec)>>,
     pub stopped: Mutex<Vec<String>>,
+    /// When set, `start_session` fails with this message and starts nothing,
+    /// like a denied Screen Recording grant or a missing device.
+    pub start_error: Mutex<Option<String>>,
 }
 
 impl FakeAudioCapture {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    /// A capture whose every `start_session` fails with `msg`.
+    pub fn failing_start(msg: &str) -> Arc<Self> {
+        let capture = Self::default();
+        *capture.start_error.lock().unwrap() = Some(msg.to_string());
+        Arc::new(capture)
     }
 
     /// Returns the full `CaptureSpec` for the most-recently started session.
@@ -621,6 +631,9 @@ impl AudioCapture for FakeAudioCapture {
         _output_path: &Path,
         spec: CaptureSpec,
     ) -> Result<ResolvedDevices, CoreError> {
+        if let Some(msg) = self.start_error.lock().unwrap().clone() {
+            return Err(CoreError::Recording(msg));
+        }
         self.active.lock().unwrap().insert(session_id.to_string());
         // Echo the request back as "resolved": the fake has no real devices, so
         // a pinned name resolves to itself and `None` stays the default.
