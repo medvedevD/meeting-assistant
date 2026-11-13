@@ -1,10 +1,9 @@
 use anyhow::{Context, Result};
 use meeting_adapters::{
-    build_llm, resolve_transcription_model_path, AnthropicProvider, CpalAudioCapture,
-    CpalAudioDevices, CpalLevelMonitor, Db, FileTemplateLoader, FsMeetingFileStore,
-    JsonSettingsStore, KeyringSecretStore, LazyWhisperTranscriber, LiveJobs, SqliteJobRepo,
-    SqliteMeetingRepo, SwappableLlm, TranscriberPrefs, WhisperTranscriber, Worker, PROTOCOL_KINDS,
-    TRANSCRIBE_KINDS,
+    resolve_transcription_model_path, AnthropicProvider, CpalAudioCapture, CpalAudioDevices,
+    CpalLevelMonitor, Db, FileTemplateLoader, FsMeetingFileStore, JsonSettingsStore, KeyedLlm,
+    KeyringSecretStore, LazyWhisperTranscriber, LiveJobs, SqliteJobRepo, SqliteMeetingRepo,
+    SwappableLlm, TranscriberPrefs, WhisperTranscriber, Worker, PROTOCOL_KINDS, TRANSCRIBE_KINDS,
 };
 use meeting_core::entities::meeting::now_unix;
 use meeting_core::ports::{
@@ -167,10 +166,13 @@ impl Container {
         let job_repo = Arc::new(SqliteJobRepo(Arc::clone(&db)));
 
         // ── LLM: active provider, with the stored key (keyring/vault/file) ────
-        let active = settings.llm.active;
-        let key = secrets.effective_key(active.as_str());
-        let cfg = settings.llm.resolve(active, key);
-        let llm_handle = Arc::new(SwappableLlm::new(build_llm(&cfg)));
+        // The key is read when minutes are generated, not here: after an update
+        // macOS may hold that read for a keychain prompt, and the sidecar must
+        // come up without waiting for the user to find it.
+        let llm_handle = Arc::new(SwappableLlm::new(Arc::new(KeyedLlm::active(
+            &settings.llm,
+            Arc::clone(&secrets),
+        ))));
         let llm: Arc<dyn LlmProvider> = llm_handle.clone();
 
         let templates_handle = Arc::new(FileTemplateLoader::new(prompts));

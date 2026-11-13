@@ -26,3 +26,6 @@ pub use factory::{build_llm, list_llm_models, probe_llm};
 
 mod swappable;
 pub use swappable::SwappableLlm;
+
+mod keyed;
+pub use keyed::{KeySource, KeyedLlm};
