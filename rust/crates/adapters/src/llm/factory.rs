@@ -10,21 +10,27 @@ use super::openai_compat::OpenAiCompatProvider;
 /// Build a concrete [`LlmProvider`] for the given resolved config.
 pub fn build_llm(cfg: &LlmConfig) -> Arc<dyn LlmProvider> {
     match cfg.kind {
-        ProviderKind::Anthropic => Arc::new(
-            AnthropicProvider::with_base_url(cfg.api_key.clone(), cfg.base_url.clone())
-                .with_model(cfg.model.clone())
-                .with_max_tokens(cfg.max_tokens),
-        ),
-        ProviderKind::Gemini => Arc::new(GeminiProvider::new(
-            cfg.api_key.clone(),
-            cfg.model.clone(),
-            cfg.max_tokens,
-            cfg.base_url.clone(),
-        )),
+        ProviderKind::Anthropic => Arc::new(anthropic(cfg)),
+        ProviderKind::Gemini => Arc::new(gemini(cfg)),
         ProviderKind::Openai | ProviderKind::Mistral | ProviderKind::Ollama => {
             Arc::new(openai_compat(cfg))
         }
     }
+}
+
+fn anthropic(cfg: &LlmConfig) -> AnthropicProvider {
+    AnthropicProvider::with_base_url(cfg.api_key.clone(), cfg.base_url.clone())
+        .with_model(cfg.model.clone())
+        .with_max_tokens(cfg.max_tokens)
+}
+
+fn gemini(cfg: &LlmConfig) -> GeminiProvider {
+    GeminiProvider::new(
+        cfg.api_key.clone(),
+        cfg.model.clone(),
+        cfg.max_tokens,
+        cfg.base_url.clone(),
+    )
 }
 
 /// The OpenAI-compatible adapter for `cfg`, with OpenAI's own token-cap field
@@ -43,25 +49,13 @@ fn openai_compat(cfg: &LlmConfig) -> OpenAiCompatProvider {
     }
 }
 
-/// Cheap credential/connectivity probe for the "Test key" button.
+/// Credential/connectivity probe for the "Test key" button: a one-line request
+/// to the configured model, built exactly as [`build_llm`] builds the provider,
+/// so it is accepted wherever a protocol request is.
 pub async fn probe_llm(cfg: &LlmConfig) -> Result<(), CoreError> {
     match cfg.kind {
-        ProviderKind::Anthropic => {
-            AnthropicProvider::with_base_url(cfg.api_key.clone(), cfg.base_url.clone())
-                .with_model(cfg.model.clone())
-                .probe()
-                .await
-        }
-        ProviderKind::Gemini => {
-            GeminiProvider::new(
-                cfg.api_key.clone(),
-                cfg.model.clone(),
-                cfg.max_tokens,
-                cfg.base_url.clone(),
-            )
-            .probe()
-            .await
-        }
+        ProviderKind::Anthropic => anthropic(cfg).probe().await,
+        ProviderKind::Gemini => gemini(cfg).probe().await,
         ProviderKind::Openai | ProviderKind::Mistral | ProviderKind::Ollama => {
             openai_compat(cfg).probe().await
         }
@@ -74,21 +68,8 @@ pub async fn probe_llm(cfg: &LlmConfig) -> Result<(), CoreError> {
 /// allows it — [`probe_llm`] is the check for that.
 pub async fn list_llm_models(cfg: &LlmConfig) -> Result<Vec<String>, CoreError> {
     match cfg.kind {
-        ProviderKind::Anthropic => {
-            AnthropicProvider::with_base_url(cfg.api_key.clone(), cfg.base_url.clone())
-                .list_models()
-                .await
-        }
-        ProviderKind::Gemini => {
-            GeminiProvider::new(
-                cfg.api_key.clone(),
-                cfg.model.clone(),
-                cfg.max_tokens,
-                cfg.base_url.clone(),
-            )
-            .list_models()
-            .await
-        }
+        ProviderKind::Anthropic => anthropic(cfg).list_models().await,
+        ProviderKind::Gemini => gemini(cfg).list_models().await,
         ProviderKind::Openai => Ok(openai_compat(cfg)
             .list_models()
             .await?
@@ -130,6 +111,74 @@ fn is_openai_chat_model(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
+    use wiremock::matchers::{body_partial_json, method, path, path_regex};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// Mount a provider that, like a reasoning model, accepts the configured
+    /// cap and rejects any smaller one with a 400.
+    async fn needs_the_configured_cap(server: &MockServer, kind: ProviderKind, cap: u32) {
+        let (endpoint, body) = match kind {
+            ProviderKind::Anthropic => (path("/v1/messages"), json!({"max_tokens": cap})),
+            ProviderKind::Gemini => (
+                path("/models/m:generateContent"),
+                json!({"generationConfig": {"maxOutputTokens": cap}}),
+            ),
+            ProviderKind::Openai => (
+                path("/chat/completions"),
+                json!({"max_completion_tokens": cap}),
+            ),
+            ProviderKind::Mistral | ProviderKind::Ollama => {
+                (path("/chat/completions"), json!({"max_tokens": cap}))
+            }
+        };
+        Mock::given(method("POST"))
+            .and(endpoint)
+            .and(body_partial_json(body))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "content": [{"type": "text", "text": "OK"}],
+                "candidates": [{"content": {"parts": [{"text": "OK"}]}}],
+                "choices": [{"message": {"role": "assistant", "content": "OK"}}]
+            })))
+            .mount(server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path_regex(".*"))
+            .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+                "error": {"message": "max tokens too small to finish reasoning"}
+            })))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn probe_passes_wherever_generation_with_the_configured_cap_does() {
+        for kind in [
+            ProviderKind::Anthropic,
+            ProviderKind::Openai,
+            ProviderKind::Gemini,
+            ProviderKind::Mistral,
+            ProviderKind::Ollama,
+        ] {
+            let server = MockServer::start().await;
+            needs_the_configured_cap(&server, kind, 25000).await;
+            let cfg = LlmConfig {
+                kind,
+                model: "m".into(),
+                max_tokens: 25000,
+                base_url: server.uri(),
+                api_key: "k".into(),
+            };
+
+            build_llm(&cfg)
+                .generate("transcript", None)
+                .await
+                .unwrap_or_else(|e| panic!("{kind:?} generate: {e:?}"));
+            probe_llm(&cfg)
+                .await
+                .unwrap_or_else(|e| panic!("{kind:?} probe: {e:?}"));
+        }
+    }
 
     #[test]
     fn openai_listing_keeps_chat_models_only() {
