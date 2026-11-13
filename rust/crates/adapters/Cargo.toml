@@ -13,7 +13,7 @@ meeting-core = { path = "../core" }
 # portable packaging build is unchanged. See build.rs and docs/ARCHITECTURE.md.
 hound = "3"
 rubato = "0.15"
-cpal = "0.15"
+cpal = "0.16"
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 dashmap = { workspace = true }
