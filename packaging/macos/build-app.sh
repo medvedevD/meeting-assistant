@@ -5,10 +5,6 @@
 #   →  macdeployqt (Qt runtime; it does NOT copy the helper — install did)
 #   →  ad-hoc deep-sign  →  verify  →  DMG (for the Homebrew Cask)
 #
-# This is also the EARLY macOS spike harness (section-07): it exercises the
-# single most fragile chain — ad-hoc sign + nested-helper deep-sign + Qt
-# deploy + Gatekeeper — before sections 03–05 go deep.
-#
 # Usage: build-app.sh [--debug] [--no-dmg]
 #   --debug    debug Rust sidecar (default: release)
 #   --no-dmg   stop after the signed .app (skip DMG)
@@ -233,5 +229,5 @@ echo
 echo "✓ macOS packaging complete."
 echo "  NOTE: spctl rejects this (ad-hoc, un-notarized) — expected. The"
 echo "  Homebrew Cask's postflight_steps strip com.apple.quarantine so it launches"
-echo "  on a clean Mac. Sunset risk + the durable fix (Developer ID + notarize):"
-echo "  packaging/macos/HOMEBREW-SUNSET.md"
+echo "  on a clean Mac. The durable fix (Developer ID + notarize) is in"
+echo "  \"Signing and distribution\" in packaging/README.md."

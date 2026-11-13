@@ -4,7 +4,7 @@
 
   Consumed by CMake via the MACOSX_BUNDLE_INFO_PLIST target property; CMake
   substitutes the MACOSX_BUNDLE variables (see qt-app/CMakeLists.txt).
-  The non-variable keys below are the ones section-05/07 actually require —
+  The non-variable keys below are required by ScreenCaptureKit and packaging —
   do not hand-edit them in the generated bundle, edit this template.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -40,7 +40,7 @@
     <key>CFBundleSignature</key>
     <string>????</string>
 
-    <!-- macOS floor is 13.0: ScreenCaptureKit audio-only capture (section-05). -->
+    <!-- macOS floor is 13.0: ScreenCaptureKit audio-only capture. -->
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
@@ -48,7 +48,7 @@
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.productivity</string>
 
-    <!-- section-05: ScreenCaptureKit triggers the Screen-Recording TCC prompt.
+    <!-- ScreenCaptureKit triggers the Screen-Recording TCC prompt.
          Without this key macOS kills the process WITHOUT prompting. The string
          is user-facing in the consent dialog; keep it honest about audio. -->
     <key>NSScreenCaptureUsageDescription</key>
