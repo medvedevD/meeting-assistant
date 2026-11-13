@@ -120,7 +120,33 @@ ScrollView {
         var model = activeModel()
         if (!model)
             return qsTr("Выберите установленную модель из каталога или добавьте внешний .bin файл.")
-        return model.description || qsTr("Внешний ggml-совместимый файл. Будет использоваться для новых транскрипций.")
+        return modelDescription(model) || qsTr("Внешний ggml-совместимый файл. Будет использоваться для новых транскрипций.")
+    }
+    // The core's catalog describes its models in English, for logs and other
+    // clients; the interface language is the GUI's, so built-in models are
+    // described here by id. A model the GUI doesn't know yet keeps the core's
+    // text, and a custom model keeps the user's own.
+    function modelDescription(model) {
+        if (!model)
+            return ""
+        switch (model.id) {
+        case "tiny":
+            return qsTr("Самая быстрая многоязычная модель — для черновиков и коротких заметок.")
+        case "base":
+            return qsTr("Лёгкая многоязычная модель, точнее, чем Tiny.")
+        case "small":
+            return qsTr("Сбалансированная многоязычная модель для повседневной расшифровки встреч.")
+        case "medium":
+            return qsTr("Более качественная многоязычная модель для сложного звука и длинных встреч.")
+        case "large-v3":
+            return qsTr("Самая качественная многоязычная модель встроенного каталога.")
+        case "large-v3-turbo-q5_0":
+            return qsTr("Сжатая модель Turbo: быстрая повседневная расшифровка при умеренном размере.")
+        case "large-v3-turbo-q8_0":
+            return qsTr("Более точная модель Turbo: качество выше, чем у Q5, но и размер больше.")
+        default:
+            return model.description || ""
+        }
     }
     function activeName() {
         var model = activeModel()
@@ -751,6 +777,7 @@ ScrollView {
                             required property var modelData
                             Layout.fillWidth: true
                             modelInfo: modelData
+                            description: panel.modelDescription(modelData)
                             active: panel.isManagedActive(modelData.id)
                             onSelect: panel.selectManaged(modelData.id)
                             onDeleteRequested: panel.requestDeleteManaged(modelData)
@@ -770,6 +797,7 @@ ScrollView {
                             required property var modelData
                             Layout.fillWidth: true
                             modelInfo: modelData
+                            description: panel.modelDescription(modelData)
                         }
                     }
                 }
@@ -1133,6 +1161,7 @@ ScrollView {
     component InstalledCatalogRow: Rectangle {
         id: row
         property var modelInfo
+        property string description
         property bool active: false
         signal select()
         signal deleteRequested()
@@ -1208,7 +1237,7 @@ ScrollView {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: row.modelInfo.description
+                    text: row.description
                     wrapMode: Text.WordWrap
                     font.family: Theme.fontUi
                     font.pixelSize: Theme.fsSmall
@@ -1227,6 +1256,7 @@ ScrollView {
     component AvailableCatalogRow: Rectangle {
         id: row
         property var modelInfo
+        property string description
         property string jobId: ""
         property string installStatus: ""
         property real progressPercent: -1
@@ -1268,7 +1298,7 @@ ScrollView {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: row.modelInfo.description
+                    text: row.description
                     wrapMode: Text.WordWrap
                     font.family: Theme.fontUi
                     font.pixelSize: Theme.fsSmall
