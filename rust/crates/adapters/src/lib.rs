@@ -1,5 +1,11 @@
 mod whisper;
-pub use whisper::{whisper_backend, LazyWhisperTranscriber, TranscriberPrefs, WhisperTranscriber};
+pub use whisper::{
+    whisper_backend, LazyWhisperTranscriber, TranscriberPrefs, WhisperTranscriber,
+    DEFAULT_LOG_FILTER,
+};
+
+#[cfg(test)]
+mod test_log;
 
 mod fs_meeting_file_store;
 pub use fs_meeting_file_store::FsMeetingFileStore;

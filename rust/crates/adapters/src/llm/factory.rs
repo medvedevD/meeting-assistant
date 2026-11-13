@@ -132,6 +132,7 @@ fn is_openai_chat_model(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_log::LogBuf;
     use serde_json::json;
     use wiremock::matchers::{body_partial_json, method, path, path_regex};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -172,41 +173,6 @@ mod tests {
             .await;
     }
 
-    /// Collects what the sidecar's `fmt` logger would write to its log.
-    #[derive(Clone, Default)]
-    struct LogBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
-
-    impl std::io::Write for LogBuf {
-        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(b);
-            Ok(b.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl LogBuf {
-        /// Route this thread's events here until the guard drops; the tests
-        /// run on tokio's current-thread runtime.
-        fn capture(&self) -> tracing::subscriber::DefaultGuard {
-            let buf = self.clone();
-            let subscriber = tracing_subscriber::fmt()
-                .with_writer(move || buf.clone())
-                .with_ansi(false)
-                .finish();
-            tracing::subscriber::set_default(subscriber)
-        }
-
-        fn line_with(&self, needle: &str) -> String {
-            let text = String::from_utf8(self.0.lock().unwrap().clone()).unwrap();
-            text.lines()
-                .find(|l| l.contains(needle))
-                .unwrap_or_else(|| panic!("no {needle:?} in the log:\n{text}"))
-                .to_string()
-        }
-    }
-
     #[tokio::test]
     async fn a_failed_probe_is_logged_with_provider_model_and_class() {
         let server = MockServer::start().await;
@@ -225,7 +191,7 @@ mod tests {
             api_key: "sk-test-secret".into(),
         };
         let log = LogBuf::default();
-        let _guard = log.capture();
+        let _guard = log.capture("info");
 
         assert!(probe_llm(&cfg).await.is_err());
 
@@ -255,7 +221,7 @@ mod tests {
             api_key: "AIza-test-secret".into(),
         };
         let log = LogBuf::default();
-        let _guard = log.capture();
+        let _guard = log.capture("info");
 
         let err = probe_llm(&cfg).await.unwrap_err();
         assert!(
