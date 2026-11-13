@@ -106,7 +106,7 @@ impl OpenAiCompatProvider {
             .auth(self.client.post(&url).json(&body))
             .send()
             .await
-            .map_err(|e| classify_transport(&self.label, &e))?;
+            .map_err(|e| classify_transport(&self.label, e))?;
         if resp.status().is_success() {
             Ok(())
         } else {
@@ -127,7 +127,7 @@ impl OpenAiCompatProvider {
             .timeout(LIST_MODELS_TIMEOUT)
             .send()
             .await
-            .map_err(|e| classify_transport(&self.label, &e))?;
+            .map_err(|e| classify_transport(&self.label, e))?;
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let text = resp.text().await.unwrap_or_default();
@@ -247,7 +247,7 @@ impl LlmProvider for OpenAiCompatProvider {
             .auth(self.client.post(&url).json(&body))
             .send()
             .await
-            .map_err(|e| classify_transport(&self.label, &e))?;
+            .map_err(|e| classify_transport(&self.label, e))?;
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();

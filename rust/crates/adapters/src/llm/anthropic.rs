@@ -74,7 +74,7 @@ impl AnthropicProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| classify_transport("Anthropic", &e))?;
+            .map_err(|e| classify_transport("Anthropic", e))?;
         if resp.status().is_success() {
             Ok(())
         } else {
@@ -96,7 +96,7 @@ impl AnthropicProvider {
             .timeout(Duration::from_secs(20))
             .send()
             .await
-            .map_err(|e| classify_transport("Anthropic", &e))?;
+            .map_err(|e| classify_transport("Anthropic", e))?;
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let text = resp.text().await.unwrap_or_default();
@@ -214,7 +214,7 @@ impl LlmProvider for AnthropicProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| classify_transport("Anthropic", &e))?;
+            .map_err(|e| classify_transport("Anthropic", e))?;
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
