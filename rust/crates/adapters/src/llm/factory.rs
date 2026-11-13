@@ -73,8 +73,8 @@ pub async fn probe_llm(cfg: &LlmConfig) -> Result<(), CoreError> {
     result
 }
 
-/// `text` with every copy of `key` masked. Gemini sends the key in the URL,
-/// and a transport error quotes the URL.
+/// `text` with every copy of `key` masked, in case a provider's message
+/// quotes the key it was sent.
 fn without_key(text: &str, key: &str) -> String {
     if key.is_empty() {
         text.to_string()
@@ -206,33 +206,33 @@ mod tests {
 
     #[tokio::test]
     async fn a_logged_probe_failure_never_carries_the_key() {
-        // Gemini puts the key in the URL, and reqwest quotes the URL when the
-        // connection fails.
-        let closed_port = std::net::TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(ResponseTemplate::new(401).set_body_json(json!({
+                "error": {"message": "Incorrect API key provided: sk-test-secret."}
+            })))
+            .mount(&server)
+            .await;
         let cfg = LlmConfig {
-            kind: ProviderKind::Gemini,
-            model: "gemini-2.5-pro".into(),
-            max_tokens: 8192,
-            base_url: format!("http://127.0.0.1:{closed_port}"),
-            api_key: "AIza-test-secret".into(),
+            kind: ProviderKind::Openai,
+            model: "gpt-6-astra".into(),
+            max_tokens: 25000,
+            base_url: server.uri(),
+            api_key: "sk-test-secret".into(),
         };
         let log = LogBuf::default();
         let _guard = log.capture("info");
 
-        let err = probe_llm(&cfg).await.unwrap_err();
-        assert!(
-            err.to_string().contains("AIza-test-secret"),
-            "the premise changed, the error no longer quotes the key: {err}"
-        );
+        assert!(probe_llm(&cfg).await.is_err());
 
         let line = log.line_with("LLM key check failed");
-        assert!(line.contains("error_class=\"network_timeout\""), "{line}");
-        assert!(line.contains("key=<api key>"), "{line}");
-        assert!(!line.contains("AIza-test-secret"), "{line}");
+        assert!(line.contains("error_class=\"api_auth\""), "{line}");
+        assert!(
+            line.contains("Incorrect API key provided: <api key>."),
+            "{line}"
+        );
+        assert!(!line.contains("sk-test-secret"), "{line}");
     }
 
     #[tokio::test]

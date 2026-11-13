@@ -13,8 +13,8 @@ use super::usage::token_usage;
 use super::PROBE_PROMPT;
 
 /// Google Gemini provider (Generative Language API). Distinct wire format from
-/// the OpenAI-compatible providers: model is in the URL path, key is a query
-/// param, and content uses `contents[].parts[].text`.
+/// the OpenAI-compatible providers: model is in the URL path, key is the
+/// `x-goog-api-key` header, and content uses `contents[].parts[].text`.
 pub struct GeminiProvider {
     api_key: String,
     model: String,
@@ -44,6 +44,23 @@ impl GeminiProvider {
         }
     }
 
+    /// A request to `{base_url}/{path}` carrying the key in the
+    /// `x-goog-api-key` header. Never in the URL: a failed request quotes its
+    /// URL, and that text reaches the log, the job's stored error and the GUI.
+    fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+        self.client
+            .request(method, format!("{}/{path}", self.base_url))
+            .header("x-goog-api-key", &self.api_key)
+    }
+
+    fn generate_content(&self, body: &GenerateContentRequest<'_>) -> reqwest::RequestBuilder {
+        self.request(
+            reqwest::Method::POST,
+            &format!("models/{}:generateContent", self.model),
+        )
+        .json(body)
+    }
+
     /// "Test key" check: a one-line `generateContent` against the configured
     /// model with the token cap `generate` uses, so a model the key can't use
     /// fails here rather than only at protocol generation (listing models
@@ -57,17 +74,11 @@ impl GeminiProvider {
                 max_output_tokens: self.max_tokens,
             },
         };
-        let url = format!(
-            "{}/models/{}:generateContent?key={}",
-            self.base_url, self.model, self.api_key
-        );
         let resp = self
-            .client
-            .post(&url)
-            .json(&body)
+            .generate_content(&body)
             .send()
             .await
-            .map_err(|e| classify_transport("Gemini", &e))?;
+            .map_err(|e| classify_transport("Gemini", e))?;
         if resp.status().is_success() {
             Ok(())
         } else {
@@ -81,17 +92,12 @@ impl GeminiProvider {
     /// `models/` prefix. Only `generateContent` models qualify, minus the
     /// speech/image/live variants that support it but can't write a protocol.
     pub async fn list_models(&self) -> Result<Vec<String>, CoreError> {
-        let url = format!(
-            "{}/models?pageSize=1000&key={}",
-            self.base_url, self.api_key
-        );
         let resp = self
-            .client
-            .get(&url)
+            .request(reqwest::Method::GET, "models?pageSize=1000")
             .timeout(Duration::from_secs(20))
             .send()
             .await
-            .map_err(|e| classify_transport("Gemini", &e))?;
+            .map_err(|e| classify_transport("Gemini", e))?;
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let text = resp.text().await.unwrap_or_default();
@@ -209,17 +215,11 @@ impl LlmProvider for GeminiProvider {
             },
         };
 
-        let url = format!(
-            "{}/models/{}:generateContent?key={}",
-            self.base_url, self.model, self.api_key
-        );
         let resp = self
-            .client
-            .post(&url)
-            .json(&body)
+            .generate_content(&body)
             .send()
             .await
-            .map_err(|e| classify_transport("Gemini", &e))?;
+            .map_err(|e| classify_transport("Gemini", e))?;
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
@@ -254,7 +254,7 @@ mod tests {
     use super::*;
     use meeting_core::entities::TokenUsage;
     use serde_json::json;
-    use wiremock::matchers::{body_partial_json, method, path, path_regex};
+    use wiremock::matchers::{body_partial_json, header, method, path, path_regex, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -344,6 +344,68 @@ mod tests {
         let provider = GeminiProvider::new("k", "gemini-2.5-pro", 4096, server.uri());
         let err = provider.generate("t", None).await.unwrap_err();
         assert!(matches!(err, CoreError::LlmModelUnavailable(_)));
+    }
+
+    /// A URL is no place for the key: a failed request quotes its URL, and
+    /// that text reaches the log, the job's stored error and the GUI.
+    #[tokio::test]
+    async fn sends_the_key_in_a_header_never_in_the_url() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/models/gemini-2.5-pro:generateContent"))
+            .and(header("x-goog-api-key", "AIza-test-secret"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "candidates": [{"content": {"parts": [{"text": "# Protocol"}]}}]
+            })))
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .and(query_param("pageSize", "1000"))
+            .and(header("x-goog-api-key", "AIza-test-secret"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"models": []})))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let provider =
+            GeminiProvider::new("AIza-test-secret", "gemini-2.5-pro", 4096, server.uri());
+        provider.generate("transcript", None).await.unwrap();
+        provider.probe().await.unwrap();
+        provider.list_models().await.unwrap();
+
+        for request in server.received_requests().await.unwrap() {
+            assert!(
+                !request.url.as_str().contains("AIza-test-secret"),
+                "key in {}",
+                request.url
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_connection_does_not_quote_the_key() {
+        let closed_port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let provider = GeminiProvider::new(
+            "AIza-test-secret",
+            "gemini-2.5-pro",
+            4096,
+            format!("http://127.0.0.1:{closed_port}"),
+        );
+
+        for err in [
+            provider.probe().await.unwrap_err(),
+            provider.generate("t", None).await.unwrap_err(),
+            provider.list_models().await.unwrap_err(),
+        ] {
+            assert!(matches!(err, CoreError::Network(_)), "got {err:?}");
+            assert!(!err.to_string().contains("AIza-test-secret"), "{err}");
+        }
     }
 
     #[tokio::test]
