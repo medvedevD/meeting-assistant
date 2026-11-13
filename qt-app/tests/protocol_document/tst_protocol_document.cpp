@@ -16,6 +16,7 @@ private slots:
     void parsesEditorialMarkdownBlocks();
     void parsesDeepHeadingsWithoutVisibleHashes();
     void prefersStructuredProtocolBlocks();
+    void showsAPlainTopicListAsAList();
     void hidesEmptyStructuredSections();
     void showsOtherSectionsInDocumentOrder();
     void otherSectionsAloneCountAsStructured();
@@ -215,6 +216,33 @@ void ProtocolDocumentTest::prefersStructuredProtocolBlocks() {
         }
     }
     QVERIFY(sawActionsTable);
+}
+
+// A plain list under "Key topics" reaches the document as one untitled topic. It
+// used to start with the list's first item set as a bold heading.
+void ProtocolDocumentTest::showsAPlainTopicListAsAList() {
+    QQmlEngine engine;
+    engine.addImportPath(QStringLiteral(MA_PROTOCOL_QML_IMPORT_DIR));
+
+    QQmlComponent component(&engine);
+    std::unique_ptr<QObject> root = createDocument(engine, component);
+    QVERIFY2(root != nullptr, qPrintable(component.errorString()));
+
+    const QVariantList items { QStringLiteral("Первая тема"), QStringLiteral("Вторая тема") };
+    QVariantMap topic;
+    topic.insert(QStringLiteral("title"), QString());
+    topic.insert(QStringLiteral("bullets"), items);
+    QVariantMap structured;
+    structured.insert(QStringLiteral("topics"), QVariantList { topic });
+
+    root->setProperty("markdown", QStringLiteral("# Markdown fallback"));
+    root->setProperty("structured", structured);
+
+    const QVariantList blocks = root->property("blocks").toList();
+    QCOMPARE(blocks.size(), 2);
+    QCOMPARE(blocks.at(0).toMap().value(QStringLiteral("type")).toString(), QStringLiteral("h2"));
+    QCOMPARE(blocks.at(1).toMap().value(QStringLiteral("type")).toString(), QStringLiteral("ul"));
+    QCOMPARE(blocks.at(1).toMap().value(QStringLiteral("items")).toList(), items);
 }
 
 void ProtocolDocumentTest::hidesEmptyStructuredSections() {
