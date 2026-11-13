@@ -92,6 +92,8 @@ public:
     void failJob(const QString &jobId) { m_jobs[jobId].status = QStringLiteral("failed"); }
 
     QStringList reprocessKinds() const { return m_reprocessKinds; }
+    // The template_name of each reprocess request, "" when it named none.
+    QStringList reprocessTemplates() const { return m_reprocessTemplates; }
     int hits(const QString &path) const { return m_hits.value(path); }
 
 private:
@@ -207,8 +209,10 @@ private:
 
         QRegularExpressionMatch match = reprocessRoute.match(path);
         if (method == "POST" && match.hasMatch()) {
-            const QString kind = QJsonDocument::fromJson(body).object().value(QStringLiteral("kind")).toString();
+            const QJsonObject request = QJsonDocument::fromJson(body).object();
+            const QString kind = request.value(QStringLiteral("kind")).toString();
             m_reprocessKinds << kind;
+            m_reprocessTemplates << request.value(QStringLiteral("template_name")).toString();
             const QString backendKind = kind == QLatin1String("protocol")
                                             ? QStringLiteral("regenerate_protocol")
                                             : QStringLiteral("reprocess_transcribe");
@@ -262,6 +266,7 @@ private:
     QStringList m_meetingOrder;
     QMap<QString, Job> m_jobs;
     QStringList m_reprocessKinds;
+    QStringList m_reprocessTemplates;
     QHash<QString, int> m_hits;
 };
 
@@ -434,6 +439,7 @@ private slots:
     void everyFileOfABatchImportIsTracked();
     void finishedJobUpdatesTheSidebarFromAnyScreen();
     void recordingNamesTheSystemMixInTheInterfaceLanguage();
+    void typedTemplateIsUsedWithoutPressingEnter();
 };
 
 void MeetingFlowTest::initTestCase() {
@@ -591,6 +597,32 @@ void MeetingFlowTest::recordingNamesTheSystemMixInTheInterfaceLanguage() {
     QTRY_VERIFY(app.visibleTextContaining(
                     QStringLiteral("🎙 MacBook Pro Microphone   🔊 Системный звук"))
                 != nullptr);
+}
+
+// The template field took its text only on Enter or when it lost focus, and a
+// button click takes neither, so typing a template and clicking "Generate"
+// generated with the default template.
+void MeetingFlowTest::typedTemplateIsUsedWithoutPressingEnter() {
+    App app;
+    QVERIFY(app.start());
+
+    const QVariantMap meeting = app.sidecar.addMeeting(QStringLiteral("sync"), true);
+    QMetaObject::invokeMethod(app.shell, "showGenerate", Q_ARG(QVariant, meeting), Q_ARG(QVariant, false));
+    QTRY_COMPARE(app.pageName(), QStringLiteral("GenerateProtocolScreen"));
+
+    QQuickItem *field = nullptr;
+    QTRY_VERIFY((field = findVisible(app.page(), [](QQuickItem *item) {
+                     return item->property("placeholderText").toString() == QStringLiteral("По умолчанию");
+                 })) != nullptr);
+    QTest::mouseClick(app.quickWindow(), Qt::LeftButton, Qt::NoModifier,
+                      field->mapToScene(QPointF(field->width() / 2, field->height() / 2)).toPoint());
+    QTRY_VERIFY(field->hasActiveFocus());
+    for (const char c : QByteArrayLiteral("Simple minutes"))
+        QTest::keyClick(app.quickWindow(), c);
+    QCOMPARE(field->property("text").toString(), QStringLiteral("Simple minutes"));
+
+    QVERIFY(app.clickUntil(kGenerateMinutes, [&app] { return !app.sidecar.reprocessKinds().isEmpty(); }));
+    QCOMPARE(app.sidecar.reprocessTemplates(), QStringList{QStringLiteral("Simple minutes")});
 }
 
 int main(int argc, char *argv[]) {
