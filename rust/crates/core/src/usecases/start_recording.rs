@@ -42,9 +42,16 @@ pub async fn start_recording(
         ..meeting
     };
 
-    let resolved = capture
-        .start_session(&meeting.id, &audio_path, spec)
-        .await?;
+    let resolved = match capture.start_session(&meeting.id, &audio_path, spec).await {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            // A start that fails (no Screen Recording grant, no device) must
+            // not leave an empty folder in the recordings dir. `remove_dir`
+            // removes only an empty folder, so it can never delete audio.
+            let _ = std::fs::remove_dir(&meeting.meeting_dir);
+            return Err(e);
+        }
+    };
     meeting_repo.save(&meeting).await?;
     Ok((meeting, resolved))
 }
@@ -345,6 +352,53 @@ mod tests {
 
         assert_eq!(resolved.mic.as_deref(), Some("USB Mic"));
         assert_eq!(resolved.system, None);
+    }
+
+    // ── failed start ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn failed_start_removes_the_meeting_dir_and_saves_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let capture = FakeAudioCapture::failing_start("screen recording permission denied");
+        let repo = FakeMeetingRepo::new();
+
+        let err = start_recording(
+            Arc::clone(&capture) as Arc<dyn AudioCapture>,
+            Arc::clone(&repo) as Arc<dyn MeetingRepo>,
+            root.path(),
+            None,
+            CaptureSpec {
+                source: CaptureSource::Mixed,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(err, CoreError::Recording(ref m) if m.contains("permission")));
+        let left: Vec<_> = std::fs::read_dir(root.path()).unwrap().collect();
+        assert!(left.is_empty(), "a failed start left {left:?}");
+        assert!(repo.list_all().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn successful_start_keeps_the_meeting_dir() {
+        let root = tempfile::tempdir().unwrap();
+        let capture = FakeAudioCapture::new();
+        let repo = FakeMeetingRepo::new();
+
+        let (meeting, _) = start_recording(
+            Arc::clone(&capture) as Arc<dyn AudioCapture>,
+            Arc::clone(&repo) as Arc<dyn MeetingRepo>,
+            root.path(),
+            None,
+            CaptureSpec::default(),
+        )
+        .await
+        .unwrap();
+
+        assert!(meeting.meeting_dir.is_dir());
+        assert!(meeting.meeting_dir.starts_with(root.path()));
     }
 
     // ── slug format ───────────────────────────────────────────────────────────

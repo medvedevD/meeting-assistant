@@ -9,6 +9,8 @@ pub struct TranscriptionModelCatalogEntry {
     pub id: &'static str,
     pub display_name: &'static str,
     pub approximate_size: &'static str,
+    /// English, for logs and other clients. The GUI describes the model in
+    /// the interface language by `id` (`WhisperPanel.modelDescription`).
     pub description: &'static str,
     pub pros: &'static [&'static str],
     pub cons: &'static [&'static str],
@@ -218,6 +220,22 @@ mod tests {
     use super::*;
     use crate::settings_store::{PersistedPaths, PersistedTranscriberPrefs};
     use std::fs;
+
+    /// `description` is English, for logs and other clients; the settings
+    /// screen describes each built-in model in the interface language, by id.
+    /// A model added here without a case there shows English in the Russian
+    /// interface (smoke test of v0.1.0-alpha.14).
+    #[test]
+    fn every_catalog_model_is_described_by_the_gui() {
+        let panel = include_str!("../../../../qt-app/qml/screens/settings/WhisperPanel.qml");
+        for model in TRANSCRIPTION_MODEL_CATALOG {
+            let case = format!("case \"{}\":", model.id);
+            assert!(
+                panel.contains(&case),
+                "WhisperPanel.modelDescription has no {case}"
+            );
+        }
+    }
 
     #[test]
     fn catalog_contains_builtin_models() {

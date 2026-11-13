@@ -81,7 +81,8 @@ int ApiClient::send(const QByteArray &verb, const QString &path,
         reply = m_net->sendCustomRequest(req, verb);
     }
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply, id, path]() {
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, id, verb, path]() {
         reply->deleteLater();
         const int httpStatus =
             reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -91,6 +92,10 @@ int ApiClient::send(const QByteArray &verb, const QString &path,
             QString msg = reply->errorString();
             if (!raw.isEmpty())
                 msg += QStringLiteral(" — ") + QString::fromUtf8(raw);
+            // QML shows the user a short notice at most; the log file is
+            // where the cause is read later.
+            qWarning("ApiClient: %s %s failed (HTTP %d): %s", verb.constData(),
+                     qPrintable(path), httpStatus, qPrintable(msg));
             const QJsonDocument errDoc = QJsonDocument::fromJson(raw);
             emit requestFailed(id, path, httpStatus, msg,
                                errDoc.isNull() ? QVariant() : errDoc.toVariant());
@@ -100,6 +105,9 @@ int ApiClient::send(const QByteArray &verb, const QString &path,
         QJsonParseError perr;
         const QJsonDocument doc = QJsonDocument::fromJson(raw, &perr);
         if (!raw.isEmpty() && perr.error != QJsonParseError::NoError) {
+            qWarning("ApiClient: %s %s returned invalid JSON: %s",
+                     verb.constData(), qPrintable(path),
+                     qPrintable(perr.errorString()));
             emit requestFailed(id, path, httpStatus,
                                QStringLiteral("invalid JSON: %1")
                                    .arg(perr.errorString()),

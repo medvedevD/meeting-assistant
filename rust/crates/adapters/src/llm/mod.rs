@@ -6,6 +6,13 @@ pub use config::{LlmConfig, ProviderKind};
 
 mod errors;
 
+/// What the "Test key" probe asks the configured model. It goes out with the
+/// same parameters as a protocol request, token cap included: a reasoning
+/// model spends that budget on thinking first, so a smaller cap can be
+/// rejected even though generation with the configured one succeeds. A short
+/// fixed answer keeps the real cost to a few tokens.
+const PROBE_PROMPT: &str = "Reply with OK.";
+
 mod usage;
 
 mod openai_compat;

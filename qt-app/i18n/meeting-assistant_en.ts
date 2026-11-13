@@ -926,6 +926,10 @@ The interface uses protocol %1, but the core supports only %2–%3.</translation
         <translation>To record system audio, macOS requires the Screen Recording permission. Despite the name, Meeting Assistant records only audio and never takes screenshots.</translation>
     </message>
     <message>
+        <source>Если Meeting Assistant уже включён в настройках, удалите его из списка кнопкой «−» и добавьте заново: после обновления macOS помнит разрешение для прежней версии приложения.</source>
+        <translation>If Meeting Assistant is already on in Settings, remove it from the list with the “−” button and add it again: after an update, macOS keeps the permission for the previous version of the app.</translation>
+    </message>
+    <message>
         <source>Отмена</source>
         <translation>Cancel</translation>
     </message>
@@ -1668,6 +1672,34 @@ for noisy meetings.</translation>
     <message>
         <source>Выберите установленную модель из каталога или добавьте внешний .bin файл.</source>
         <translation>Choose an installed model from the catalog or add an external .bin file.</translation>
+    </message>
+    <message>
+        <source>Самая быстрая многоязычная модель — для черновиков и коротких заметок.</source>
+        <translation>Fastest multilingual model for quick drafts and short notes.</translation>
+    </message>
+    <message>
+        <source>Лёгкая многоязычная модель, точнее, чем Tiny.</source>
+        <translation>Lightweight multilingual model with better accuracy than Tiny.</translation>
+    </message>
+    <message>
+        <source>Сбалансированная многоязычная модель для повседневной расшифровки встреч.</source>
+        <translation>Balanced multilingual model for everyday meeting transcription.</translation>
+    </message>
+    <message>
+        <source>Более качественная многоязычная модель для сложного звука и длинных встреч.</source>
+        <translation>Higher-quality multilingual model for harder audio and longer meetings.</translation>
+    </message>
+    <message>
+        <source>Самая качественная многоязычная модель встроенного каталога.</source>
+        <translation>Highest-quality multilingual model in the built-in catalog.</translation>
+    </message>
+    <message>
+        <source>Сжатая модель Turbo: быстрая повседневная расшифровка при умеренном размере.</source>
+        <translation>Compressed Turbo model for faster everyday transcription with moderate size.</translation>
+    </message>
+    <message>
+        <source>Более точная модель Turbo: качество выше, чем у Q5, но и размер больше.</source>
+        <translation>Higher-precision Turbo model with stronger quality than Q5 at a larger size.</translation>
     </message>
     <message>
         <source>Модель не выбрана</source>

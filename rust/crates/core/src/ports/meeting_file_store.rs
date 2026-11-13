@@ -10,7 +10,9 @@ pub trait MeetingFileStore: Send + Sync {
     /// the import flow when the source is copied (rather than registered in place).
     async fn import_audio(&self, dir: &Path, source: &Path) -> Result<PathBuf, CoreError>;
     /// List audio files (.wav/.mp3/.m4a) under `dir`, descending at most
-    /// `max_depth` levels, with an internal cap to keep scans cheap.
+    /// `max_depth` levels, with an internal cap to keep scans cheap. A
+    /// recording's scratch tracks (the unmixed legs of a "Both" recording) are
+    /// not recordings and are left out.
     async fn list_audio_files(
         &self,
         dir: &Path,

@@ -101,6 +101,21 @@ pub fn whisper_backend() -> &'static str {
     env!("MEETING_WHISPER_BACKEND")
 }
 
+/// Default filter for the sidecar's log, which the GUI writes to the user's
+/// log file. whisper.cpp and GGML log every model load and every decoding
+/// state at INFO, some 60 lines per transcription (`whisper_init_state`,
+/// `ggml_metal_*`). [`route_whisper_cpp_logs`] brings them into `tracing`
+/// under the `whisper_rs` target, where this keeps only their warnings and
+/// errors; our own lines say which model loaded and which job finished.
+pub const DEFAULT_LOG_FILTER: &str = "info,whisper_rs=warn";
+
+/// Send whisper.cpp's and GGML's log through `tracing` instead of straight to
+/// stderr, where no filter reaches it. Runs before every model load; only the
+/// first call has an effect.
+fn route_whisper_cpp_logs() {
+    whisper_rs::install_logging_hooks();
+}
+
 // ── Transcriber preferences ───────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,6 +180,7 @@ impl WhisperTranscriber {
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("model path is not valid UTF-8"))?;
         let t = std::time::Instant::now();
+        route_whisper_cpp_logs();
         let ctx = WhisperContext::new_with_params(path, WhisperContextParameters::default())
             .map_err(|e| anyhow::anyhow!("failed to load whisper model from {path}: {e}"))?;
         let model_name = model_path
@@ -525,6 +541,7 @@ impl LazyWhisperTranscriber {
             let t = std::time::Instant::now();
             let mut ctx_params = WhisperContextParameters::default();
             ctx_params.use_gpu(use_gpu);
+            route_whisper_cpp_logs();
             let ctx = WhisperContext::new_with_params(path_str, ctx_params).map_err(|e| {
                 CoreError::Transcription(format!(
                     "model_missing: model not found or corrupted: {e}"
@@ -795,6 +812,33 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
+
+    /// whisper.cpp printed ~60 INFO lines (`whisper_init_state`,
+    /// `ggml_metal_*`) into the user's log for every transcription (smoke test
+    /// of v0.1.0-alpha.14). Its log must reach `tracing`, where the sidecar's
+    /// default filter keeps only its warnings and errors. A missing model file
+    /// makes whisper.cpp log one INFO line and one ERROR line, without a GPU.
+    #[test]
+    fn whisper_cpp_logs_only_problems_into_the_default_log() {
+        use crate::test_log::LogBuf;
+
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("ggml-missing.bin");
+        let transcriber =
+            LazyWhisperTranscriber::new(missing.clone(), TranscriberPrefs::new("ru", 1, 1, false));
+        let log = LogBuf::default();
+        let _guard = log.capture(DEFAULT_LOG_FILTER);
+
+        assert!((transcriber.factory)(&missing, false).is_err());
+
+        let line = log.line_with("failed to open");
+        assert!(line.contains("ERROR"), "{line}");
+        assert!(
+            !log.text().contains("loading model from"),
+            "whisper.cpp INFO reached the log:\n{}",
+            log.text()
+        );
+    }
 
     // --- Fake infrastructure ---
 

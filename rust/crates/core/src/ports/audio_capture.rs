@@ -38,7 +38,9 @@ pub struct CaptureSpec {
 /// user can *see* which source is live, including any default fallback.
 ///
 /// `None` means that leg was not part of the source (e.g. no system leg for a
-/// mic-only recording).
+/// mic-only recording). An empty label means the leg has no device of its own
+/// to name (macOS records the whole system mix); the GUI names it in the user's
+/// language.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedDevices {
     pub mic: Option<String>,

@@ -185,7 +185,21 @@ private:
         }
         if (method == "GET" && path == QLatin1String("/api/v1/settings"))
             return {200, json(QJsonObject{{QStringLiteral("llm"),
-                                           QJsonObject{{QStringLiteral("active"), QStringLiteral("ollama")}}}})};
+                                           QJsonObject{{QStringLiteral("active"), QStringLiteral("ollama")}}},
+                                          {QStringLiteral("recording"),
+                                           QJsonObject{{QStringLiteral("source"), QStringLiteral("mixed")},
+                                                       {QStringLiteral("echo_cancel"), false}}}})};
+        if (method == "POST" && path == QLatin1String("/api/v1/recordings")) {
+            // What the macOS sidecar answers for a mixed recording: the mic by
+            // name, and the system mix with an empty label for the GUI to name.
+            const QJsonObject resolved{{QStringLiteral("mic"), QStringLiteral("MacBook Pro Microphone")},
+                                       {QStringLiteral("system"), QString()}};
+            return {201, json(QJsonObject{{QStringLiteral("id"), QStringLiteral("rec-1")},
+                                          {QStringLiteral("name"), QStringLiteral("Планёрка")},
+                                          {QStringLiteral("audio_path"), QStringLiteral("/sandbox/rec-1.wav")},
+                                          {QStringLiteral("created_at"), kCreatedAt},
+                                          {QStringLiteral("resolved"), resolved}})};
+        }
         if (method == "GET" && path == QLatin1String("/api/v1/audio/devices"))
             return {200, json(QJsonObject{{QStringLiteral("input"), QJsonArray()},
                                           {QStringLiteral("output"), QJsonArray()},
@@ -355,6 +369,12 @@ struct App {
         });
     }
 
+    QQuickItem *visibleTextContaining(const QString &part) const {
+        return findVisible(quickWindow()->contentItem(), [&part](QQuickItem *item) {
+            return item->property("text").toString().contains(part);
+        });
+    }
+
     // Clicks until `done` holds: a page pushed just now may not be laid out yet.
     bool clickUntil(const QString &buttonText, const std::function<bool()> &done) const {
         return QTest::qWaitFor([&] {
@@ -413,6 +433,7 @@ private slots:
     void failedImportOffersToStartAgain();
     void everyFileOfABatchImportIsTracked();
     void finishedJobUpdatesTheSidebarFromAnyScreen();
+    void recordingNamesTheSystemMixInTheInterfaceLanguage();
 };
 
 void MeetingFlowTest::initTestCase() {
@@ -553,6 +574,23 @@ void MeetingFlowTest::finishedJobUpdatesTheSidebarFromAnyScreen() {
 
     QTRY_VERIFY_WITH_TIMEOUT(app.listedWithTranscript(id), 5000);
     QTRY_VERIFY(app.visibleText(QStringLiteral("транскрипт")) != nullptr);
+}
+
+// On macOS the sidecar named the system leg "System audio", and the Russian
+// interface showed it as is. It now sends an empty label, which this screen
+// names itself.
+void MeetingFlowTest::recordingNamesTheSystemMixInTheInterfaceLanguage() {
+    App app;
+    QVERIFY(app.start());
+
+    QMetaObject::invokeMethod(app.shell, "showNewRecording");
+    QTRY_COMPARE(app.pageName(), QStringLiteral("NewRecordingScreen"));
+    QMetaObject::invokeMethod(app.page(), "start", Q_ARG(QVariant, QStringLiteral("Планёрка")));
+
+    QTRY_COMPARE(app.page()->property("st").toString(), QStringLiteral("recording"));
+    QTRY_VERIFY(app.visibleTextContaining(
+                    QStringLiteral("🎙 MacBook Pro Microphone   🔊 Системный звук"))
+                != nullptr);
 }
 
 int main(int argc, char *argv[]) {

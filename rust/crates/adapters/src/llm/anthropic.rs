@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use super::errors::{classify_http, classify_transport};
 use super::usage::token_usage;
+use super::PROBE_PROMPT;
 
 pub struct AnthropicProvider {
     api_key: String,
@@ -48,17 +49,18 @@ impl AnthropicProvider {
         self
     }
 
-    /// Cheap credential check: a 1-token completion. Surfaces auth/quota errors
-    /// without running a full protocol generation.
+    /// "Test key" check: a one-line request to the configured model with the
+    /// token cap `generate` uses. Surfaces auth/quota/model errors without
+    /// running a full protocol generation.
     pub async fn probe(&self) -> Result<(), CoreError> {
         let body = RequestBody {
             model: &self.model,
-            max_tokens: 1,
+            max_tokens: self.max_tokens,
             messages: vec![Message {
                 role: "user",
                 content: vec![ContentBlock {
                     kind: "text",
-                    text: "hi",
+                    text: PROBE_PROMPT,
                     cache_control: None,
                 }],
             }],
@@ -72,7 +74,7 @@ impl AnthropicProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| classify_transport("Anthropic", &e))?;
+            .map_err(|e| classify_transport("Anthropic", e))?;
         if resp.status().is_success() {
             Ok(())
         } else {
@@ -94,7 +96,7 @@ impl AnthropicProvider {
             .timeout(Duration::from_secs(20))
             .send()
             .await
-            .map_err(|e| classify_transport("Anthropic", &e))?;
+            .map_err(|e| classify_transport("Anthropic", e))?;
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let text = resp.text().await.unwrap_or_default();
@@ -212,7 +214,7 @@ impl LlmProvider for AnthropicProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| classify_transport("Anthropic", &e))?;
+            .map_err(|e| classify_transport("Anthropic", e))?;
 
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
@@ -402,6 +404,36 @@ mod tests {
 
         let err = provider.generate("t", None).await.unwrap_err();
         assert!(matches!(err, CoreError::ApiAuth(_)));
+    }
+
+    #[tokio::test]
+    async fn probe_asks_the_configured_model_with_the_generation_token_cap() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(header("x-api-key", "ak"))
+            .and(body_json(json!({
+                "model": "claude-opus-4-7",
+                "max_tokens": 32000,
+                "messages": [{
+                    "role": "user",
+                    "content": [{"type": "text", "text": PROBE_PROMPT}]
+                }]
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "content": [{"type": "text", "text": "OK"}],
+                "stop_reason": "end_turn"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        AnthropicProvider::with_base_url("ak", server.uri())
+            .with_model("claude-opus-4-7")
+            .with_max_tokens(32000)
+            .probe()
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

@@ -119,7 +119,8 @@ Page {
         if (scr.resolvedMic.length)
             parts.push(qsTr("🎙 %1").arg(scr.resolvedMic))
         if (source === "system" || source === "mixed") {
-            // macOS has no concrete system device; show a generic label.
+            // macOS has no concrete system device: the server sends an empty
+            // label and the leg is named here, in the interface language.
             parts.push(qsTr("🔊 %1").arg(
                 scr.resolvedSystem.length ? scr.resolvedSystem : qsTr("Системный звук")))
         }
@@ -260,6 +261,18 @@ Page {
             font.pixelSize: Theme.fsBodyLg
             color: Theme.ink2
             text: qsTr("Для записи системного звука macOS требует разрешение «Запись экрана» (Screen Recording). Несмотря на название, Meeting Assistant записывает только звук и никогда не делает снимки экрана.")
+        }
+
+        // The alpha is ad-hoc signed, so after an update macOS still holds the
+        // grant for the previous binary: the switch shows on, the start fails.
+        Text {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            lineHeight: 1.35
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fsBody
+            color: Theme.ink3
+            text: qsTr("Если Meeting Assistant уже включён в настройках, удалите его из списка кнопкой «−» и добавьте заново: после обновления macOS помнит разрешение для прежней версии приложения.")
         }
 
         footer: MeetyDialogActions {

@@ -81,6 +81,7 @@ add_subdirectory(first_run)
 add_subdirectory(app_shell_wiring)
 add_subdirectory(meeting_flow)
 add_subdirectory(i18n)
+add_subdirectory(settings_switches)
 
 qt_add_executable(tst_smoke
     tst_smoke.cpp

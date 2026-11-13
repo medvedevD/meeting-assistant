@@ -25,7 +25,17 @@ pub fn classify_http(provider: &str, status: u16, body: &str) -> CoreError {
 }
 
 /// Map a transport-level `reqwest` failure to a classified [`CoreError`].
-pub fn classify_transport(provider: &str, err: &reqwest::Error) -> CoreError {
+/// The message quotes the URL, which helps with a wrong base URL, so only the
+/// parts that can carry a secret are cut first: the query, the fragment and
+/// any credentials. The message reaches the log, the job's stored error and
+/// the GUI.
+pub fn classify_transport(provider: &str, mut err: reqwest::Error) -> CoreError {
+    if let Some(url) = err.url_mut() {
+        url.set_query(None);
+        url.set_fragment(None);
+        let _ = url.set_password(None);
+        let _ = url.set_username("");
+    }
     if err.is_timeout() {
         CoreError::ApiTimeout(format!("{provider}: {err}"))
     } else if err.is_connect() {
@@ -178,6 +188,39 @@ mod tests {
         ));
         assert!(matches!(classify_http("x", 503, ""), CoreError::Network(_)));
         assert!(matches!(classify_http("x", 408, ""), CoreError::Network(_)));
+    }
+
+    /// The quoted URL keeps what helps with a wrong base URL (host, path) and
+    /// loses what can carry a secret: credentials, query and fragment.
+    #[tokio::test]
+    async fn a_transport_error_quotes_no_secret_from_the_url() {
+        let closed_port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let url = format!(
+            "http://proxy-user:proxy-secret@127.0.0.1:{closed_port}/v1/models?key=query-secret#fragment-secret"
+        );
+        let err = reqwest::Client::new().get(&url).send().await.unwrap_err();
+        assert!(err.to_string().contains("query-secret"), "premise: {err}");
+
+        let err = classify_transport("ollama", err);
+
+        assert!(matches!(err, CoreError::Network(_)), "got {err:?}");
+        let text = err.to_string();
+        assert!(
+            text.contains(&format!("127.0.0.1:{closed_port}/v1/models")),
+            "{text}"
+        );
+        for secret in [
+            "proxy-user",
+            "proxy-secret",
+            "query-secret",
+            "fragment-secret",
+        ] {
+            assert!(!text.contains(secret), "{secret} in {text}");
+        }
     }
 
     #[test]

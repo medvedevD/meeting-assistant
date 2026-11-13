@@ -249,12 +249,14 @@ fn resolve_mic_leg(requested: Option<&str>) -> Result<ResolvedLeg, String> {
 
 // ── System-leg resolution ─────────────────────────────────────────────────────
 
-/// macOS has no per-output handle (ScreenCaptureKit captures the aggregate mix).
+/// macOS has no per-output handle (ScreenCaptureKit captures the aggregate mix),
+/// so there is no device name to show. The label stays empty and the GUI names
+/// the leg in the user's language: the backend holds no UI text.
 #[cfg(target_os = "macos")]
 fn resolve_system_leg(_requested: Option<&str>) -> Result<ResolvedLeg, String> {
     Ok(ResolvedLeg {
         id: String::new(),
-        label: "System audio".to_string(),
+        label: String::new(),
     })
 }
 
@@ -540,9 +542,47 @@ where
     f32::from_sample(s)
 }
 
-/// A shared float-WAV writer handle the cpal data callback appends to.
+/// A shared float-WAV writer handle the cpal data callback appends to. It holds
+/// `None` once [`stop_and_finalize`] has closed the file.
 #[cfg(not(target_os = "linux"))]
-type WavWriterHandle = Arc<Mutex<hound::WavWriter<BufWriter<std::fs::File>>>>;
+type WavWriterHandle = Arc<Mutex<Option<hound::WavWriter<BufWriter<std::fs::File>>>>>;
+
+/// The data callback's work: append `data` to the WAV as f32. Once the file is
+/// closed, a callback the backend still runs writes nothing.
+#[cfg(not(target_os = "linux"))]
+fn append_samples<T>(writer: &WavWriterHandle, data: &[T])
+where
+    T: SizedSample,
+    f32: FromSample<T>,
+{
+    if let Some(w) = writer.lock().unwrap().as_mut() {
+        for &s in data {
+            let _ = w.write_sample(to_f32(s));
+        }
+    }
+}
+
+/// Stop a capture stream and close its WAV.
+///
+/// Neither step trusts the backend to free the stream on drop. cpal 0.15 on
+/// macOS never did for a device opened by name (its disconnect listener held
+/// the stream), so the callback kept capturing and kept its copy of the writer,
+/// and waiting to own the writer failed. Pausing stops the capture whatever
+/// the backend does with the stream, and the writer is taken out of the shared
+/// handle instead of waiting to own it.
+#[cfg(not(target_os = "linux"))]
+fn stop_and_finalize<S: StreamTrait>(stream: S, writer: WavWriterHandle) -> Result<(), String> {
+    if let Err(e) = stream.pause() {
+        tracing::warn!("could not pause the capture stream before closing it: {e}");
+    }
+    drop(stream);
+    let wav = writer
+        .lock()
+        .map_err(|_| "a capture callback panicked while writing the WAV".to_string())?
+        .take()
+        .ok_or_else(|| "the WAV was already closed".to_string())?;
+    wav.finalize().map_err(|e| e.to_string())
+}
 
 /// Build a WAV-writing input stream for samples of type `T`, converting each to
 /// f32. Generic over the device's native format so non-f32 devices work too.
@@ -558,12 +598,7 @@ where
 {
     device.build_input_stream(
         config,
-        move |data: &[T], _: &cpal::InputCallbackInfo| {
-            let mut w = writer.lock().unwrap();
-            for &s in data {
-                let _ = w.write_sample(to_f32(s));
-            }
-        },
+        move |data: &[T], _: &cpal::InputCallbackInfo| append_samples(&writer, data),
         |err| tracing::error!("cpal input stream error: {err}"),
         None,
     )
@@ -672,9 +707,9 @@ fn record_single(
     let stream_config: cpal::StreamConfig = config.into();
 
     let file = std::fs::File::create(&output_path).map_err(|e| e.to_string())?;
-    let writer = Arc::new(Mutex::new(
+    let writer: WavWriterHandle = Arc::new(Mutex::new(Some(
         hound::WavWriter::new(BufWriter::new(file), spec).map_err(|e| e.to_string())?,
-    ));
+    )));
 
     // The device's native capture format is not always f32 (WASAPI mics are
     // commonly i16). Building an f32 stream on a non-f32 device fails with
@@ -685,14 +720,7 @@ fn record_single(
 
     stream.play().map_err(|e| e.to_string())?;
     let _ = stop_rx.recv();
-    drop(stream);
-
-    Arc::try_unwrap(writer)
-        .map_err(|_| "writer Arc still has multiple owners".to_string())?
-        .into_inner()
-        .unwrap()
-        .finalize()
-        .map_err(|e| e.to_string())
+    stop_and_finalize(stream, writer)
 }
 
 // ── System audio (platform-specific) ─────────────────────────────────────────
@@ -841,8 +869,7 @@ fn record_mixed(
         None => default_pulse_source().ok_or_else(|| "no default input source".to_string())?,
     };
 
-    let mic_tmp = output_path.with_extension("mic_tmp.wav");
-    let sys_tmp = output_path.with_extension("sys_tmp.wav");
+    let (mic_tmp, sys_tmp) = mixed_leg_paths(&output_path);
 
     let (mic_stop_tx, mic_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let (sys_stop_tx, sys_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
@@ -868,12 +895,7 @@ fn record_mixed(
         .join()
         .map_err(|_| "sys thread panicked".to_string())??;
 
-    ffmpeg_mix(
-        &mic_tmp,
-        &sys_tmp,
-        &output_path,
-        &build_mix_filter(echo_cancel),
-    )?;
+    mix_legs(&mic_tmp, &sys_tmp, &output_path, echo_cancel)?;
 
     let _ = std::fs::remove_file(&mic_tmp);
     let _ = std::fs::remove_file(&sys_tmp);
@@ -967,6 +989,63 @@ fn ffmpeg_program() -> std::ffi::OsString {
         .unwrap_or_else(|| std::ffi::OsString::from("ffmpeg"))
 }
 
+/// Extensions of the scratch tracks a recording writes beside its
+/// `recording.wav`: the two legs of a mixed recording, and the file recovery
+/// mixes them into before renaming it over `recording.wav`.
+const MIC_LEG_EXT: &str = "mic_tmp.wav";
+const SYS_LEG_EXT: &str = "sys_tmp.wav";
+pub(crate) const MIX_TMP_EXT: &str = "mix_tmp.wav";
+
+/// Where a mixed ("Both") recording keeps its two legs until they are mixed
+/// into `output_path`: `recording.mic_tmp.wav` and `recording.sys_tmp.wav`.
+/// Recovery looks for the same names when a stop or the core failed before the
+/// mix ran.
+pub(crate) fn mixed_leg_paths(output_path: &Path) -> (PathBuf, PathBuf) {
+    (
+        output_path.with_extension(MIC_LEG_EXT),
+        output_path.with_extension(SYS_LEG_EXT),
+    )
+}
+
+/// Whether `path` is one of a recording's scratch tracks rather than a
+/// recording: an unfinished leg, which stop or recovery mixes into the
+/// meeting's `recording.wav`, or recovery's half-written mix.
+pub(crate) fn is_scratch_track(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let name = name.to_ascii_lowercase();
+    [MIC_LEG_EXT, SYS_LEG_EXT, MIX_TMP_EXT]
+        .iter()
+        .any(|ext| name.ends_with(&format!(".{ext}")))
+}
+
+/// Mix the mic and system legs of a mixed recording into `out` with this
+/// platform's filter, as `record_mixed` does at stop.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+pub(crate) fn mix_legs(
+    mic: &Path,
+    sys: &Path,
+    out: &Path,
+    echo_cancel: bool,
+) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    let filter = build_mix_filter(echo_cancel);
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    let filter = build_mix_filter_resync(echo_cancel);
+    ffmpeg_mix(mic, sys, out, &filter)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+pub(crate) fn mix_legs(
+    _mic: &Path,
+    _sys: &Path,
+    _out: &Path,
+    _echo_cancel: bool,
+) -> Result<(), String> {
+    Err("mixed audio capture is not yet supported on this platform".to_string())
+}
+
 /// Mix two WAV files into one using ffmpeg with the given `-filter_complex`.
 #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn ffmpeg_mix(a: &Path, b: &Path, out: &Path, filter: &str) -> Result<(), String> {
@@ -1009,8 +1088,7 @@ fn record_mixed(
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let mic_tmp = output_path.with_extension("mic_tmp.wav");
-    let sys_tmp = output_path.with_extension("sys_tmp.wav");
+    let (mic_tmp, sys_tmp) = mixed_leg_paths(&output_path);
 
     let (mic_stop_tx, mic_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let (sys_stop_tx, sys_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
@@ -1038,12 +1116,7 @@ fn record_mixed(
         .join()
         .map_err(|_| "sys thread panicked".to_string())??;
 
-    ffmpeg_mix(
-        &mic_tmp,
-        &sys_tmp,
-        &output_path,
-        &build_mix_filter_resync(echo_cancel),
-    )?;
+    mix_legs(&mic_tmp, &sys_tmp, &output_path, echo_cancel)?;
 
     let _ = std::fs::remove_file(&mic_tmp);
     let _ = std::fs::remove_file(&sys_tmp);
@@ -1083,8 +1156,7 @@ fn record_mixed(
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
 
-    let mic_tmp = output_path.with_extension("mic_tmp.wav");
-    let sys_tmp = output_path.with_extension("sys_tmp.wav");
+    let (mic_tmp, sys_tmp) = mixed_leg_paths(&output_path);
 
     let (mic_stop_tx, mic_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
     let (sys_stop_tx, sys_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
@@ -1128,12 +1200,7 @@ fn record_mixed(
         return Err(e);
     }
 
-    let mix = ffmpeg_mix(
-        &mic_tmp,
-        &sys_tmp,
-        &output_path,
-        &build_mix_filter_resync(echo_cancel),
-    );
+    let mix = mix_legs(&mic_tmp, &sys_tmp, &output_path, echo_cancel);
     cleanup();
     mix
 }
@@ -1512,6 +1579,11 @@ fn monitor_cpal(
     let stream = build_meter_input_stream(&device, &stream_config, sample_format, level_cb)?;
     stream.play().map_err(|e| e.to_string())?;
     let _ = stop_rx.recv();
+    // Pause first, as stop_and_finalize does: dropping alone left the
+    // microphone open on macOS with cpal 0.15.
+    if let Err(e) = stream.pause() {
+        tracing::warn!("could not pause the level-test stream before closing it: {e}");
+    }
     drop(stream);
     level.store(0.0_f32.to_bits(), Ordering::Relaxed);
     Ok(())
@@ -1522,6 +1594,61 @@ fn monitor_cpal(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A capture stream whose backend never frees the data callback, as cpal 0.15
+    /// did on macOS for a device opened by name: the callback's copy of the
+    /// writer outlives the stream.
+    #[cfg(not(target_os = "linux"))]
+    struct LeakingStream {
+        paused: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    impl StreamTrait for LeakingStream {
+        fn play(&self) -> Result<(), cpal::PlayStreamError> {
+            Ok(())
+        }
+        fn pause(&self) -> Result<(), cpal::PauseStreamError> {
+            self.paused.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    // Stopping a recording on macOS failed with "writer Arc still has multiple
+    // owners", lost the meeting and left the microphone recording, because the
+    // stream's callback, and with it a copy of the writer, was never freed.
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn stop_closes_the_wav_although_the_backend_keeps_the_callback() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mic.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let writer: WavWriterHandle = Arc::new(Mutex::new(Some(
+            hound::WavWriter::create(&path, spec).unwrap(),
+        )));
+        let callback = Arc::clone(&writer);
+        append_samples(&callback, &[0.25_f32; 160]);
+
+        let paused = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stream = LeakingStream {
+            paused: Arc::clone(&paused),
+        };
+        stop_and_finalize(stream, writer).expect("stop must close the WAV");
+        assert!(
+            paused.load(Ordering::SeqCst),
+            "stop must pause the stream, so the device stops capturing"
+        );
+
+        // The callback the backend still runs must not write past the end.
+        append_samples(&callback, &[0.5_f32; 160]);
+        let reader = hound::WavReader::open(&path).expect("the closed WAV must be readable");
+        assert_eq!(reader.len(), 160);
+    }
 
     fn mic_spec() -> CaptureSpec {
         CaptureSpec {
@@ -1555,6 +1682,15 @@ mod tests {
                 "mic-only must not resolve a system leg"
             );
         }
+    }
+
+    /// The recording line showed the English "System audio" in the Russian UI.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_system_leg_has_no_label_so_the_gui_names_it() {
+        let resolved = resolve_devices(&system_spec()).unwrap();
+        assert_eq!(resolved.devices.system.as_deref(), Some(""));
+        assert_eq!(resolved.devices.mic, None);
     }
 
     #[test]
@@ -1729,7 +1865,16 @@ Source #2
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         cap.stop_session("s1").await.unwrap();
 
-        assert!(std::fs::metadata(&path).unwrap().len() > 44);
+        let len = std::fs::metadata(&path).unwrap().len();
+        assert!(len > 44);
+        // The default mic is opened by name, the path where cpal 0.15 on macOS
+        // kept capturing after the stop.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().len(),
+            len,
+            "the WAV grew after the stop, so the microphone is still capturing"
+        );
     }
 
     #[tokio::test]

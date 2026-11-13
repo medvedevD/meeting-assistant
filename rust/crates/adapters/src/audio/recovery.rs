@@ -12,6 +12,11 @@
 //! `meetings` row so the recording is listable and transcribable. The pass is
 //! idempotent.
 //!
+//! A mixed ("Both") recording captures each source to its own leg
+//! (`recording.mic_tmp.wav`, `recording.sys_tmp.wav`) and mixes them into
+//! `recording.wav` only at stop. A failed stop or a dead core leaves the legs
+//! and no `recording.wav`; the pass mixes them the way the stop would have.
+//!
 //! ## WAV layout — parsed, never assumed
 //! The plan warns against assuming a 44-byte header. Verified against the
 //! vendored `hound` 3.5.1 (the exact version `cpal_capture` writes with):
@@ -276,12 +281,130 @@ pub struct RecoveryReport {
     pub wav_already_valid: usize,
     pub wav_failed: usize,
     pub rows_recreated: usize,
+    /// Mixed recordings whose two left-over legs were mixed into `recording.wav`.
+    pub legs_mixed: usize,
+    /// Mixed recordings whose legs could not be mixed, so one leg became
+    /// `recording.wav`.
+    pub legs_kept_one: usize,
+    /// Mixed recordings whose legs held no usable audio.
+    pub legs_failed: usize,
+}
+
+/// Mixes the mic and system legs (first two paths) of a mixed recording into
+/// the third path. Production passes the capture adapter's ffmpeg mix.
+pub(crate) type LegMixer = fn(&Path, &Path, &Path) -> Result<(), String>;
+
+/// The mix `record_mixed` runs at stop. Echo cancellation is off: whether the
+/// user had it on is not recorded on disk, and a plain mix loses nothing.
+fn ffmpeg_leg_mixer(mic: &Path, sys: &Path, out: &Path) -> Result<(), String> {
+    super::cpal_capture::mix_legs(mic, sys, out, false)
+}
+
+/// What [`recover_mixed_legs`] made of a meeting dir without `recording.wav`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LegsRecovery {
+    /// Neither leg is there: not a mixed recording.
+    NoLegs,
+    /// Both legs mixed into `recording.wav`; the legs are deleted.
+    Mixed,
+    /// The mix failed or one leg was unusable, so the longer usable leg was
+    /// renamed to `recording.wav`. The other leg is left on disk.
+    KeptOne { reason: String },
+    /// No leg holds audio; nothing changed on disk.
+    Failed(String),
+}
+
+/// Make a leg a valid WAV and return its duration in seconds, or why it holds
+/// no usable audio.
+fn usable_leg(path: &Path) -> Result<f64, String> {
+    let frames = reconstruct_wav(path)?.frames();
+    if frames == 0 {
+        return Err("no audio".to_string());
+    }
+    let rate = hound::WavReader::open(path)
+        .map_err(|e| e.to_string())?
+        .spec()
+        .sample_rate;
+    Ok(frames as f64 / f64::from(rate.max(1)))
+}
+
+/// Recover a mixed ("Both") recording whose stop or core failed between
+/// capture and mix, leaving `recording.mic_tmp.wav` and
+/// `recording.sys_tmp.wav` but no `recording.wav`.
+///
+/// Both legs are made valid WAVs (a crash leaves their headers unfinalized),
+/// then mixed into a temp file that is renamed to `recording.wav` only once
+/// complete, so a crash during the mix leaves the legs to retry on the next
+/// start. If the mix fails, or one leg holds no audio, the longer usable leg
+/// becomes `recording.wav` and the other stays on disk, so no audio is deleted
+/// that did not make it into the recording.
+fn recover_mixed_legs(audio_path: &Path, mix: LegMixer) -> LegsRecovery {
+    let (mic, sys) = super::cpal_capture::mixed_leg_paths(audio_path);
+    let (has_mic, has_sys) = (mic.is_file(), sys.is_file());
+    if !has_mic && !has_sys {
+        return LegsRecovery::NoLegs;
+    }
+
+    let mic_len = if has_mic {
+        usable_leg(&mic)
+    } else {
+        Err("missing".to_string())
+    };
+    let sys_len = if has_sys {
+        usable_leg(&sys)
+    } else {
+        Err("missing".to_string())
+    };
+
+    let reason = match (&mic_len, &sys_len) {
+        (Ok(_), Ok(_)) => {
+            let mix_tmp = audio_path.with_extension(super::cpal_capture::MIX_TMP_EXT);
+            let mixed = mix(&mic, &sys, &mix_tmp)
+                .and_then(|()| std::fs::rename(&mix_tmp, audio_path).map_err(|e| e.to_string()));
+            match mixed {
+                Ok(()) => {
+                    let _ = std::fs::remove_file(&mic);
+                    let _ = std::fs::remove_file(&sys);
+                    return LegsRecovery::Mixed;
+                }
+                Err(e) => {
+                    let _ = std::fs::remove_file(&mix_tmp);
+                    format!("mix failed: {e}")
+                }
+            }
+        }
+        (Err(e), Ok(_)) => format!("mic leg unusable: {e}"),
+        (Ok(_), Err(e)) => format!("system leg unusable: {e}"),
+        (Err(m), Err(s)) => {
+            return LegsRecovery::Failed(format!("mic leg: {m}; system leg: {s}"));
+        }
+    };
+
+    let keep = match (mic_len, sys_len) {
+        (Ok(m), Ok(s)) if s > m => &sys,
+        (Ok(_), _) => &mic,
+        _ => &sys,
+    };
+    match std::fs::rename(keep, audio_path) {
+        Ok(()) => LegsRecovery::KeptOne { reason },
+        Err(e) => LegsRecovery::Failed(format!("{reason}; cannot keep {}: {e}", keep.display())),
+    }
 }
 
 /// Startup recovery pass. Scans `meetings_dir` for `*/recording.wav`, makes
-/// each WAV valid, and ensures a `meetings` row exists for it. Best-effort:
-/// per-entry failures are logged and never abort core startup. Idempotent.
+/// each WAV valid, and ensures a `meetings` row exists for it. A mixed
+/// recording that never reached its mix is first rebuilt from its two legs
+/// (see [`recover_mixed_legs`]). Best-effort: per-entry failures are logged
+/// and never abort core startup. Idempotent.
 pub async fn run_recovery(meetings_dir: &Path, repo: &dyn MeetingRepo) -> RecoveryReport {
+    run_recovery_with(meetings_dir, repo, ffmpeg_leg_mixer).await
+}
+
+async fn run_recovery_with(
+    meetings_dir: &Path,
+    repo: &dyn MeetingRepo,
+    mix: LegMixer,
+) -> RecoveryReport {
     let mut report = RecoveryReport::default();
 
     let entries = match std::fs::read_dir(meetings_dir) {
@@ -302,7 +425,31 @@ pub async fn run_recovery(meetings_dir: &Path, repo: &dyn MeetingRepo) -> Recove
         }
         let audio_path = dir.join("recording.wav");
         if !audio_path.is_file() {
-            continue;
+            match recover_mixed_legs(&audio_path, mix) {
+                LegsRecovery::NoLegs => continue,
+                LegsRecovery::Mixed => {
+                    report.legs_mixed += 1;
+                    tracing::info!(
+                        "recovery: mixed the left-over legs into {}",
+                        audio_path.display()
+                    );
+                }
+                LegsRecovery::KeptOne { reason } => {
+                    report.legs_kept_one += 1;
+                    tracing::warn!(
+                        "recovery: kept one leg as {} ({reason})",
+                        audio_path.display()
+                    );
+                }
+                LegsRecovery::Failed(e) => {
+                    report.legs_failed += 1;
+                    tracing::warn!(
+                        "recovery: cannot rebuild {} from its legs: {e}",
+                        audio_path.display()
+                    );
+                    continue;
+                }
+            }
         }
         report.scanned += 1;
 
@@ -348,14 +495,18 @@ pub async fn run_recovery(meetings_dir: &Path, repo: &dyn MeetingRepo) -> Recove
         }
     }
 
-    if report.scanned > 0 {
+    if report.scanned > 0 || report.legs_failed > 0 {
         tracing::info!(
-            "recovery: scanned={} reconstructed={} already_valid={} failed={} rows_recreated={}",
+            "recovery: scanned={} reconstructed={} already_valid={} failed={} rows_recreated={} \
+             legs_mixed={} legs_kept_one={} legs_failed={}",
             report.scanned,
             report.wav_reconstructed,
             report.wav_already_valid,
             report.wav_failed,
             report.rows_recreated,
+            report.legs_mixed,
+            report.legs_kept_one,
+            report.legs_failed,
         );
     }
     report
@@ -694,6 +845,195 @@ mod tests {
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].created_at, 1_778_423_400, "created_at from slug");
         assert_eq!(all[0].name, "2026-05-10 14:30");
+    }
+
+    // ── Left-over legs of a mixed recording ─────────────────────────────────
+
+    fn legs(dir: &Path) -> (PathBuf, PathBuf) {
+        crate::audio::cpal_capture::mixed_leg_paths(&dir.join("recording.wav"))
+    }
+
+    /// Stands in for ffmpeg: checks the legs it gets are already valid WAVs
+    /// (a crash leaves their headers unfinalized), then "mixes" by copying the
+    /// system leg, so the result is told apart from the mic leg by length.
+    fn copy_system_leg(mic: &Path, sys: &Path, out: &Path) -> Result<(), String> {
+        for leg in [mic, sys] {
+            let frames = hound::WavReader::open(leg).unwrap().duration();
+            assert!(
+                frames > 0,
+                "{} handed to the mix unfinalized",
+                leg.display()
+            );
+        }
+        std::fs::copy(sys, out)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    fn failing_mix(_: &Path, _: &Path, _: &Path) -> Result<(), String> {
+        Err("ffmpeg exited with 1".to_string())
+    }
+
+    fn unreachable_mix(_: &Path, _: &Path, _: &Path) -> Result<(), String> {
+        panic!("a single usable leg must not be mixed")
+    }
+
+    #[tokio::test]
+    async fn run_recovery_mixes_left_over_legs_and_recreates_the_row() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = SqliteMeetingRepo(Db::open_in_memory().unwrap());
+
+        // A stop that failed (or a core that died) before the mix ran.
+        let dir = slug_dir(root.path(), "2026-11-12_10-05_cccccccc");
+        let (mic, sys) = legs(&dir);
+        write_unfinalized(&mic, 1, 300);
+        write_unfinalized(&sys, 2, 500);
+
+        let r1 = run_recovery_with(root.path(), &repo, copy_system_leg).await;
+        assert_eq!(r1.legs_mixed, 1);
+        assert_eq!(r1.scanned, 1);
+        assert_eq!(r1.rows_recreated, 1);
+
+        let audio = dir.join("recording.wav");
+        assert_eq!(read_back(&audio).0, 500, "recording.wav is the mix");
+        assert!(!mic.exists() && !sys.exists(), "mixed legs are removed");
+        assert!(!audio.with_extension("mix_tmp.wav").exists());
+
+        let all = repo.list_all().await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].audio_path, audio);
+        assert_eq!(all[0].name, "2026-11-12 10:05");
+
+        // Second start: an ordinary, valid recording.
+        let r2 = run_recovery_with(root.path(), &repo, unreachable_mix).await;
+        assert_eq!(r2.legs_mixed, 0);
+        assert_eq!(r2.wav_already_valid, 1);
+        assert_eq!(r2.rows_recreated, 0);
+        assert_eq!(repo.list_all().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn run_recovery_keeps_the_row_saved_at_start_for_mixed_legs() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = SqliteMeetingRepo(Db::open_in_memory().unwrap());
+
+        let dir = slug_dir(root.path(), "2026-11-12_10-05_dddddddd");
+        let (mic, sys) = legs(&dir);
+        write_unfinalized(&mic, 1, 100);
+        write_unfinalized(&sys, 2, 100);
+        let audio = dir.join("recording.wav");
+        let started = Meeting {
+            id: "row-d".to_string(),
+            name: "Планёрка".to_string(),
+            meeting_dir: dir.clone(),
+            audio_path: audio.clone(),
+            transcript_path: None,
+            protocol_path: None,
+            transcript_text: None,
+            protocol_text: None,
+            protocol_usage: None,
+            created_at: 1,
+        };
+        repo.save(&started).await.unwrap();
+
+        let r = run_recovery_with(root.path(), &repo, copy_system_leg).await;
+        assert_eq!(r.legs_mixed, 1);
+        assert_eq!(r.rows_recreated, 0);
+        let all = repo.list_all().await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].name, "Планёрка");
+        assert!(audio.is_file());
+    }
+
+    #[tokio::test]
+    async fn run_recovery_keeps_the_longer_leg_when_the_mix_fails() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = SqliteMeetingRepo(Db::open_in_memory().unwrap());
+
+        let dir = slug_dir(root.path(), "2026-11-12_10-05_eeeeeeee");
+        let (mic, sys) = legs(&dir);
+        write_unfinalized(&mic, 1, 4_800);
+        write_unfinalized(&sys, 2, 1_200);
+
+        let r = run_recovery_with(root.path(), &repo, failing_mix).await;
+        assert_eq!(r.legs_kept_one, 1);
+        assert_eq!(r.rows_recreated, 1);
+
+        let audio = dir.join("recording.wav");
+        assert_eq!(read_back(&audio), (4_800, 48_000, 4_800), "the mic leg");
+        assert!(!mic.exists());
+        assert_eq!(read_back(&sys).0, 1_200, "the other leg stays on disk");
+        assert!(!audio.with_extension("mix_tmp.wav").exists());
+    }
+
+    #[tokio::test]
+    async fn run_recovery_keeps_the_only_usable_leg_without_mixing() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = SqliteMeetingRepo(Db::open_in_memory().unwrap());
+
+        // The mic leg was created but the stream died before a single sample.
+        let dir = slug_dir(root.path(), "2026-11-12_10-05_ffffffff");
+        let (mic, sys) = legs(&dir);
+        write_unfinalized(&mic, 1, 0);
+        write_unfinalized(&sys, 2, 700);
+
+        let r = run_recovery_with(root.path(), &repo, unreachable_mix).await;
+        assert_eq!(r.legs_kept_one, 1);
+        assert_eq!(read_back(&dir.join("recording.wav")).0, 700);
+        assert_eq!(repo.list_all().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn run_recovery_leaves_legs_without_audio_untouched() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = SqliteMeetingRepo(Db::open_in_memory().unwrap());
+
+        let dir = slug_dir(root.path(), "2026-11-12_10-05_00000000");
+        let (mic, sys) = legs(&dir);
+        std::fs::write(&mic, b"RIFF").unwrap();
+        write_unfinalized(&sys, 2, 0);
+
+        let r = run_recovery_with(root.path(), &repo, unreachable_mix).await;
+        assert_eq!(r.legs_failed, 1);
+        assert_eq!(r.scanned, 0);
+        assert!(mic.exists() && sys.exists());
+        assert!(!dir.join("recording.wav").exists());
+        assert!(repo.list_all().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_recovery_skips_a_dir_without_recording_or_legs() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = SqliteMeetingRepo(Db::open_in_memory().unwrap());
+        slug_dir(root.path(), "2026-11-12_10-05_11111111");
+
+        let r = run_recovery_with(root.path(), &repo, unreachable_mix).await;
+        assert_eq!(r, RecoveryReport::default());
+    }
+
+    /// The real mix, through the bundled-or-PATH ffmpeg `record_mixed` uses.
+    #[tokio::test]
+    #[ignore = "needs ffmpeg on PATH"]
+    async fn run_recovery_mixes_left_over_legs_with_ffmpeg() {
+        let root = tempfile::tempdir().unwrap();
+        let repo = SqliteMeetingRepo(Db::open_in_memory().unwrap());
+
+        let dir = slug_dir(root.path(), "2026-11-12_10-05_22222222");
+        let (mic, sys) = legs(&dir);
+        write_unfinalized(&mic, 1, 48_000);
+        write_unfinalized(&sys, 2, 96_000);
+
+        let r = run_recovery(root.path(), &repo).await;
+        assert_eq!(r.legs_mixed, 1, "{r:?}");
+        assert_eq!(r.rows_recreated, 1);
+
+        let wav = hound::WavReader::open(dir.join("recording.wav")).unwrap();
+        let secs = f64::from(wav.duration()) / f64::from(wav.spec().sample_rate);
+        assert!(
+            (secs - 2.0).abs() < 0.1,
+            "mix lasts as long as the longer leg: {secs}s"
+        );
+        assert!(!mic.exists() && !sys.exists());
     }
 
     #[tokio::test]
