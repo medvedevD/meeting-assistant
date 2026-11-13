@@ -33,12 +33,12 @@ brew install --cask meeting-assistant
 ```
 
 homebrew-cask policy does **not** govern third-party taps, so the cask keeps
-installing past the central-tap sunset. The cask's `postflight` strips
+installing past the central-tap sunset. The cask's `postflight_steps` strip
 `com.apple.quarantine`, so on a clean machine the app **launches without the
 Gatekeeper wall** — no "Open Anyway" detour (Gatekeeper's launch check only
 fires on quarantined files; removing the bit removes the check). Caveats: (1)
-Homebrew 6+ makes the user `brew trust` the tap once, because the postflight
-runs a command; (2) the app is still un-notarized, so this is lower-trust and
+Homebrew 6+ makes the user `brew trust` the tap once, as it does for every
+third-party tap; (2) the app is still un-notarized, so this is lower-trust and
 not a permanent answer; (3) ad-hoc signing still resets the Screen-Recording TCC
 grant on every update. The self-hosted tap buys time; the real fix below is
 still required.

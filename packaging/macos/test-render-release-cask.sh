@@ -27,8 +27,15 @@ grep -Fq 'version "0.1.0-alpha.test"' "$OUT"
 grep -Fq 'url "https://github.com/example/meeting-assistant/releases/download/v0.1.0-alpha.test/MeetingAssistant-0.1.0.dmg",' "$OUT"
 grep -Fq "sha256 \"$EXPECTED_SHA\"" "$OUT"
 grep -Fq 'verified: "github.com/example/meeting-assistant/"' "$OUT"
-# the entire point of the free channel: strip quarantine on install.
-grep -Fq 'args: ["-dr", "com.apple.quarantine", "#{appdir}/MeetingAssistant.app"]' "$OUT"
+# the entire point of the free channel: strip quarantine on install, via the
+# declarative postflight_steps (current `brew style` rejects legacy postflight).
+grep -Fq 'postflight_steps do' "$OUT"
+grep -Fq 'run "/usr/bin/xattr",' "$OUT"
+grep -Fq 'args: ["-dr", "com.apple.quarantine", "{{appdir}}/MeetingAssistant.app"]' "$OUT"
+if grep -Eq '^[[:space:]]*postflight do' "$OUT"; then
+    echo "Error: rendered cask still uses the legacy postflight block." >&2
+    exit 1
+fi
 grep -Fq 'uninstall quit: "com.meeting-assistant.app"' "$OUT"
 
 # Ruby syntax check (a cask is Ruby).

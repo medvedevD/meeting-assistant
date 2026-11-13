@@ -232,6 +232,6 @@ fi
 echo
 echo "✓ macOS packaging complete."
 echo "  NOTE: spctl rejects this (ad-hoc, un-notarized) — expected. The"
-echo "  Homebrew Cask's postflight strips com.apple.quarantine so it launches"
+echo "  Homebrew Cask's postflight_steps strip com.apple.quarantine so it launches"
 echo "  on a clean Mac. Sunset risk + the durable fix (Developer ID + notarize):"
 echo "  packaging/macos/HOMEBREW-SUNSET.md"
