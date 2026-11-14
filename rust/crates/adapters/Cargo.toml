@@ -46,10 +46,13 @@ getrandom = "0.2"
 whisper-rs = { version = "0.16", features = ["tracing_backend"] }
 
 # macOS system-audio capture via ScreenCaptureKit (audio-only; macOS 13.0 floor).
-# QtMultimedia/cpal cannot expose a macOS loopback device — see section-05.
+# QtMultimedia/cpal cannot expose a macOS loopback device.
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = { version = "=2.1.0", features = ["macos_13_0"] }
 keyring = { version = "3", features = ["apple-native"] }
+# Asks the keychain whether a key exists without reading it (no access prompt).
+# The major keyring's apple-native backend uses, so no second copy is built.
+security-framework = "3"
 # Metal is on by default for macOS: it ships with the OS (no runtime install)
 # and needs no extra notarization/signing surface. This is the "cheapest win".
 whisper-rs = { version = "0.16", features = ["metal", "tracing_backend"] }

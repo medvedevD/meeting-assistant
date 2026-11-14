@@ -25,7 +25,7 @@ The previous run is kept as `…log.prev`. Grab this on any failure:
 ## Install and open
 
 Follow [`docs/INSTALL.md`](../docs/INSTALL.md). On macOS, do not run the app directly
-from inside the DMG; see also [`macos/HOMEBREW-SUNSET.md`](macos/HOMEBREW-SUNSET.md). On
+from inside the DMG; see also "Signing and distribution" in [`README.md`](README.md). On
 Windows, see [`windows/SMARTSCREEN.md`](windows/SMARTSCREEN.md). On Linux, if the
 AppImage fails to launch, run it from a terminal to see stderr.
 
@@ -35,6 +35,11 @@ AppImage fails to launch, run it from a terminal to see stderr.
 - [ ] The sidecar reaches Ready, with no blocking "incompatible" or "core failed" dialog.
 - [ ] The OS microphone prompt appears and granting it works. On macOS, also check Screen
       Recording if system audio is used.
+- [ ] macOS, over an earlier build: the sidecar reaches Ready without waiting for a keychain
+      prompt. A recording with system audio fails with the permission dialog; "Reset
+      permission" there, then a new start, brings up the macOS prompt, and after granting
+      and reopening, the recording starts. Moving the app out of the list and back is not
+      enough.
 - [ ] Start a recording. The timer runs and the status line names the real device.
 - [ ] Stop. The meeting appears in the list.
 - [ ] Transcription runs to completion. On Windows or Linux, use a CPU without AVX-512

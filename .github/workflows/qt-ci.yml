@@ -1,6 +1,6 @@
 name: Qt CI
 
-# Section-08 gate for the Qt migration: both binaries must build and the
+# Both binaries must build and the
 # sidecar-contract, recovery and offscreen-Qt-smoke tests must pass on all
 # three OSes, and the IPC protocol version must stay single-source-of-truth.
 # This is what gates the ship.
@@ -239,7 +239,7 @@ jobs:
         shell: bash
         run: bash .github/scripts/check-cpu-baseline.sh "${{ matrix.sidecar }}"
 
-      # ── Rust tests: recovery pass (section-06) + sidecar contract (02) ─────
+      # ── Rust tests: recovery pass + sidecar contract ───────────────────────
       - name: Recovery-pass tests
         shell: bash
         run: cargo test --release --manifest-path rust/Cargo.toml -p meeting-adapters recovery

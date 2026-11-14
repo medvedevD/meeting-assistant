@@ -335,7 +335,9 @@ ColumnLayout {
             out.push({ "type": "h2", "text": qsTr("Темы") })
             for (var t = 0; t < topics.length; ++t) {
                 var topic = topics[t]
-                out.push({ "type": "h3", "text": topic.title || "" })
+                // A plain list of topics comes as one untitled topic.
+                if (topic.title)
+                    out.push({ "type": "h3", "text": topic.title })
                 if (topic.bullets && topic.bullets.length > 0)
                     out.push({ "type": "ul", "items": topic.bullets })
             }

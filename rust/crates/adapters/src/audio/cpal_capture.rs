@@ -2023,7 +2023,7 @@ Source #2
         assert_eq!(resolve_ffmpeg_in(dir.path()), bundled.into_os_string());
     }
 
-    // ── 60-min mic↔system clock-drift spike (section-05) ────────────────────
+    // ── 60-min mic↔system clock-drift spike ─────────────────────────────────
     //
     // Captures macOS system audio (ScreenCaptureKit) and the mic (cpal)
     // simultaneously, then measures how far the two independent audio clocks

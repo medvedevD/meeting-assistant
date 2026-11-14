@@ -1,9 +1,9 @@
-// Offscreen Qt boot smoke (Qt-migration section-08).
+// Offscreen Qt boot smoke.
 //
 // Drives the *real* GUI controller classes (SidecarManager + ApiClient — the
 // exact code main.cpp wires) against a *real* `meeting-server` binary, under
 // `QT_QPA_PLATFORM=offscreen` with a QGuiApplication so the full GUI Qt stack
-// is exercised headlessly. It asserts the section-02/03 client contract:
+// is exercised headlessly. It asserts the GUI-sidecar client contract:
 //
 //   1. spawn → handshake parse → version gate → /health gate → Ready, and an
 //      authenticated GET /api/v1/meetings round-trips (handshake+health+fetch);

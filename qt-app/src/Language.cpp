@@ -67,8 +67,14 @@ bool Language::restartRequired() const {
 void Language::apply() {
     QLocale::setDefault(localeFor(m_active, m_systemLanguages));
 
-    if (m_active == kRussian)
-        return; // the source strings are already Russian
+    if (m_active == kRussian) {
+        // The app's strings are already Russian, but Qt's own are English: the
+        // macOS application menu said "Quit Meeting Assistant" in a Russian run.
+        m_qtTranslator = std::make_unique<QTranslator>();
+        if (m_qtTranslator->load(QStringLiteral(":/i18n/qtbase_ru.qm")))
+            QCoreApplication::installTranslator(m_qtTranslator.get());
+        return;
+    }
 
     m_translator = std::make_unique<QTranslator>();
     if (m_translator->load(QLatin1String(kTranslationFile)))

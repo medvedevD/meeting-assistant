@@ -88,7 +88,7 @@ impl TemplateNotice {
 /// [`crate::SettingsService`], this lives off [`crate::AppState`] so the routes
 /// carry their own state; the composition layer wires a concrete implementation
 /// over the [`meeting_core::ports::TemplateLoader`] and the settings store
-/// (needed to clear a dangling `default_template` on delete — plan decision #7).
+/// (needed to clear a dangling `default_template` on delete).
 #[async_trait]
 pub trait TemplateService: Send + Sync {
     /// Every template with its body.

@@ -361,13 +361,13 @@ jobs:
 
           Homebrew strips macOS quarantine, so the app opens without the Gatekeeper "cannot verify" wall. With the plain DMG download, follow the bundled guide for the one-time approval. Do **not** run MeetingAssistant.app directly from inside the DMG — install it first.
 
-          **After an update:** recording system audio needs the Screen Recording permission (System Settings → Privacy & Security → Screen & System Audio Recording). This alpha is ad-hoc signed, so macOS keeps that permission for the previous build: the switch shows on, but the recording fails to start with a permission error. If Meeting Assistant is already on in that list, remove it with the − button and add it again.
+          **After an update:** recording system audio needs the Screen Recording permission (System Settings → Privacy & Security → Screen & System Audio Recording). This alpha is ad-hoc signed, so macOS keeps that permission for the previous build: the switch shows on, but the recording fails to start with a permission error. Removing the app from that list and adding it back does not help. Instead, press **Reset permission** in the app's permission dialog (or run \`tccutil reset ScreenCapture com.meeting-assistant.app\` in Terminal), start the recording again, allow access when macOS asks, and let macOS reopen the app. For the same reason, the first minutes after an update may bring up a keychain prompt for each saved API key: choose **Always Allow**.
 
           ## Other platforms
 
           Windows and Linux installers are attached below. They need a CPU with AVX2: Intel Haswell (2013) or AMD Excavator (2015) and later. This is an unsigned / ad-hoc-signed alpha for cross-OS self-testing; Windows may show SmartScreen. Protocol generation needs your own API key in Settings.
 
-          The durable macOS public-distribution fix remains Developer ID signing + notarization/stapling (see packaging/macos/HOMEBREW-SUNSET.md).
+          The durable macOS public-distribution fix remains Developer ID signing + notarization/stapling (see "Signing and distribution" in packaging/README.md).
           EOF
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \

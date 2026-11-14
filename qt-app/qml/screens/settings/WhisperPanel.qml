@@ -364,7 +364,7 @@ ScrollView {
                 Layout.fillWidth: true
                 Layout.minimumWidth: 0
                 text: panel.modelsDirDraft
-                placeholderText: "/home/dmitry/.local/share/meeting-assistant/models"
+                placeholderText: panel.modelsDir()
                 font.family: Theme.fontMono
                 font.pixelSize: Theme.fsSmall
                 onTextChanged: panel.modelsDirDraft = text

@@ -141,6 +141,10 @@ pub struct KeyringSecretStore {
     fallback_path: PathBuf,
     vault_path: PathBuf,
     inner: Mutex<Inner>,
+    /// Keys this process read from or wrote to the OS keyring. After an update
+    /// of an ad-hoc signed build, every macOS keychain read can stop for a
+    /// prompt, so each key is read from the keyring at most once per run.
+    keyring_cache: Mutex<BTreeMap<String, String>>,
 }
 
 impl KeyringSecretStore {
@@ -177,6 +181,7 @@ impl KeyringSecretStore {
             fallback_path,
             vault_path,
             inner: Mutex::new(inner),
+            keyring_cache: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -218,12 +223,54 @@ impl KeyringSecretStore {
     /// the UI's `has_key` always reflects the real, manageable state.
     pub fn get(&self, provider: &str) -> Option<String> {
         let stored = match &*self.inner.lock().unwrap() {
-            Inner::Keyring => keyring_get(provider),
+            Inner::Keyring => self.keyring_get_cached(provider),
             Inner::Plaintext(m) => m.get(provider).cloned(),
             Inner::VaultLocked(_) => None,
             Inner::VaultUnlocked { secrets, .. } => secrets.get(provider).cloned(),
         };
         stored.filter(|s| !s.is_empty())
+    }
+
+    /// Whether a key is stored, without reading it from the OS keyring: on
+    /// macOS that read can stop for a keychain prompt (see `keyring_cache`), and
+    /// the settings screen asks for every provider each time it loads.
+    pub fn has_stored(&self, provider: &str) -> bool {
+        match &*self.inner.lock().unwrap() {
+            Inner::Keyring => {
+                self.keyring_cache.lock().unwrap().contains_key(provider)
+                    || keyring_exists(provider)
+                        .unwrap_or_else(|| self.keyring_get_cached(provider).is_some())
+            }
+            Inner::Plaintext(m) => m.get(provider).is_some_and(|s| !s.is_empty()),
+            Inner::VaultLocked(_) => false,
+            Inner::VaultUnlocked { secrets, .. } => {
+                secrets.get(provider).is_some_and(|s| !s.is_empty())
+            }
+        }
+    }
+
+    /// The stored key if reading it needs no OS keyring access: from the file
+    /// or vault, or a keyring key this process has already read or written.
+    pub fn known(&self, provider: &str) -> Option<String> {
+        let known = match &*self.inner.lock().unwrap() {
+            Inner::Keyring => self.keyring_cache.lock().unwrap().get(provider).cloned(),
+            Inner::Plaintext(m) => m.get(provider).cloned(),
+            Inner::VaultLocked(_) => None,
+            Inner::VaultUnlocked { secrets, .. } => secrets.get(provider).cloned(),
+        };
+        known.filter(|s| !s.is_empty())
+    }
+
+    fn keyring_get_cached(&self, provider: &str) -> Option<String> {
+        if let Some(key) = self.keyring_cache.lock().unwrap().get(provider) {
+            return Some(key.clone());
+        }
+        let read = keyring_get(provider).filter(|s| !s.is_empty())?;
+        self.keyring_cache
+            .lock()
+            .unwrap()
+            .insert(provider.to_string(), read.clone());
+        Some(read)
     }
 
     /// Persist a key. An empty value deletes it. Fails if the vault is locked.
@@ -232,7 +279,14 @@ impl KeyringSecretStore {
             return self.delete(provider);
         }
         match &mut *self.inner.lock().unwrap() {
-            Inner::Keyring => keyring_set(provider, value).map_err(io_other),
+            Inner::Keyring => {
+                keyring_set(provider, value).map_err(io_other)?;
+                self.keyring_cache
+                    .lock()
+                    .unwrap()
+                    .insert(provider.to_string(), value.to_string());
+                Ok(())
+            }
             Inner::Plaintext(m) => {
                 m.insert(provider.to_string(), value.to_string());
                 write_fallback(&self.fallback_path, m)
@@ -251,6 +305,7 @@ impl KeyringSecretStore {
         match &mut *self.inner.lock().unwrap() {
             Inner::Keyring => {
                 keyring_delete(provider);
+                self.keyring_cache.lock().unwrap().remove(provider);
                 Ok(())
             }
             Inner::Plaintext(m) => {
@@ -374,6 +429,41 @@ fn entry_user(provider: &str) -> String {
 fn keyring_get(provider: &str) -> Option<String> {
     let entry = keyring::Entry::new(SERVICE, &entry_user(provider)).ok()?;
     entry.get_password().ok()
+}
+
+/// Whether the keychain holds `provider`'s key, asked for its attributes only.
+/// Reading the password needs the item's access list to allow this binary, and
+/// after an update of an ad-hoc signed build it does not until the user answers
+/// a prompt. The attributes are not protected that way. `None` when the lookup
+/// itself fails, so the caller falls back to reading the key.
+#[cfg(target_os = "macos")]
+fn keyring_exists(provider: &str) -> Option<bool> {
+    use security_framework::item::{ItemClass, ItemSearchOptions, Limit};
+    // errSecItemNotFound
+    const ITEM_NOT_FOUND: i32 = -25300;
+
+    let account = entry_user(provider);
+    match ItemSearchOptions::new()
+        .class(ItemClass::generic_password())
+        .service(SERVICE)
+        .account(&account)
+        .load_attributes(true)
+        .limit(Limit::Max(1))
+        .search()
+    {
+        Ok(found) => Some(!found.is_empty()),
+        Err(e) if e.code() == ITEM_NOT_FOUND => Some(false),
+        Err(e) => {
+            tracing::debug!("keychain lookup for {provider} failed: {e}");
+            None
+        }
+    }
+}
+
+/// Elsewhere a read asks nothing of the user, so the caller just reads the key.
+#[cfg(not(target_os = "macos"))]
+fn keyring_exists(_provider: &str) -> Option<bool> {
+    None
 }
 
 fn keyring_set(provider: &str, value: &str) -> Result<(), keyring::Error> {
@@ -636,6 +726,19 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    // Run by hand on a Mac with a key saved from another build of the app: this
+    // test binary is not on the item's access list, as an updated app is not.
+    // It must answer at once; a keychain prompt would hold it until answered.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "reads the real login keychain; run by hand"]
+    fn keyring_exists_asks_no_prompt() {
+        for provider in ["anthropic", "openai", "gemini", "mistral"] {
+            println!("{provider}: {:?}", keyring_exists(provider));
+        }
+        assert_eq!(keyring_exists("no-such-provider"), Some(false));
+    }
+
     fn file_store(dir: &std::path::Path) -> KeyringSecretStore {
         // Force the plaintext fallback regardless of keyring availability so the
         // test is deterministic across CI/dev machines.
@@ -643,6 +746,7 @@ mod tests {
             fallback_path: dir.join("secrets.json"),
             vault_path: dir.join("secrets.vault.json"),
             inner: Mutex::new(Inner::Plaintext(BTreeMap::new())),
+            keyring_cache: Mutex::new(BTreeMap::new()),
         }
     }
 

@@ -172,6 +172,7 @@ private slots:
     void localeKeepsTheRegionOfAMatchingSystem();
 
     void russianRunLoadsNoTranslation();
+    void russianRunTranslatesQtsOwnStrings();
     void errorsLibraryIsTranslated();
     void errorsLibraryStaysRussianWithoutATranslation();
     void pipelineLabelsComeFromTheStage_data();
@@ -342,6 +343,21 @@ void I18nTest::russianRunLoadsNoTranslation() {
     QCOMPARE(QCoreApplication::translate("errors", "Сетевая ошибка"),
              QStringLiteral("Сетевая ошибка"));
     QCOMPARE(QLocale().language(), QLocale::Russian);
+}
+
+// Qt's own strings are English. In a Russian run the macOS application menu said
+// "Quit Meeting Assistant", "Services" and "Show All".
+void I18nTest::russianRunTranslatesQtsOwnStrings() {
+    {
+        const auto language = appliedLanguage({QStringLiteral("ru-RU")});
+        QCOMPARE(QCoreApplication::translate("MAC_APPLICATION_MENU", "Quit %1"),
+                 QStringLiteral("Выйти из %1"));
+        QCOMPARE(QCoreApplication::translate("MAC_APPLICATION_MENU", "Services"),
+                 QStringLiteral("Службы"));
+    }
+    const auto english = appliedLanguage({QStringLiteral("en-US")});
+    QCOMPARE(QCoreApplication::translate("MAC_APPLICATION_MENU", "Quit %1"),
+             QStringLiteral("Quit %1"));
 }
 
 // Decision on the plan's risk: qsTr has to work in a `.pragma library` file.

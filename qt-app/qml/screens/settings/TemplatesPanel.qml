@@ -1,4 +1,4 @@
-// Templates CRUD (Phase 2 backend). List + body editor with New/Save/Rename/
+// Templates CRUD. List + body editor with New/Save/Rename/
 // Delete over REST (/api/v1/templates*). The "default template" selector writes
 // to scr.draft.default_template and is persisted by the screen's global Save.
 import QtQuick

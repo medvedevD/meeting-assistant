@@ -1,4 +1,4 @@
-# Swift runtime rpath for the macOS ScreenCaptureKit backend (section-05).
+# Swift runtime rpath for the macOS ScreenCaptureKit backend.
 #
 # `meeting-adapters` links the `screencapturekit` crate, whose Swift bridge
 # pulls in the Swift Concurrency runtime (`@rpath/libswift_Concurrency.dylib`,

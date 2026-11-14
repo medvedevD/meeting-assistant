@@ -3,8 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use meeting_adapters::settings_store::PersistedSettings;
 use meeting_adapters::{
-    build_llm, list_llm_models, probe_llm, resolve_transcription_model_path, whisper_backend,
-    JsonSettingsStore, LlmConfig, ProviderKind, SecretStatus, TranscriberPrefs, VaultState,
+    list_llm_models, probe_llm, resolve_transcription_model_path, whisper_backend,
+    JsonSettingsStore, KeyedLlm, LlmConfig, ProviderKind, SecretStatus, TranscriberPrefs,
+    VaultState,
 };
 use meeting_api::SettingsService;
 use meeting_core::CoreError;
@@ -41,12 +42,13 @@ impl AppSettingsService {
         Ok(self.store().load().llm.resolve(kind, key))
     }
 
-    /// Rebuild the active LLM from the given settings + effective key.
+    /// Rebuild the active LLM from the given settings. Its key is read when
+    /// minutes are generated (see [`KeyedLlm`]).
     fn rebuild_llm(&self, settings: &PersistedSettings) {
-        let active = settings.llm.active;
-        let key = self.handles.secrets.effective_key(active.as_str());
-        let cfg = settings.llm.resolve(active, key);
-        self.handles.llm.set(build_llm(&cfg));
+        self.handles.llm.set(Arc::new(KeyedLlm::active(
+            &settings.llm,
+            Arc::clone(&self.handles.secrets),
+        )));
     }
 
     /// Apply every hot-swappable field. `db`/`recordings` path changes are
@@ -71,8 +73,7 @@ impl AppSettingsService {
 
 /// Project the secret store's at-rest location onto the sanitized snapshot so
 /// the UI can disclose it honestly. `mechanism`/`path` are mutually exclusive:
-/// a keystore reports its mechanism, a file backend reports its path. Phase 1
-/// ships `keyring` and `plaintext`; `vault`/`locked` arrive in a later phase.
+/// a keystore reports its mechanism, a file backend reports its path.
 fn secret_storage_view(status: SecretStatus) -> Value {
     match status {
         SecretStatus::Keyring {
@@ -136,15 +137,20 @@ fn key_hint_value(stored: Option<&str>) -> Value {
     }
 }
 
-/// Build a provider view for a key-bearing provider, reading the stored key
-/// once to derive both `has_key` and the fingerprint.
+/// Build a provider view for a key-bearing provider without reading its key
+/// from the OS keyring: on macOS that read can stop for a keychain prompt per
+/// provider, and the settings load at startup. The fingerprint is shown once
+/// the key has been read for a key check or generation, or saved, this run.
 fn keyed_provider_view(
     secrets: &meeting_adapters::KeyringSecretStore,
     provider: &str,
     cfg: &meeting_adapters::settings_store::ProviderCfg,
 ) -> Value {
-    let stored = secrets.get(provider).filter(|s| !s.is_empty());
-    provider_view(cfg, stored.is_some(), key_hint_value(stored.as_deref()))
+    provider_view(
+        cfg,
+        secrets.has_stored(provider),
+        key_hint_value(secrets.known(provider).as_deref()),
+    )
 }
 
 #[async_trait]
@@ -183,8 +189,7 @@ impl SettingsService for AppSettingsService {
             },
             "llm": {
                 "active": llm.active.as_str(),
-                // One `get` per provider: derive both has_key and the fingerprint
-                // from the same read (avoids a second keyring/vault round-trip).
+                // No keyring read here: see keyed_provider_view.
                 "anthropic": keyed_provider_view(secrets, "anthropic", &llm.anthropic),
                 "openai": keyed_provider_view(secrets, "openai", &llm.openai),
                 "gemini": keyed_provider_view(secrets, "gemini", &llm.gemini),

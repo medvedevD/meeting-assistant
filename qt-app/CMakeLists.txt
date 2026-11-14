@@ -68,13 +68,14 @@ qt_add_executable(meeting-assistant-qt
     src/ApiClient.h        src/ApiClient.cpp
     src/JobPoller.h        src/JobPoller.cpp
     src/PathUtils.h
+    src/ScreenCapturePermission.h
     "${_gen_header}")
 
 # macOS: ship as MeetingAssistant.app. The Info.plist carries the
-# NSScreenCaptureUsageDescription that section-05's ScreenCaptureKit path
+# NSScreenCaptureUsageDescription that the ScreenCaptureKit path
 # requires (without it macOS kills the process with no TCC prompt).
 #
-# OFF by default so the section-03 dev workflow (run-qt.sh expects a plain
+# OFF by default so the dev workflow (run-qt.sh expects a plain
 # `meeting-assistant-qt` executable) is untouched. packaging/macos/build-app.sh
 # configures with -DMA_MACOS_APP_BUNDLE=ON for the real artefact.
 option(MA_MACOS_APP_BUNDLE "Build MeetingAssistant.app bundle (packaging)" OFF)
@@ -110,12 +111,12 @@ endif()
 
 target_include_directories(meeting-assistant-qt PRIVATE "${_gen_dir}")
 
-# SettingsStore is a QML singleton (decision #12): one shared server-settings
+# SettingsStore is a QML singleton: one shared server-settings
 # cache reachable from any screen as `SettingsStore`.
 set_source_files_properties(qml/SettingsStore.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE)
 
-# Theme is the redesign's design-token singleton (qt-redesign Phase 1):
+# Theme is the design-token singleton,
 # reachable from any screen as `Theme`.
 set_source_files_properties(qml/theme/Theme.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE)
@@ -199,7 +200,22 @@ qt_add_translations(meeting-assistant-qt
     RESOURCE_PREFIX "/i18n"
     LUPDATE_OPTIONS -locations none)
 
-# Bundled design fonts (qt-redesign): variable TTFs registered as :/fonts/*,
+# Qt's own strings (the macOS application menu, standard dialogs) are English in
+# Qt. A Russian run loads Qt's Russian translation, embedded here as
+# :/i18n/qtbase_ru.qm (Language.cpp). It comes from the Qt install's
+# qttranslations; without it those strings stay English.
+function(ma_add_qt_base_translation target)
+    set(_qm "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_TRANSLATIONS}/qtbase_ru.qm")
+    if(NOT EXISTS "${_qm}")
+        message(WARNING "No ${_qm}: Qt's own strings stay English in a Russian run")
+        return()
+    endif()
+    set_source_files_properties("${_qm}" PROPERTIES QT_RESOURCE_ALIAS "qtbase_ru.qm")
+    qt_add_resources(${target} "qt_base_translation" PREFIX "/i18n" FILES "${_qm}")
+endfunction()
+ma_add_qt_base_translation(meeting-assistant-qt)
+
+# Bundled design fonts: variable TTFs registered as :/fonts/*,
 # loaded by Theme.qml's FontLoaders. All OFL-licensed: the license must travel
 # with the fonts, so the install rules below ship every file in MA_FONT_LICENSES.
 # tests/serif_typeface loads the same MA_FONT_FILES.
@@ -251,7 +267,7 @@ if(WIN32)
     target_link_libraries(meeting-assistant-qt PRIVATE kernel32)
 endif()
 
-# ── Install rules (section-07 packaging) ─────────────────────────────────────
+# ── Install rules (packaging) ────────────────────────────────────────────────
 # Lay out the two-binary bundle so SidecarManager::locateSidecar() always finds
 # meeting-server next to the GUI (it resolves applicationDirPath()):
 #   macOS    MeetingAssistant.app/Contents/MacOS/{MeetingAssistant,meeting-server}
@@ -294,11 +310,11 @@ else() # Linux (AppImage AppDir / generic prefix)
     ma_install_licenses(share/doc/meeting-assistant/licenses)
 endif()
 
-# ── Offscreen Qt smoke test (section-08) ─────────────────────────────────────
-# OFF by default so the section-03 dev workflow and section-07 packaging build
-# only the GUI. The section-08 CI matrix configures with -DMA_BUILD_TESTS=ON
-# and runs it via ctest under QT_QPA_PLATFORM=offscreen.
-option(MA_BUILD_TESTS "Build the offscreen Qt boot smoke test (section-08)" OFF)
+# ── Qt tests ─────────────────────────────────────────────────────────────────
+# OFF by default so the dev workflow and packaging build only the GUI. CI
+# configures with -DMA_BUILD_TESTS=ON and runs them via ctest under
+# QT_QPA_PLATFORM=offscreen.
+option(MA_BUILD_TESTS "Build the Qt tests" OFF)
 if(MA_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

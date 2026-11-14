@@ -44,8 +44,8 @@ Page {
         return "idle"
     }
 
-    // Per-generation template override, seeded from the server default
-    // (decision #13). Editing it does NOT change the global default.
+    // Per-generation template override, seeded from the server default.
+    // Editing it does NOT change the global default.
     property string templateName: ""
     Connections {
         target: SettingsStore
@@ -307,7 +307,9 @@ Page {
                             Layout.fillWidth: true
                             text: scr.templateName
                             placeholderText: qsTr("По умолчанию")
-                            onEditingFinished: scr.templateName = text
+                            // On every edit: editingFinished needs Enter or a focus
+                            // change, and clicking "Generate" gives neither.
+                            onTextEdited: scr.templateName = text
                         }
 
                         MeetyButton {

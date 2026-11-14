@@ -926,8 +926,24 @@ The interface uses protocol %1, but the core supports only %2–%3.</translation
         <translation>To record system audio, macOS requires the Screen Recording permission. Despite the name, Meeting Assistant records only audio and never takes screenshots.</translation>
     </message>
     <message>
-        <source>Если Meeting Assistant уже включён в настройках, удалите его из списка кнопкой «−» и добавьте заново: после обновления macOS помнит разрешение для прежней версии приложения.</source>
-        <translation>If Meeting Assistant is already on in Settings, remove it from the list with the “−” button and add it again: after an update, macOS keeps the permission for the previous version of the app.</translation>
+        <source>Если Meeting Assistant уже включён в настройках, сбросьте разрешение: после обновления macOS помнит его для прежней версии приложения. Затем снова начните запись, разрешите доступ в запросе macOS и согласитесь перезапустить приложение.</source>
+        <translation>If Meeting Assistant is already on in Settings, reset the permission: after an update, macOS keeps it for the previous version of the app. Then start the recording again, allow access when macOS asks, and agree to reopen the app.</translation>
+    </message>
+    <message>
+        <source>Если Meeting Assistant уже включён в настройках, сбросьте разрешение командой «tccutil reset ScreenCapture com.meeting-assistant.app» в Терминале: после обновления macOS помнит его для прежней версии приложения. Затем снова начните запись и разрешите доступ в запросе macOS.</source>
+        <translation>If Meeting Assistant is already on in Settings, reset the permission with “tccutil reset ScreenCapture com.meeting-assistant.app” in Terminal: after an update, macOS keeps it for the previous version of the app. Then start the recording again and allow access when macOS asks.</translation>
+    </message>
+    <message>
+        <source>Сбросить разрешение</source>
+        <translation>Reset permission</translation>
+    </message>
+    <message>
+        <source>Разрешение сброшено. Закройте окно, начните запись снова и разрешите доступ, когда macOS спросит.</source>
+        <translation>Permission reset. Close this window, start the recording again, and allow access when macOS asks.</translation>
+    </message>
+    <message>
+        <source>Не удалось сбросить разрешение. Выполните в Терминале: tccutil reset ScreenCapture com.meeting-assistant.app</source>
+        <translation>Could not reset the permission. Run this in Terminal: tccutil reset ScreenCapture com.meeting-assistant.app</translation>
     </message>
     <message>
         <source>Отмена</source>
