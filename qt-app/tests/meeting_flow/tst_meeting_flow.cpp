@@ -64,6 +64,9 @@ public:
         return QStringLiteral("http://127.0.0.1:%1").arg(m_server.serverPort());
     }
 
+    // Answer a recording start as macOS does without Screen Recording access.
+    bool deniesScreenCapture = false;
+
     // Returns the meeting as the list route reports it, ready for shell.show*().
     QVariantMap addMeeting(const QString &id, bool hasTranscript) {
         m_meetings[id] = Meeting{id, hasTranscript, QString()};
@@ -92,6 +95,8 @@ public:
     void failJob(const QString &jobId) { m_jobs[jobId].status = QStringLiteral("failed"); }
 
     QStringList reprocessKinds() const { return m_reprocessKinds; }
+    // The template_name of each reprocess request, "" when it named none.
+    QStringList reprocessTemplates() const { return m_reprocessTemplates; }
     int hits(const QString &path) const { return m_hits.value(path); }
 
 private:
@@ -189,6 +194,13 @@ private:
                                           {QStringLiteral("recording"),
                                            QJsonObject{{QStringLiteral("source"), QStringLiteral("mixed")},
                                                        {QStringLiteral("echo_cancel"), false}}}})};
+        if (method == "POST" && path == QLatin1String("/api/v1/recordings") && deniesScreenCapture)
+            return {500, json(QJsonObject{
+                             {QStringLiteral("error"),
+                              QStringLiteral("recording error: ScreenCaptureKit error: No shareable content "
+                                             "available. Grant Screen Recording in "
+                                             "x-apple.systempreferences:com.apple.preference.security"
+                                             "?Privacy_ScreenCapture")}})};
         if (method == "POST" && path == QLatin1String("/api/v1/recordings")) {
             // What the macOS sidecar answers for a mixed recording: the mic by
             // name, and the system mix with an empty label for the GUI to name.
@@ -207,8 +219,10 @@ private:
 
         QRegularExpressionMatch match = reprocessRoute.match(path);
         if (method == "POST" && match.hasMatch()) {
-            const QString kind = QJsonDocument::fromJson(body).object().value(QStringLiteral("kind")).toString();
+            const QJsonObject request = QJsonDocument::fromJson(body).object();
+            const QString kind = request.value(QStringLiteral("kind")).toString();
             m_reprocessKinds << kind;
+            m_reprocessTemplates << request.value(QStringLiteral("template_name")).toString();
             const QString backendKind = kind == QLatin1String("protocol")
                                             ? QStringLiteral("regenerate_protocol")
                                             : QStringLiteral("reprocess_transcribe");
@@ -262,6 +276,7 @@ private:
     QStringList m_meetingOrder;
     QMap<QString, Job> m_jobs;
     QStringList m_reprocessKinds;
+    QStringList m_reprocessTemplates;
     QHash<QString, int> m_hits;
 };
 
@@ -289,8 +304,23 @@ QQuickItem *findStack(QQuickItem *root) {
 
 // One running app: the real shell in a window, talking to a fake sidecar. Members
 // are ordered so the QML goes first and the sidecar it talks to goes last.
+// Stands in for main.cpp's ScreenCapturePermission, which would run tccutil.
+class FakeScreenCapturePermission final : public QObject {
+    Q_OBJECT
+    Q_PROPERTY(bool canReset READ canReset CONSTANT)
+
+public:
+    bool canReset() const { return true; }
+    Q_INVOKABLE bool reset() {
+        ++resets;
+        return true;
+    }
+    int resets = 0;
+};
+
 struct App {
     FakeSidecar sidecar;
+    FakeScreenCapturePermission permission;
     ApiClient api;
     PathUtils pathUtils;
     QQmlEngine engine;
@@ -307,6 +337,7 @@ struct App {
         QQmlContext *ctx = engine.rootContext();
         ctx->setContextProperty(QStringLiteral("api"), &api);
         ctx->setContextProperty(QStringLiteral("pathUtils"), &pathUtils);
+        ctx->setContextProperty(QStringLiteral("screenCapturePermission"), &permission);
         ctx->setContextProperty(QStringLiteral("appPreferences"), QVariant::fromValue<QObject *>(nullptr));
 
         QQmlComponent component(&engine);
@@ -434,6 +465,8 @@ private slots:
     void everyFileOfABatchImportIsTracked();
     void finishedJobUpdatesTheSidebarFromAnyScreen();
     void recordingNamesTheSystemMixInTheInterfaceLanguage();
+    void typedTemplateIsUsedWithoutPressingEnter();
+    void permissionDialogResetsTheScreenRecordingGrant();
 };
 
 void MeetingFlowTest::initTestCase() {
@@ -591,6 +624,54 @@ void MeetingFlowTest::recordingNamesTheSystemMixInTheInterfaceLanguage() {
     QTRY_VERIFY(app.visibleTextContaining(
                     QStringLiteral("🎙 MacBook Pro Microphone   🔊 Системный звук"))
                 != nullptr);
+}
+
+// The template field took its text only on Enter or when it lost focus, and a
+// button click takes neither, so typing a template and clicking "Generate"
+// generated with the default template.
+void MeetingFlowTest::typedTemplateIsUsedWithoutPressingEnter() {
+    App app;
+    QVERIFY(app.start());
+
+    const QVariantMap meeting = app.sidecar.addMeeting(QStringLiteral("sync"), true);
+    QMetaObject::invokeMethod(app.shell, "showGenerate", Q_ARG(QVariant, meeting), Q_ARG(QVariant, false));
+    QTRY_COMPARE(app.pageName(), QStringLiteral("GenerateProtocolScreen"));
+
+    QQuickItem *field = nullptr;
+    QTRY_VERIFY((field = findVisible(app.page(), [](QQuickItem *item) {
+                     return item->property("placeholderText").toString() == QStringLiteral("По умолчанию");
+                 })) != nullptr);
+    QTest::mouseClick(app.quickWindow(), Qt::LeftButton, Qt::NoModifier,
+                      field->mapToScene(QPointF(field->width() / 2, field->height() / 2)).toPoint());
+    QTRY_VERIFY(field->hasActiveFocus());
+    for (const char c : QByteArrayLiteral("Simple minutes"))
+        QTest::keyClick(app.quickWindow(), c);
+    QCOMPARE(field->property("text").toString(), QStringLiteral("Simple minutes"));
+
+    QVERIFY(app.clickUntil(kGenerateMinutes, [&app] { return !app.sidecar.reprocessKinds().isEmpty(); }));
+    QCOMPARE(app.sidecar.reprocessTemplates(), QStringList{QStringLiteral("Simple minutes")});
+}
+
+// After an update of the ad-hoc signed build macOS keeps the Screen Recording
+// grant for the old binary. The dialog told the user to remove the app from the
+// list and add it back, which did not help in the alpha.15 smoke run; resetting
+// the grant did. The dialog now offers that reset.
+void MeetingFlowTest::permissionDialogResetsTheScreenRecordingGrant() {
+    App app;
+    app.sidecar.deniesScreenCapture = true;
+    QVERIFY(app.start());
+
+    QMetaObject::invokeMethod(app.shell, "showNewRecording");
+    QTRY_COMPARE(app.pageName(), QStringLiteral("NewRecordingScreen"));
+    QMetaObject::invokeMethod(app.page(), "start", Q_ARG(QVariant, QStringLiteral("Планёрка")));
+
+    QTRY_VERIFY(app.visibleText(QStringLiteral("Нужно разрешение macOS")) != nullptr);
+    QVERIFY(app.visibleTextContaining(QStringLiteral("кнопкой «−»")) == nullptr);
+    QVERIFY(app.clickUntil(QStringLiteral("Сбросить разрешение"),
+                           [&app] { return app.permission.resets > 0; }));
+    QCOMPARE(app.permission.resets, 1);
+    QTRY_VERIFY(app.visibleTextContaining(QStringLiteral("Разрешение сброшено.")) != nullptr);
+    QVERIFY(app.visibleText(QStringLiteral("Сбросить разрешение")) == nullptr);
 }
 
 int main(int argc, char *argv[]) {

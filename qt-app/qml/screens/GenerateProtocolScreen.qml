@@ -307,7 +307,9 @@ Page {
                             Layout.fillWidth: true
                             text: scr.templateName
                             placeholderText: qsTr("По умолчанию")
-                            onEditingFinished: scr.templateName = text
+                            // On every edit: editingFinished needs Enter or a focus
+                            // change, and clicking "Generate" gives neither.
+                            onTextEdited: scr.templateName = text
                         }
 
                         MeetyButton {

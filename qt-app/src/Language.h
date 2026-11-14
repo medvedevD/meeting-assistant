@@ -58,6 +58,8 @@ private:
 
     std::unique_ptr<QSettings> m_settings;
     std::unique_ptr<QTranslator> m_translator;
+    // Qt's own strings in Russian (application menu, standard dialogs).
+    std::unique_ptr<QTranslator> m_qtTranslator;
     QStringList m_systemLanguages;
     QString m_choice;
     QString m_active;

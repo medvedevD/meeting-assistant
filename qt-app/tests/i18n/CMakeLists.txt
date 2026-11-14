@@ -37,6 +37,7 @@ set_source_files_properties(${_i18n_qm_files} PROPERTIES
 qt_add_resources(tst_i18n "i18n_translation"
     PREFIX "/i18n"
     FILES ${_i18n_qm_files})
+ma_add_qt_base_translation(tst_i18n)
 
 add_test(NAME qt_i18n COMMAND tst_i18n)
 set_tests_properties(qt_i18n PROPERTIES

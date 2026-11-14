@@ -68,6 +68,7 @@ qt_add_executable(meeting-assistant-qt
     src/ApiClient.h        src/ApiClient.cpp
     src/JobPoller.h        src/JobPoller.cpp
     src/PathUtils.h
+    src/ScreenCapturePermission.h
     "${_gen_header}")
 
 # macOS: ship as MeetingAssistant.app. The Info.plist carries the
@@ -198,6 +199,21 @@ qt_add_translations(meeting-assistant-qt
     TS_FILES i18n/meeting-assistant_en.ts
     RESOURCE_PREFIX "/i18n"
     LUPDATE_OPTIONS -locations none)
+
+# Qt's own strings (the macOS application menu, standard dialogs) are English in
+# Qt. A Russian run loads Qt's Russian translation, embedded here as
+# :/i18n/qtbase_ru.qm (Language.cpp). It comes from the Qt install's
+# qttranslations; without it those strings stay English.
+function(ma_add_qt_base_translation target)
+    set(_qm "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_TRANSLATIONS}/qtbase_ru.qm")
+    if(NOT EXISTS "${_qm}")
+        message(WARNING "No ${_qm}: Qt's own strings stay English in a Russian run")
+        return()
+    endif()
+    set_source_files_properties("${_qm}" PROPERTIES QT_RESOURCE_ALIAS "qtbase_ru.qm")
+    qt_add_resources(${target} "qt_base_translation" PREFIX "/i18n" FILES "${_qm}")
+endfunction()
+ma_add_qt_base_translation(meeting-assistant-qt)
 
 # Bundled design fonts: variable TTFs registered as :/fonts/*,
 # loaded by Theme.qml's FontLoaders. All OFL-licensed: the license must travel

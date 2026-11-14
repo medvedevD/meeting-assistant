@@ -201,16 +201,15 @@ impl StructuredProtocol {
                 Section::Decisions => out.decisions.push(item),
                 Section::Actions => out.actions.push(action_from_text(&item)),
                 Section::OpenQuestions => out.open_questions.push(item),
-                Section::Topics => {
-                    if current_topic.is_none() {
-                        current_topic = Some(ProtocolTopic {
-                            title: item,
-                            bullets: Vec::new(),
-                        });
-                    } else if let Some(topic) = current_topic.as_mut() {
-                        topic.bullets.push(item);
-                    }
-                }
+                // Bullets with no topic subheading above them are a plain list
+                // of topics: one untitled topic holds them all.
+                Section::Topics => current_topic
+                    .get_or_insert_with(|| ProtocolTopic {
+                        title: String::new(),
+                        bullets: Vec::new(),
+                    })
+                    .bullets
+                    .push(item),
                 // Text before the first section: anything under a heading went
                 // to `current_other` above.
                 Section::None => {
@@ -776,6 +775,29 @@ Notes.";
             structured.other_sections[2].markdown,
             "| Risk | Impact |\n|------|--------|\n| Unstable stage | High |"
         );
+    }
+
+    // The "Simple minutes" templates ask for a plain list under "Key topics".
+    // Its first item became the title of a topic and the rest its bullets, so
+    // the minutes showed that item as a bold heading. A list with no topic
+    // subheadings stays a list.
+    #[test]
+    fn a_plain_topic_list_is_not_a_titled_topic() {
+        for heading in ["## Key topics", "## Ключевые темы"] {
+            let md = format!("{heading}\n- First.\n- Second.\n- Third.\n\n## Decisions\n- Ship.");
+
+            let structured = StructuredProtocol::from_markdown(&md);
+
+            assert_eq!(
+                structured.topics,
+                vec![ProtocolTopic {
+                    title: String::new(),
+                    bullets: vec!["First.".into(), "Second.".into(), "Third.".into()],
+                }],
+                "{heading}"
+            );
+            assert_eq!(structured.decisions, vec!["Ship."], "{heading}");
+        }
     }
 
     #[test]
