@@ -83,6 +83,16 @@ public:
     bool keysLocked = false;
     // What the recovery pass repaired at this start.
     QJsonArray recovered;
+    // Hold setup-status replies until releaseSetupStatus(): each one is the
+    // state at the moment it was asked, as a slow sidecar would answer.
+    bool holdSetupStatus = false;
+    int heldSetupStatus() const { return m_held.size(); }
+    void releaseSetupStatus() {
+        const auto held = m_held;
+        m_held.clear();
+        for (const Held &h : held)
+            send(h.sock, h.reply);
+    }
 
     // ── what the test reads ─────────────────────────────────────────────────
     // Each request as "METHOD /path".
@@ -101,6 +111,11 @@ private:
         int status;
         QByteArray body;
     };
+    struct Held {
+        QTcpSocket *sock;
+        Reply reply;
+    };
+    QList<Held> m_held;
     static QByteArray json(const QJsonObject &o) { return QJsonDocument(o).toJson(QJsonDocument::Compact); }
 
     QString activeProvider() const {
@@ -223,6 +238,14 @@ private:
         requests << QString::fromLatin1(requestLine.value(0)) + QLatin1Char(' ') + path;
         const Reply reply = route(requestLine.value(0), path, buffer.mid(headerEnd + 4, bodySize));
         m_buffers.remove(sock);
+        if (holdSetupStatus && path == QLatin1String("/api/v1/setup-status")) {
+            m_held.append({sock, reply});
+            return;
+        }
+        send(sock, reply);
+    }
+
+    void send(QTcpSocket *sock, const Reply &reply) {
         sock->write("HTTP/1.1 " + QByteArray::number(reply.status) + " X\r\n"
                     "Content-Type: application/json\r\n"
                     "Content-Length: " + QByteArray::number(reply.body.size()) + "\r\n"
@@ -421,6 +444,7 @@ private slots:
     void brokenSetupIsAnnouncedWithItsFix();
     void refusedMicrophoneIsAnnouncedOnlyIfItWorkedBefore();
     void closedNoticeStaysClosed();
+    void refreshAskedWhileOneIsInFlightIsNotLost();
 };
 
 void FirstRunStepsTest::initTestCase() {
@@ -716,6 +740,33 @@ void FirstRunStepsTest::closedNoticeStaysClosed() {
     QMetaObject::invokeMethod(app.setup(), "refresh");
     QTest::qWait(300);
     QVERIFY(app.noticeIds().isEmpty());
+}
+
+// After a model download two refreshes come close together: one from saving
+// the selection, one from the install finishing. The second used to be dropped
+// while the first was in flight, so the screen kept the answer from before the
+// model was selected and the step fell back to "todo". It failed on CI only, on
+// one macOS run of three.
+void FirstRunStepsTest::refreshAskedWhileOneIsInFlightIsNotLost() {
+    App app;
+    QVERIFY(app.start());
+    QCOMPARE(app.setup()->property("transcriptionState").toString(), QStringLiteral("missing"));
+
+    app.sidecar.holdSetupStatus = true;
+    QMetaObject::invokeMethod(app.setup(), "refresh");
+    QTRY_COMPARE(app.sidecar.heldSetupStatus(), 1);
+
+    // The state changes while that answer is on its way, and someone asks again.
+    QJsonObject transcriber = app.sidecar.settings.value(QStringLiteral("transcriber")).toObject();
+    transcriber[QStringLiteral("model_id")] = QStringLiteral("small");
+    app.sidecar.settings[QStringLiteral("transcriber")] = transcriber;
+    QMetaObject::invokeMethod(app.setup(), "refresh");
+
+    // The stale answer lands first; the second ask must still be made.
+    app.sidecar.holdSetupStatus = false;
+    app.sidecar.releaseSetupStatus();
+    QTRY_COMPARE(app.setup()->property("transcriptionState").toString(), QStringLiteral("ready"));
+    QCOMPARE(app.stepStatus(QStringLiteral("modelStep")), QStringLiteral("done"));
 }
 
 int main(int argc, char *argv[]) {

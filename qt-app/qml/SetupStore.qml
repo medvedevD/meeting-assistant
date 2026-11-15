@@ -36,9 +36,21 @@ QtObject {
     readonly property bool cpuSupported:
         !loaded || snapshot.cpu_supported !== false
 
+    // One request at a time. An ask that arrives while one is in flight is
+    // kept and sent when that one answers: the answer on its way describes
+    // the state before whatever prompted the new ask.
     function refresh() {
-        if (!_get.busy)
+        if (_get.busy)
+            _refreshAgain = true
+        else
             _get.get("/api/v1/setup-status")
+    }
+    property bool _refreshAgain: false
+    function _answered() {
+        if (_refreshAgain) {
+            _refreshAgain = false
+            _get.get("/api/v1/setup-status")
+        }
     }
 
     // ── model install, owned here so it outlives whichever screen started it ──
@@ -194,10 +206,11 @@ QtObject {
         onOk: function (json) {
             store.snapshot = json || ({})
             store.loaded = true
+            store._answered()
         }
         // A failed refresh keeps the last answer: a hiccup must not flash a
         // warning on or off.
-        onFail: function (s, e) {}
+        onFail: function (s, e) { store._answered() }
     }
 
     // Saving settings or a key is what changes the answer, so follow them.
