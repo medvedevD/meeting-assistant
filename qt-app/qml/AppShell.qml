@@ -31,6 +31,7 @@ Item {
         if (api.configured) {
             store.refresh()
             ActiveJobsStore.seedActive()
+            SetupStore.refresh()
         }
     }
 
@@ -40,6 +41,9 @@ Item {
             if (api.configured) {
                 store.refresh()
                 ActiveJobsStore.seedActive()
+                // Once per launch: what the home screen warns about. It reads
+                // no key and opens no device, so it raises no system dialog.
+                SetupStore.refresh()
             }
         }
     }
@@ -81,6 +85,13 @@ Item {
         stack.push(newRecComp, { "shell": shell, "store": store },
                    StackView.Immediate)
     }
+    // The recording screen with its file picker already open.
+    function showImport() {
+        selectedId = ""
+        stack.pop(null, StackView.Immediate)
+        stack.push(newRecComp, { "shell": shell, "store": store, "importOnOpen": true },
+                   StackView.Immediate)
+    }
     function showGenerate(m, autoStart) {
         selectedId = m.id
         stack.pop(null, StackView.Immediate)
@@ -92,10 +103,15 @@ Item {
             "autoStart": autoStart === true
         }, StackView.Immediate)
     }
-    function showSettings() {
+    function showSettings() { showSettingsAt(0) }
+    // `category`: index of the settings section to open with.
+    function showSettingsAt(category) {
         selectedId = ""
         stack.pop(null, StackView.Immediate)
-        stack.push(settingsComp, { "shell": shell }, StackView.Immediate)
+        stack.push(settingsComp, {
+            "shell": shell,
+            "initialCategory": category
+        }, StackView.Immediate)
     }
     function showDiagnostics() {
         selectedId = ""

@@ -13,7 +13,10 @@ ma_add_test_qml_module(tst_first_run
         components/MeetyButton.qml
         components/MeetyIcon.qml
         components/MeetyWordmark.qml
-        theme/Theme.qml)
+        theme/Theme.qml
+    LOCAL_QML
+        stubs/FirstRunSteps.qml
+        stubs/LaunchNotices.qml)
 
 add_test(NAME qt_first_run_screen_states COMMAND tst_first_run)
 set_tests_properties(qt_first_run_screen_states PROPERTIES

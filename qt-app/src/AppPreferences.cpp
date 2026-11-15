@@ -4,6 +4,7 @@
 
 namespace {
 constexpr auto kOnboardingCompletedKey = "ui/onboardingCompleted";
+constexpr auto kMicrophoneTestedKey = "ui/microphoneTested";
 }
 
 AppPreferences::AppPreferences(bool firstRunPreviewEnabled, QObject *parent)
@@ -37,6 +38,16 @@ void AppPreferences::completeOnboarding() {
     emit onboardingCompletedChanged();
 }
 
+void AppPreferences::markMicrophoneTested() {
+    if (m_firstRunPreviewEnabled || m_microphoneTested)
+        return;
+
+    m_microphoneTested = true;
+    m_settings->setValue(QLatin1String(kMicrophoneTestedKey), true);
+    m_settings->sync();
+    emit microphoneTestedChanged();
+}
+
 bool AppPreferences::firstRunPreviewFromEnvironment() {
     return qEnvironmentVariable("FIRST_RUN") == QLatin1String("1");
 }
@@ -44,4 +55,6 @@ bool AppPreferences::firstRunPreviewFromEnvironment() {
 void AppPreferences::initialize() {
     m_onboardingCompleted =
         m_settings->value(QLatin1String(kOnboardingCompletedKey), false).toBool();
+    m_microphoneTested =
+        m_settings->value(QLatin1String(kMicrophoneTestedKey), false).toBool();
 }

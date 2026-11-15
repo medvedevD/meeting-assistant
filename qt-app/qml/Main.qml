@@ -1,3 +1,4 @@
+import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -8,9 +9,85 @@ ApplicationWindow {
     id: root
     width: 1120
     height: 820
-    visible: true
+    // Shown by restoreGeometry(), once it is where the user left it.
+    visible: false
     title: qsTr("Meeting Assistant")
     color: Theme.paper
+
+    // ── window size and place across launches ──────────────────────────────
+    Settings {
+        id: savedWindow
+        category: "window"
+        property int left: 0
+        property int top: 0
+        property int width: 0       // 0: nothing saved yet
+        property int height: 0
+        property bool maximized: false
+    }
+
+    function restoreGeometry() {
+        // A monitor may be gone since: use the saved place only if the title
+        // bar lands on a screen that is still there.
+        var place = null
+        if (savedWindow.width >= 640 && savedWindow.height >= 480) {
+            var screens = Qt.application.screens
+            for (var i = 0; i < screens.length; ++i) {
+                var sc = screens[i]
+                if (savedWindow.left >= sc.virtualX
+                        && savedWindow.top >= sc.virtualY
+                        && savedWindow.left + 120 <= sc.virtualX + sc.width
+                        && savedWindow.top + 40 <= sc.virtualY + sc.height) {
+                    place = sc
+                    break
+                }
+            }
+        }
+        if (place) {
+            root.width = Math.min(savedWindow.width, place.width)
+            root.height = Math.min(savedWindow.height, place.height)
+        }
+
+        if (savedWindow.maximized) {
+            root.showMaximized()
+            return
+        }
+        root.show()
+        // Placed after show(): a position set on a hidden window counts the
+        // title bar on macOS, while x and y read back without it, so the
+        // window would creep up on every launch.
+        if (place) {
+            root.x = savedWindow.left
+            root.y = savedWindow.top
+        } else {
+            // First launch, or its screen is gone: centre on the current one,
+            // so the place is known instead of left to the system.
+            var s = root.screen
+            root.width = Math.min(root.width, s.width)
+            root.height = Math.min(root.height, s.height)
+            root.x = s.virtualX + Math.round((s.width - root.width) / 2)
+            root.y = s.virtualY + Math.round((s.height - root.height) / 2)
+        }
+    }
+
+    function saveGeometry() {
+        savedWindow.maximized = root.visibility === Window.Maximized
+        // A maximized or full-screen window keeps the size it returns to.
+        if (root.visibility === Window.Windowed) {
+            savedWindow.left = root.x
+            savedWindow.top = root.y
+            savedWindow.width = root.width
+            savedWindow.height = root.height
+        }
+        savedWindow.sync()
+    }
+
+    Component.onCompleted: restoreGeometry()
+    onClosing: saveGeometry()
+    // Cmd+Q on macOS quits without closing the window first.
+    Connections {
+        target: Qt.application
+        function onAboutToQuit() { root.saveGeometry() }
+    }
 
     // MEETY_THEME_GALLERY=1 shows the token
     // gallery instead of the app shell. Dev-only; never reached in production.
@@ -54,8 +131,8 @@ ApplicationWindow {
                 Text {
                     Layout.fillWidth: true
                     text: sidecar.state === SidecarManager.Restarting
-                          ? qsTr("Перезапуск ядра…")
-                          : qsTr("Запуск ядра…")
+                          ? qsTr("Перезапускаем Meeting Assistant…")
+                          : qsTr("Запускаем Meeting Assistant…")
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
                     font.family: Theme.serifFor(text)
@@ -67,7 +144,7 @@ ApplicationWindow {
                 Text {
                     Layout.fillWidth: true
                     visible: sidecar.state === SidecarManager.Restarting
-                    text: qsTr("Ядро остановилось неожиданно и перезапускается…")
+                    text: qsTr("Фоновая часть приложения неожиданно остановилась и запускается заново.")
                     horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.WordWrap
                     lineHeight: 1.35

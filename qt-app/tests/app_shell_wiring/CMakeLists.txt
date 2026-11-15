@@ -25,6 +25,8 @@ ma_add_test_qml_module(tst_app_shell_wiring
         theme/Theme.qml
     LOCAL_QML
         stubs/DiagnosticsScreen.qml
+        stubs/FirstRunSteps.qml
+        stubs/LaunchNotices.qml
         stubs/GenerateProtocolScreen.qml
         stubs/MeetingDetailScreen.qml
         stubs/MeetingNoProtocolScreen.qml

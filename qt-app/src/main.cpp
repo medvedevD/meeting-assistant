@@ -3,6 +3,7 @@
 #include "JobPoller.h"
 #include "Language.h"
 #include "Logging.h"
+#include "MicrophonePermission.h"
 #include "PathUtils.h"
 #include "ScreenCapturePermission.h"
 #include "SidecarManager.h"
@@ -70,6 +71,7 @@ int main(int argc, char *argv[]) {
         AppPreferences::firstRunPreviewFromEnvironment());
     PathUtils pathUtils;
     ScreenCapturePermission screenCapturePermission;
+    MicrophonePermission microphonePermission;
 
     // Wire the client the moment the sidecar is Ready (handshake + version
     // gate + /health all passed).
@@ -97,6 +99,8 @@ int main(int argc, char *argv[]) {
                                              &pathUtils);
     engine.rootContext()->setContextProperty(
         QStringLiteral("screenCapturePermission"), &screenCapturePermission);
+    engine.rootContext()->setContextProperty(
+        QStringLiteral("microphonePermission"), &microphonePermission);
     engine.rootContext()->setContextProperty(QStringLiteral("appLanguage"),
                                              &language);
     engine.rootContext()->setContextProperty(QStringLiteral("controlsStyle"),

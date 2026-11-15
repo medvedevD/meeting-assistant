@@ -67,6 +67,13 @@ public:
     // Answer a recording start as macOS does without Screen Recording access.
     bool deniesScreenCapture = false;
 
+    // What GET /api/v1/setup-status answers. Everything is set up by default.
+    QString transcriptionState = QStringLiteral("ready");
+    QString transcriptionReason;
+    QJsonValue downloadPercent;
+    QString minutesState = QStringLiteral("ready");
+    bool cpuSupported = true;
+
     // Returns the meeting as the list route reports it, ready for shell.show*().
     QVariantMap addMeeting(const QString &id, bool hasTranscript) {
         m_meetings[id] = Meeting{id, hasTranscript, QString()};
@@ -194,6 +201,26 @@ private:
                                           {QStringLiteral("recording"),
                                            QJsonObject{{QStringLiteral("source"), QStringLiteral("mixed")},
                                                        {QStringLiteral("echo_cancel"), false}}}})};
+        if (method == "GET" && path == QLatin1String("/api/v1/setup-status")) {
+            const bool downloading = transcriptionState == QLatin1String("downloading");
+            const QJsonObject installation{{QStringLiteral("job_id"), QStringLiteral("install-1")},
+                                           {QStringLiteral("model_id"), QStringLiteral("small")},
+                                           {QStringLiteral("status"), QStringLiteral("downloading")},
+                                           {QStringLiteral("percent"), downloadPercent}};
+            return {200, json(QJsonObject{
+                             {QStringLiteral("transcription"),
+                              QJsonObject{{QStringLiteral("state"), transcriptionState},
+                                          {QStringLiteral("reason"),
+                                           transcriptionReason.isEmpty() ? QJsonValue()
+                                                                         : QJsonValue(transcriptionReason)},
+                                          {QStringLiteral("installation"),
+                                           downloading ? QJsonValue(installation) : QJsonValue()}}},
+                             {QStringLiteral("minutes"),
+                              QJsonObject{{QStringLiteral("state"), minutesState},
+                                          {QStringLiteral("provider"), QStringLiteral("anthropic")}}},
+                             {QStringLiteral("cpu_supported"), cpuSupported},
+                             {QStringLiteral("recovered_recordings"), QJsonArray()}})};
+        }
         if (method == "POST" && path == QLatin1String("/api/v1/recordings") && deniesScreenCapture)
             return {500, json(QJsonObject{
                              {QStringLiteral("error"),
@@ -366,6 +393,19 @@ struct App {
 
     QQuickWindow *quickWindow() const { return qobject_cast<QQuickWindow *>(window.get()); }
     QObject *jobs() { return engine.singletonInstance<QObject *>("MeetingAssistant", "ActiveJobsStore"); }
+    QObject *setup() { return engine.singletonInstance<QObject *>("MeetingAssistant", "SetupStore"); }
+
+    // The recording screen, once it has the sidecar's setup status.
+    bool openRecordingScreen() {
+        QMetaObject::invokeMethod(shell, "showNewRecording");
+        return QTest::qWaitFor([&] {
+            return pageName() == QLatin1String("NewRecordingScreen") && setup()->property("loaded").toBool();
+        }, 5000);
+    }
+    bool preflightVisible() const {
+        auto *notice = page()->findChild<QQuickItem *>(QStringLiteral("preflightNotice"));
+        return notice && notice->isVisible();
+    }
     QObject *store() const { return shell->property("storeRef").value<QObject *>(); }
     QQuickItem *page() const { return stack->property("currentItem").value<QQuickItem *>(); }
 
@@ -467,6 +507,10 @@ private slots:
     void recordingNamesTheSystemMixInTheInterfaceLanguage();
     void typedTemplateIsUsedWithoutPressingEnter();
     void permissionDialogResetsTheScreenRecordingGrant();
+    void recordingScreenIsQuietWhenEverythingIsSetUp();
+    void recordingScreenWarnsBeforeTheMeetingAndOpensTheFix();
+    void recordingScreenFollowsTheModelDownload();
+    void recordingScreenSaysWhenTheCpuCannotTranscribe();
 };
 
 void MeetingFlowTest::initTestCase() {
@@ -672,6 +716,71 @@ void MeetingFlowTest::permissionDialogResetsTheScreenRecordingGrant() {
     QCOMPARE(app.permission.resets, 1);
     QTRY_VERIFY(app.visibleTextContaining(QStringLiteral("Разрешение сброшено.")) != nullptr);
     QVERIFY(app.visibleText(QStringLiteral("Сбросить разрешение")) == nullptr);
+}
+
+// A new user could record a whole meeting and only then learn that there was
+// no Whisper model and no provider key. The recording screen now says so before
+// the meeting, and says nothing when there is nothing to say.
+void MeetingFlowTest::recordingScreenIsQuietWhenEverythingIsSetUp() {
+    App app;
+    QVERIFY(app.start());
+
+    QVERIFY(app.openRecordingScreen());
+
+    QVERIFY(!app.preflightVisible());
+}
+
+void MeetingFlowTest::recordingScreenWarnsBeforeTheMeetingAndOpensTheFix() {
+    App app;
+    app.sidecar.transcriptionState = QStringLiteral("missing");
+    app.sidecar.transcriptionReason = QStringLiteral("model_not_selected");
+    app.sidecar.minutesState = QStringLiteral("missing");
+    QVERIFY(app.start());
+
+    QVERIFY(app.openRecordingScreen());
+
+    QTRY_VERIFY(app.preflightVisible());
+    QVERIFY(app.visibleTextContaining(QStringLiteral("Модель распознавания не выбрана")) != nullptr);
+    QVERIFY(app.visibleTextContaining(QStringLiteral("Протоколы не настроены")) != nullptr);
+    // Recording stays available: the audio is saved either way.
+    QVERIFY(app.visibleText(QStringLiteral("Начать запись")) != nullptr);
+
+    // The action lands on the settings section that fixes it: 0 is transcription.
+    QVERIFY(app.clickUntil(QStringLiteral("Выбрать модель"),
+                           [&app] { return app.pageName() == QLatin1String("SettingsScreen"); }));
+    QCOMPARE(app.page()->property("initialCategory").toInt(), 0);
+}
+
+void MeetingFlowTest::recordingScreenFollowsTheModelDownload() {
+    App app;
+    app.sidecar.transcriptionState = QStringLiteral("downloading");
+    app.sidecar.transcriptionReason = QStringLiteral("model_not_selected");
+    app.sidecar.downloadPercent = 42.7;
+    QVERIFY(app.start());
+
+    QVERIFY(app.openRecordingScreen());
+
+    QTRY_VERIFY(app.visibleTextContaining(QStringLiteral("скачивается: 42%")) != nullptr);
+    QVERIFY(app.visibleText(QStringLiteral("Выбрать модель")) == nullptr);
+
+    // The download ends with no settings change: the screen notices by itself.
+    app.sidecar.transcriptionState = QStringLiteral("ready");
+    app.sidecar.transcriptionReason.clear();
+    QTRY_VERIFY_WITH_TIMEOUT(!app.preflightVisible(), kSweepTimeoutMs);
+}
+
+void MeetingFlowTest::recordingScreenSaysWhenTheCpuCannotTranscribe() {
+    App app;
+    app.sidecar.cpuSupported = false;
+    // No model either, but offering to pick one would not help on this machine.
+    app.sidecar.transcriptionState = QStringLiteral("missing");
+    app.sidecar.transcriptionReason = QStringLiteral("model_not_selected");
+    QVERIFY(app.start());
+
+    QVERIFY(app.openRecordingScreen());
+
+    QTRY_VERIFY(app.visibleTextContaining(QStringLiteral("AVX2")) != nullptr);
+    QVERIFY(app.visibleText(QStringLiteral("Выбрать модель")) == nullptr);
 }
 
 int main(int argc, char *argv[]) {
