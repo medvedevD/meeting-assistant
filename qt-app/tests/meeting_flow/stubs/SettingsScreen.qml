@@ -3,4 +3,5 @@ import QtQuick
 
 Item {
     property var shell
+    property int initialCategory: 0
 }

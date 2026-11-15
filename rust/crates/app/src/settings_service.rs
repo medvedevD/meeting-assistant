@@ -172,6 +172,7 @@ impl SettingsService for AppSettingsService {
                 "echo_cancel": s.recording.echo_cancel,
             },
             "default_template": s.default_template,
+            "minutes_setup_skipped": s.minutes_setup_skipped,
             "transcriber": {
                 "language": s.transcriber.language,
                 "beam_size": s.transcriber.beam_size,

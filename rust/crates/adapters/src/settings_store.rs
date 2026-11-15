@@ -26,6 +26,11 @@ pub struct PersistedSettings {
     pub transcriber: PersistedTranscriberPrefs,
     #[serde(default)]
     pub llm: LlmPrefs,
+    /// The user answered "later" to setting up minutes. Setup status then
+    /// reports a missing provider key as `skipped`, which the UI does not nag
+    /// about.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub minutes_setup_skipped: bool,
 }
 
 impl PersistedSettings {

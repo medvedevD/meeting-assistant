@@ -27,6 +27,9 @@ mod container;
 #[path = "../settings_service.rs"]
 mod settings_service;
 
+#[path = "../setup_status_service.rs"]
+mod setup_status_service;
+
 #[path = "../template_service.rs"]
 mod template_service;
 
@@ -187,12 +190,13 @@ async fn run(args: Args) -> Result<()> {
         let store = handles.settings_store.clone();
         std::sync::Arc::new(move || store.load().default_template.clone())
     };
+    let model_installer = transcription_model_service::AppTranscriptionModelService::new(
+        handles.settings_store.clone(),
+    );
     let transcription_model_service: std::sync::Arc<dyn meeting_api::TranscriptionModelService> =
-        std::sync::Arc::new(
-            transcription_model_service::AppTranscriptionModelService::new(
-                handles.settings_store.clone(),
-            ),
-        );
+        std::sync::Arc::new(model_installer.clone());
+    let setup_settings_store = handles.settings_store.clone();
+    let setup_secrets = handles.secrets.clone();
     let settings_service: std::sync::Arc<dyn meeting_api::SettingsService> =
         std::sync::Arc::new(settings_service::AppSettingsService::new(handles));
 
@@ -202,8 +206,20 @@ async fn run(args: Args) -> Result<()> {
     // those WAVs and reconcile their rows before we serve, so recovered
     // recordings are listable/transcribable. Best-effort + idempotent: it
     // never aborts startup.
-    meeting_adapters::run_recovery(&container.recordings_dir, container.meeting_repo.as_ref())
-        .await;
+    let recovery =
+        meeting_adapters::run_recovery(&container.recordings_dir, container.meeting_repo.as_ref())
+            .await;
+    let setup_status_service: std::sync::Arc<dyn meeting_api::SetupStatusService> =
+        std::sync::Arc::new(setup_status_service::AppSetupStatusService::new(
+            setup_settings_store,
+            setup_secrets,
+            model_installer,
+            setup_status_service::recovered_recordings(
+                &recovery.recovered,
+                container.meeting_repo.as_ref(),
+            )
+            .await,
+        ));
 
     let workers = container.spawn_workers().await;
 
@@ -234,13 +250,16 @@ async fn run(args: Args) -> Result<()> {
             progress: container.progress,
             default_template,
         },
-        settings_service,
-        template_service,
-        transcription_model_service,
-        std::sync::Arc::new(meeting_api::AudioApi {
-            enumerator: container.audio_devices,
-            monitor: container.audio_monitor,
-        }),
+        meeting_api::ServerServices {
+            settings: settings_service,
+            templates: template_service,
+            transcription_models: transcription_model_service,
+            setup_status: setup_status_service,
+            audio: std::sync::Arc::new(meeting_api::AudioApi {
+                enumerator: container.audio_devices,
+                monitor: container.audio_monitor,
+            }),
+        },
         token.clone(),
         env!("CARGO_PKG_VERSION"),
     );

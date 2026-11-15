@@ -221,6 +221,209 @@
     </message>
 </context>
 <context>
+    <name>FirstRunSteps</name>
+    <message>
+        <source>Микрофон</source>
+        <translation>Microphone</translation>
+    </message>
+    <message>
+        <source>Микрофон не найден. Подключите его или импортируйте готовую запись.</source>
+        <translation>No microphone found. Connect one, or import an existing recording.</translation>
+    </message>
+    <message>
+        <source>Микрофон слышно.</source>
+        <translation>The microphone is working.</translation>
+    </message>
+    <message>
+        <source>Доступ к микрофону запрещён. Разрешите его в системных настройках и нажмите «Проверить снова».</source>
+        <translation>Microphone access is denied. Allow it in the system settings, then press “Test again”.</translation>
+    </message>
+    <message>
+        <source>Не удалось открыть микрофон: %1</source>
+        <translation>Could not open the microphone: %1</translation>
+    </message>
+    <message>
+        <source>Ответьте на запрос системы.</source>
+        <translation>Answer the system prompt.</translation>
+    </message>
+    <message>
+        <source>Сигнала пока нет. Проверьте, что микрофон не выключен, и скажите что-нибудь.</source>
+        <translation>No signal yet. Check that the microphone is not muted and say something.</translation>
+    </message>
+    <message>
+        <source>Скажите что-нибудь…</source>
+        <translation>Say something…</translation>
+    </message>
+    <message>
+        <source>Остановить</source>
+        <translation>Stop</translation>
+    </message>
+    <message>
+        <source>Проверить снова</source>
+        <translation>Test again</translation>
+    </message>
+    <message>
+        <source>Проверить микрофон</source>
+        <translation>Test microphone</translation>
+    </message>
+    <message>
+        <source>Открыть настройки macOS</source>
+        <translation>Open macOS settings</translation>
+    </message>
+    <message>
+        <source>Распознавание речи</source>
+        <translation>Speech recognition</translation>
+    </message>
+    <message>
+        <source>Модель установлена: %1.</source>
+        <translation>Model installed: %1.</translation>
+    </message>
+    <message>
+        <source>Модель установлена.</source>
+        <translation>Model installed.</translation>
+    </message>
+    <message>
+        <source>На этом компьютере расшифровка не заработает: процессор не поддерживает AVX2.</source>
+        <translation>Transcription will not work on this computer: the processor does not support AVX2.</translation>
+    </message>
+    <message>
+        <source>Модель скачивается: %1%. Остальное можно делать, не дожидаясь.</source>
+        <translation>The model is downloading: %1%. You can carry on with the rest meanwhile.</translation>
+    </message>
+    <message>
+        <source>Модель скачивается. Остальное можно делать, не дожидаясь.</source>
+        <translation>The model is downloading. You can carry on with the rest meanwhile.</translation>
+    </message>
+    <message>
+        <source>Не удалось скачать модель: %1</source>
+        <translation>Could not download the model: %1</translation>
+    </message>
+    <message>
+        <source>Повторить</source>
+        <translation>Retry</translation>
+    </message>
+    <message>
+        <source>Скачать модель</source>
+        <translation>Download model</translation>
+    </message>
+    <message>
+        <source>Ollama (на этом компьютере)</source>
+        <translation>Ollama (on this computer)</translation>
+    </message>
+    <message>
+        <source>Ollama не отвечает. Запустите её и повторите проверку.</source>
+        <translation>Ollama is not responding. Start it and check again.</translation>
+    </message>
+    <message>
+        <source>В Ollama нет модели %1. Скачайте её командой «ollama pull %1» и повторите проверку.</source>
+        <translation>Ollama does not have the model %1. Download it with “ollama pull %1” and check again.</translation>
+    </message>
+    <message>
+        <source>Провайдер не принял ключ. Проверьте его и попробуйте ещё раз.</source>
+        <translation>The provider did not accept the key. Check it and try again.</translation>
+    </message>
+    <message>
+        <source>Введите API-ключ.</source>
+        <translation>Enter an API key.</translation>
+    </message>
+    <message>
+        <source>macOS спросит разрешение на доступ к микрофону.</source>
+        <translation>macOS will ask for permission to use the microphone.</translation>
+    </message>
+    <message>
+        <source>Скажите пару слов, чтобы убедиться, что вас слышно.</source>
+        <translation>Say a few words to make sure you can be heard.</translation>
+    </message>
+    <message>
+        <source>Работает на вашем компьютере. Нужна модель: %1, %2.</source>
+        <translation>Runs on your computer. It needs a model: %1, %2.</translation>
+    </message>
+    <message>
+        <source>Работает на вашем компьютере. Нужна модель.</source>
+        <translation>Runs on your computer. It needs a model.</translation>
+    </message>
+    <message>
+        <source>Другая модель</source>
+        <translation>Another model</translation>
+    </message>
+    <message>
+        <source>Протоколы</source>
+        <translation>Minutes</translation>
+    </message>
+    <message>
+        <source>Протоколы будет писать %1.</source>
+        <translation>%1 will write the minutes.</translation>
+    </message>
+    <message>
+        <source>Настроите позже: «Настройки» → «LLM-провайдер».</source>
+        <translation>Set it up later: Settings → LLM provider.</translation>
+    </message>
+    <message>
+        <source>Проверяем…</source>
+        <translation>Checking…</translation>
+    </message>
+    <message>
+        <source>Хранилище ключей заблокировано. Разблокируйте его в настройках.</source>
+        <translation>The key store is locked. Unlock it in Settings.</translation>
+    </message>
+    <message>
+        <source>Выберите ИИ для протоколов. Расшифровка уходит ему только при генерации.</source>
+        <translation>Choose the AI for minutes. The transcript is sent to it only when you generate them.</translation>
+    </message>
+    <message>
+        <source>Ключ не нужен, расшифровка не покидает компьютер.</source>
+        <translation>No key needed, and the transcript stays on this computer.</translation>
+    </message>
+    <message>
+        <source>macOS может спросить пароль от связки ключей.</source>
+        <translation>macOS may ask for your keychain password.</translation>
+    </message>
+    <message>
+        <source>Звук не покидает компьютер. Предупредите участников о записи.</source>
+        <translation>Audio stays on this computer. Tell the participants they are being recorded.</translation>
+    </message>
+    <message>
+        <source>Расшифровать запись получится, когда модель будет установлена.</source>
+        <translation>The recording can be transcribed once the model is installed.</translation>
+    </message>
+    <message>
+        <source>Импорт записи</source>
+        <translation>Import a recording</translation>
+    </message>
+    <message>
+        <source>Ключ уже сохранён</source>
+        <translation>A key is already saved</translation>
+    </message>
+    <message>
+        <source>API-ключ</source>
+        <translation>API key</translation>
+    </message>
+    <message>
+        <source>Проверить</source>
+        <translation>Check</translation>
+    </message>
+    <message>
+        <source>Открыть настройки</source>
+        <translation>Open settings</translation>
+    </message>
+    <message>
+        <source>Позже</source>
+        <translation>Later</translation>
+    </message>
+    <message>
+        <source>Начать первую запись</source>
+        <translation>Start first recording</translation>
+    </message>
+    <message>
+        <source>Сначала проверьте микрофон.</source>
+        <translation>Test the microphone first.</translation>
+    </message>
+    <message>
+        <source>Пропустить настройку</source>
+        <translation>Skip setup</translation>
+    </message>
+</context>
+<context>
     <name>GenerateProtocolScreen</name>
     <message>
         <source>Ошибка</source>
@@ -324,6 +527,45 @@
     <message>
         <source>Как в системе</source>
         <translation>Same as system</translation>
+    </message>
+</context>
+<context>
+    <name>LaunchNotices</name>
+    <message>
+        <source>Запись «%1» прервалась при сбое и восстановлена.</source>
+        <translation>The recording “%1” was cut off by a crash and has been recovered.</translation>
+    </message>
+    <message>
+        <source>Открыть</source>
+        <translation>Open</translation>
+    </message>
+    <message>
+        <source>Доступ к микрофону запрещён: записать встречу не получится.</source>
+        <translation>Microphone access is denied: meetings cannot be recorded.</translation>
+    </message>
+    <message>
+        <source>Открыть настройки macOS</source>
+        <translation>Open macOS settings</translation>
+    </message>
+    <message>
+        <source>Файл модели распознавания пропал: новые записи не расшифруются.</source>
+        <translation>The speech recognition model file is gone: new recordings will not be transcribed.</translation>
+    </message>
+    <message>
+        <source>Выбрать модель</source>
+        <translation>Choose a model</translation>
+    </message>
+    <message>
+        <source>Хранилище ключей заблокировано: протоколы не сгенерируются.</source>
+        <translation>The key store is locked: minutes cannot be generated.</translation>
+    </message>
+    <message>
+        <source>Разблокировать</source>
+        <translation>Unlock</translation>
+    </message>
+    <message>
+        <source>Скрыть</source>
+        <translation>Dismiss</translation>
     </message>
 </context>
 <context>
@@ -640,16 +882,16 @@
         <translation>Meeting Assistant</translation>
     </message>
     <message>
-        <source>Перезапуск ядра…</source>
-        <translation>Restarting core…</translation>
+        <source>Перезапускаем Meeting Assistant…</source>
+        <translation>Restarting Meeting Assistant…</translation>
     </message>
     <message>
-        <source>Запуск ядра…</source>
-        <translation>Starting core…</translation>
+        <source>Запускаем Meeting Assistant…</source>
+        <translation>Starting Meeting Assistant…</translation>
     </message>
     <message>
-        <source>Ядро остановилось неожиданно и перезапускается…</source>
-        <translation>The core stopped unexpectedly and is restarting…</translation>
+        <source>Фоновая часть приложения неожиданно остановилась и запускается заново.</source>
+        <translation>The background part of the app stopped unexpectedly and is starting again.</translation>
     </message>
     <message>
         <source>Несовместимые компоненты</source>
@@ -952,6 +1194,42 @@ The interface uses protocol %1, but the core supports only %2–%3.</translation
     <message>
         <source>Открыть настройки</source>
         <translation>Open settings</translation>
+    </message>
+    <message>
+        <source>Запись сохранится, но расшифровать её на этом компьютере не получится: процессор не поддерживает AVX2.</source>
+        <translation>The recording will be saved, but this computer cannot transcribe it: the processor does not support AVX2.</translation>
+    </message>
+    <message>
+        <source>Файл модели распознавания не найден. Запись сохранится, но расшифровать её получится только после установки модели.</source>
+        <translation>The speech recognition model file is missing. The recording will be saved, but it can only be transcribed once a model is installed.</translation>
+    </message>
+    <message>
+        <source>Модель распознавания не выбрана. Запись сохранится, но расшифровать её получится только после установки модели.</source>
+        <translation>No speech recognition model is selected. The recording will be saved, but it can only be transcribed once a model is installed.</translation>
+    </message>
+    <message>
+        <source>Выбрать модель</source>
+        <translation>Choose a model</translation>
+    </message>
+    <message>
+        <source>Модель распознавания скачивается: %1%. Запись сохранится, расшифровать её можно будет после загрузки.</source>
+        <translation>The speech recognition model is downloading: %1%. The recording will be saved and can be transcribed once the download finishes.</translation>
+    </message>
+    <message>
+        <source>Модель распознавания скачивается. Запись сохранится, расшифровать её можно будет после загрузки.</source>
+        <translation>The speech recognition model is downloading. The recording will be saved and can be transcribed once the download finishes.</translation>
+    </message>
+    <message>
+        <source>Протоколы не настроены: после встречи будет только расшифровка.</source>
+        <translation>Minutes are not set up: after the meeting you will get the transcript only.</translation>
+    </message>
+    <message>
+        <source>Настроить</source>
+        <translation>Set up</translation>
+    </message>
+    <message>
+        <source>Хранилище ключей заблокировано. Разблокируйте его, чтобы получить протокол.</source>
+        <translation>The key store is locked. Unlock it to get minutes.</translation>
     </message>
     <message>
         <source>Выберите аудиофайл</source>
@@ -1370,6 +1648,21 @@ The interface uses protocol %1, but the core supports only %2–%3.</translation
     </message>
 </context>
 <context>
+    <name>SetupStore</name>
+    <message>
+        <source>HTTP %1: %2</source>
+        <translation>HTTP %1: %2</translation>
+    </message>
+    <message>
+        <source>Не удалось скачать модель.</source>
+        <translation>Could not download the model.</translation>
+    </message>
+    <message>
+        <source>Загрузка прервалась.</source>
+        <translation>The download was interrupted.</translation>
+    </message>
+</context>
+<context>
     <name>SidecarManager</name>
     <message>
         <source>Другой экземпляр Meeting Assistant уже запущен.</source>
@@ -1581,46 +1874,6 @@ for noisy meetings.</translation>
     <message>
         <source>Запиши, расшифруй, оформи в протокол.</source>
         <translation>Record, transcribe, turn it into minutes.</translation>
-    </message>
-    <message>
-        <source>Разрешите доступ к микрофону и «Запись экрана»</source>
-        <translation>Allow microphone access and Screen Recording</translation>
-    </message>
-    <message>
-        <source>Разрешите доступ к микрофону</source>
-        <translation>Allow microphone access</translation>
-    </message>
-    <message>
-        <source>Второе разрешение нужно только для системного звука. Снимки экрана Meeting Assistant не делает.</source>
-        <translation>The second permission is needed only for system audio. Meeting Assistant does not take screenshots.</translation>
-    </message>
-    <message>
-        <source>Источник системного звука можно выбрать на экране записи, если он доступен в системе.</source>
-        <translation>You can choose a system audio source on the recording screen if your system offers one.</translation>
-    </message>
-    <message>
-        <source>Выберите модель Whisper</source>
-        <translation>Choose a Whisper model</translation>
-    </message>
-    <message>
-        <source>Размер и качество можно подобрать в настройках. Транскрипция идёт локально.</source>
-        <translation>You can pick the size and quality in settings. Transcription runs locally.</translation>
-    </message>
-    <message>
-        <source>Настройте генерацию протоколов</source>
-        <translation>Set up minutes generation</translation>
-    </message>
-    <message>
-        <source>Выберите облачный LLM и добавьте его API-ключ либо используйте локальную Ollama.</source>
-        <translation>Choose a cloud LLM and add its API key, or use local Ollama.</translation>
-    </message>
-    <message>
-        <source>Начать первую запись</source>
-        <translation>Start the first recording</translation>
-    </message>
-    <message>
-        <source>У меня уже есть запись — импортировать</source>
-        <translation>I already have a recording: import it</translation>
     </message>
     <message>
         <source>21 мая · Командная встреча</source>

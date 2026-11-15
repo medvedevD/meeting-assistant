@@ -1,4 +1,5 @@
 // WelcomeScreen — persistent first-run onboarding and the empty-selection state.
+// The first-run setup steps themselves live in welcome/FirstRunSteps.qml.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -88,64 +89,87 @@ Page {
         Item {
             anchors.fill: parent
 
-            ColumnLayout {
-                anchors.centerIn: parent
-                width: Math.min(parent.width - 80, 430)
-                spacing: 10
+            LaunchNotices {
+                id: launchNotices
+                objectName: "launchNotices"
+                anchors.top: parent.top
+                anchors.topMargin: 24
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: Math.min(parent.width - 48, 640)
+                meetings: scr.store && scr.store.meetings ? scr.store.meetings : []
+                preferences: scr.preferences
+                onOpenMeeting: function (meeting) { scr.shell.showDetail(meeting) }
+                onOpenSettings: function (category) { scr.shell.showSettingsAt(category) }
+            }
 
-                MeetyWordmark {
-                    size: 42
-                    Layout.alignment: Qt.AlignHCenter
-                }
+            // The space the notices leave, so several of them never cover the
+            // invitation below.
+            Item {
+                anchors.top: launchNotices.visible ? launchNotices.bottom : parent.top
+                anchors.topMargin: launchNotices.visible ? 16 : 0
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
 
-                Text {
-                    Layout.fillWidth: true
-                    Layout.topMargin: 4
-                    horizontalAlignment: Text.AlignHCenter
-                    text: qsTr("Выберите встречу")
-                    font.family: Theme.serifFor(text)
-                    renderType: Theme.renderTypeFor(font.family)
-                    font.pixelSize: 28
-                    font.weight: Theme.wMedium
-                    font.letterSpacing: Theme.tracking(28, -0.015)
-                    color: Theme.ink
-                }
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    width: Math.min(parent.width - 80, 430)
+                    spacing: 10
 
-                Text {
-                    Layout.fillWidth: true
-                    Layout.maximumWidth: 380
-                    Layout.alignment: Qt.AlignHCenter
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WordWrap
-                    lineHeight: 1.45
-                    text: qsTr("Или начните новую запись — Meeting Assistant запишет, расшифрует и подготовит протокол.")
-                    font.family: Theme.fontUi
-                    font.pixelSize: Theme.fsBodyLg
-                    color: Theme.ink3
-                }
-
-                RowLayout {
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.topMargin: 8
-                    spacing: 8
-
-                    MeetyButton {
-                        text: qsTr("Новая запись")
-                        iconName: "mic"
-                        variant: "accent"
-                        enabled: scr.shell !== undefined
-                        onClicked: {
-                            scr.completeOnboarding()
-                            scr.shell.showNewRecording()
-                        }
+                    MeetyWordmark {
+                        size: 42
+                        Layout.alignment: Qt.AlignHCenter
                     }
-                    MeetyButton {
-                        text: qsTr("Импорт")
-                        iconName: "doc"
-                        enabled: scr.shell !== undefined
-                        onClicked: {
-                            scr.completeOnboarding()
-                            scr.shell.showNewRecording()
+
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 4
+                        horizontalAlignment: Text.AlignHCenter
+                        text: qsTr("Выберите встречу")
+                        font.family: Theme.serifFor(text)
+                        renderType: Theme.renderTypeFor(font.family)
+                        font.pixelSize: 28
+                        font.weight: Theme.wMedium
+                        font.letterSpacing: Theme.tracking(28, -0.015)
+                        color: Theme.ink
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: 380
+                        Layout.alignment: Qt.AlignHCenter
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
+                        lineHeight: 1.45
+                        text: qsTr("Или начните новую запись — Meeting Assistant запишет, расшифрует и подготовит протокол.")
+                        font.family: Theme.fontUi
+                        font.pixelSize: Theme.fsBodyLg
+                        color: Theme.ink3
+                    }
+
+                    RowLayout {
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.topMargin: 8
+                        spacing: 8
+
+                        MeetyButton {
+                            text: qsTr("Новая запись")
+                            iconName: "mic"
+                            variant: "accent"
+                            enabled: scr.shell !== undefined
+                            onClicked: {
+                                scr.completeOnboarding()
+                                scr.shell.showNewRecording()
+                            }
+                        }
+                        MeetyButton {
+                            text: qsTr("Импорт")
+                            iconName: "doc"
+                            enabled: scr.shell !== undefined
+                            onClicked: {
+                                scr.completeOnboarding()
+                                scr.shell.showImport()
+                            }
                         }
                     }
                 }
@@ -167,7 +191,7 @@ Page {
                 id: heroPane
                 Layout.fillWidth: true
                 Layout.fillHeight: scr.width >= 760
-                Layout.preferredWidth: scr.width >= 760 ? Math.round(scr.width * 0.51) : scr.width
+                Layout.preferredWidth: scr.width >= 760 ? Math.round(scr.width * 0.42) : scr.width
                 Layout.preferredHeight: scr.width >= 760 ? scr.height : 220
                 color: Theme.paperSub
                 clip: true
@@ -220,175 +244,94 @@ Page {
                 }
             }
 
-            ScrollView {
+            // No scrolling here: FirstRunSteps scrolls its own steps and pins
+            // the start button under them.
+            ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                contentWidth: availableWidth
-                clip: true
-                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                spacing: scr.width >= 760 ? 10 : 8
 
-                ColumnLayout {
-                    width: parent.width
-                    spacing: scr.width >= 760 ? 16 : 12
+                Item { Layout.preferredHeight: scr.width >= 760 ? 12 : 6 }
 
-                    Item { Layout.fillHeight: true; Layout.minimumHeight: scr.width >= 760 ? 36 : 18 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: scr.width >= 760 ? 44 : 32
+                    Layout.rightMargin: scr.width >= 760 ? 44 : 32
+                    spacing: 12
 
-                    RowLayout {
-                        Layout.fillWidth: true
-                        Layout.leftMargin: scr.width >= 760 ? 44 : 32
-                        Layout.rightMargin: scr.width >= 760 ? 44 : 32
-                        spacing: 12
-
-                        MeetyWordmark {
-                            size: 36
-                            Layout.alignment: Qt.AlignVCenter
-                        }
-                        Text {
-                            text: "Meeting Assistant"
-                            font.family: Theme.serifFor(text)
-                            renderType: Theme.renderTypeFor(font.family)
-                            font.pixelSize: 26
-                            font.weight: Theme.wMedium
-                            font.letterSpacing: Theme.tracking(26, -0.02)
-                            color: Theme.ink
-                        }
+                    MeetyWordmark {
+                        size: 36
+                        Layout.alignment: Qt.AlignVCenter
                     }
-
                     Text {
-                        // Reading font.pixelSize from a font.* binding loops:
-                        // writing any font sub-property notifies the whole
-                        // group, which re-evaluates this binding. Size the two
-                        // from one source instead.
-                        readonly property int titleSize: scr.width >= 760 ? 32 : 26
-
-                        Layout.fillWidth: true
-                        Layout.leftMargin: scr.width >= 760 ? 44 : 32
-                        Layout.rightMargin: scr.width >= 760 ? 44 : 32
-                        text: qsTr("Тихий ассистент\nдля шумных встреч.")
-                        wrapMode: Text.WordWrap
-                        lineHeight: 1.05
+                        text: "Meeting Assistant"
                         font.family: Theme.serifFor(text)
                         renderType: Theme.renderTypeFor(font.family)
-                        font.pixelSize: titleSize
+                        font.pixelSize: 26
                         font.weight: Theme.wMedium
-                        font.letterSpacing: Theme.tracking(titleSize, -0.02)
+                        font.letterSpacing: Theme.tracking(26, -0.02)
                         color: Theme.ink
                     }
-
-                    Text {
-                        Layout.fillWidth: true
-                        Layout.leftMargin: scr.width >= 760 ? 44 : 32
-                        Layout.rightMargin: scr.width >= 760 ? 44 : 32
-                        Layout.bottomMargin: scr.width >= 760 ? 14 : 8
-                        text: qsTr("Запиши, расшифруй, оформи в протокол.")
-                        wrapMode: Text.WordWrap
-                        lineHeight: 1.35
-                        font.family: Theme.serifFor(text)
-                        renderType: Theme.renderTypeFor(font.family)
-                        font.italic: true
-                        font.pixelSize: scr.width >= 760 ? 16 : 14
-                        color: Theme.ink2
-                    }
-
-                    WelcomeBullet {
-                        Layout.fillWidth: true
-                        Layout.leftMargin: scr.width >= 760 ? 44 : 32
-                        Layout.rightMargin: scr.width >= 760 ? 44 : 32
-                        number: "1"
-                        title: Qt.platform.os === "osx"
-                               ? qsTr("Разрешите доступ к микрофону и «Запись экрана»")
-                               : qsTr("Разрешите доступ к микрофону")
-                        desc: Qt.platform.os === "osx"
-                              ? qsTr("Второе разрешение нужно только для системного звука. Снимки экрана Meeting Assistant не делает.")
-                              : qsTr("Источник системного звука можно выбрать на экране записи, если он доступен в системе.")
-                    }
-                    WelcomeBullet {
-                        Layout.fillWidth: true
-                        Layout.leftMargin: scr.width >= 760 ? 44 : 32
-                        Layout.rightMargin: scr.width >= 760 ? 44 : 32
-                        number: "2"
-                        title: qsTr("Выберите модель Whisper")
-                        desc: qsTr("Размер и качество можно подобрать в настройках. Транскрипция идёт локально.")
-                    }
-                    WelcomeBullet {
-                        Layout.fillWidth: true
-                        Layout.leftMargin: scr.width >= 760 ? 44 : 32
-                        Layout.rightMargin: scr.width >= 760 ? 44 : 32
-                        number: "3"
-                        title: qsTr("Настройте генерацию протоколов")
-                        desc: qsTr("Выберите облачный LLM и добавьте его API-ключ либо используйте локальную Ollama.")
-                    }
-
-                    MeetyButton {
-                        Layout.leftMargin: scr.width >= 760 ? 44 : 32
-                        Layout.rightMargin: scr.width >= 760 ? 44 : 32
-                        Layout.topMargin: 12
-                        Layout.alignment: Qt.AlignLeft
-                        text: qsTr("Начать первую запись")
-                        iconName: "mic"
-                        variant: "accent"
-                        large: true
-                        enabled: scr.shell !== undefined
-                        onClicked: {
-                            scr.completeOnboarding()
-                            scr.shell.showNewRecording()
-                        }
-                    }
-
-                    MeetyButton {
-                        Layout.leftMargin: scr.width >= 760 ? 44 : 32
-                        Layout.rightMargin: scr.width >= 760 ? 44 : 32
-                        Layout.alignment: Qt.AlignLeft
-                        text: qsTr("У меня уже есть запись — импортировать")
-                        variant: "ghost"
-                        enabled: scr.shell !== undefined
-                        onClicked: {
-                            scr.completeOnboarding()
-                            scr.shell.showNewRecording()
-                        }
-                    }
-
-                    Item { Layout.fillHeight: true; Layout.minimumHeight: scr.width >= 760 ? 36 : 26 }
                 }
+
+                Text {
+                    // Reading font.pixelSize from a font.* binding loops:
+                    // writing any font sub-property notifies the whole
+                    // group, which re-evaluates this binding. Size the two
+                    // from one source instead.
+                    readonly property int titleSize: scr.width >= 760 ? 32 : 26
+
+                    Layout.fillWidth: true
+                    Layout.leftMargin: scr.width >= 760 ? 44 : 32
+                    Layout.rightMargin: scr.width >= 760 ? 44 : 32
+                    text: qsTr("Тихий ассистент\nдля шумных встреч.")
+                    wrapMode: Text.WordWrap
+                    lineHeight: 1.05
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
+                    font.pixelSize: titleSize
+                    font.weight: Theme.wMedium
+                    font.letterSpacing: Theme.tracking(titleSize, -0.02)
+                    color: Theme.ink
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: scr.width >= 760 ? 44 : 32
+                    Layout.rightMargin: scr.width >= 760 ? 44 : 32
+                    Layout.bottomMargin: scr.width >= 760 ? 6 : 4
+                    text: qsTr("Запиши, расшифруй, оформи в протокол.")
+                    wrapMode: Text.WordWrap
+                    lineHeight: 1.35
+                    font.family: Theme.serifFor(text)
+                    renderType: Theme.renderTypeFor(font.family)
+                    font.italic: true
+                    font.pixelSize: scr.width >= 760 ? 16 : 14
+                    color: Theme.ink2
+                }
+
+                FirstRunSteps {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.leftMargin: scr.width >= 760 ? 44 : 32
+                    Layout.rightMargin: scr.width >= 760 ? 44 : 32
+                    Layout.bottomMargin: scr.width >= 760 ? 16 : 12
+                    preferences: scr.preferences
+                    onStartRecording: {
+                        scr.completeOnboarding()
+                        scr.shell.showNewRecording()
+                    }
+                    onImportRecording: {
+                        scr.completeOnboarding()
+                        scr.shell.showImport()
+                    }
+                    onSkipped: scr.completeOnboarding()
+                    // Leaving for the settings is not finishing: the pane
+                    // is back when the user returns.
+                    onOpenSettings: function (category) { scr.shell.showSettingsAt(category) }
+                }
+
             }
-        }
-    }
-
-    component WelcomeBullet: RowLayout {
-        id: bullet
-        property string number
-        property string title
-        property string desc
-
-        spacing: 12
-
-        Rectangle {
-            Layout.preferredWidth: 22
-            Layout.preferredHeight: 22
-            Layout.alignment: Qt.AlignTop
-            Layout.topMargin: 1
-            radius: 11
-            color: Theme.accentTint
-
-            Text {
-                anchors.centerIn: parent
-                text: bullet.number
-                font.family: Theme.fontUi
-                font.pixelSize: Theme.fsMicro
-                font.weight: Theme.wBold
-                color: Theme.accent2
-            }
-        }
-
-        Text {
-            Layout.fillWidth: true
-            text: "<b>" + bullet.title + "</b> — " + bullet.desc
-            textFormat: Text.RichText
-            wrapMode: Text.WordWrap
-            lineHeight: 1.45
-            font.family: Theme.fontUi
-            font.pixelSize: scr.width >= 760 ? 14 : 13
-            color: Theme.ink2
         }
     }
 

@@ -14,6 +14,8 @@ Page {
     id: scr
     property var shell
     property var store
+    // Open the file picker as soon as the screen is up: the user asked to import.
+    property bool importOnOpen: false
 
     // "idle" | "recording" | "stopping" | "importing" | "error"
     property string st: "idle"
@@ -46,6 +48,44 @@ Page {
     Component.onCompleted: {
         if (SettingsStore.loaded) seedDefaults(); else SettingsStore.refresh()
         AudioDevicesStore.ensureLoaded()
+        SetupStore.refresh()
+        if (importOnOpen)
+            filePicker.open()
+    }
+
+    // What will not work once this meeting is recorded, so the user learns it
+    // before the meeting and not after. Empty when everything is set up. Nothing
+    // here blocks recording: the audio is saved either way. `category` is the
+    // settings section that fixes the item, -1 when nothing in the app can.
+    readonly property var preflight: {
+        var items = []
+        if (!SetupStore.cpuSupported) {
+            items.push({
+                text: qsTr("Запись сохранится, но расшифровать её на этом компьютере не получится: процессор не поддерживает AVX2."),
+                action: "", category: -1 })
+        } else if (SetupStore.transcriptionState === "missing") {
+            items.push({
+                text: SetupStore.transcriptionReason === "model_missing"
+                      ? qsTr("Файл модели распознавания не найден. Запись сохранится, но расшифровать её получится только после установки модели.")
+                      : qsTr("Модель распознавания не выбрана. Запись сохранится, но расшифровать её получится только после установки модели."),
+                action: qsTr("Выбрать модель"), category: 0 })
+        } else if (SetupStore.transcriptionState === "downloading") {
+            items.push({
+                text: SetupStore.downloadPercent >= 0
+                      ? qsTr("Модель распознавания скачивается: %1%. Запись сохранится, расшифровать её можно будет после загрузки.").arg(SetupStore.downloadPercent)
+                      : qsTr("Модель распознавания скачивается. Запись сохранится, расшифровать её можно будет после загрузки."),
+                action: "", category: -1 })
+        }
+        if (SetupStore.minutesState === "missing" || SetupStore.minutesState === "skipped") {
+            items.push({
+                text: qsTr("Протоколы не настроены: после встречи будет только расшифровка."),
+                action: qsTr("Настроить"), category: 1 })
+        } else if (SetupStore.minutesState === "locked") {
+            items.push({
+                text: qsTr("Хранилище ключей заблокировано. Разблокируйте его, чтобы получить протокол."),
+                action: qsTr("Открыть настройки"), category: 1 })
+        }
+        return items
     }
     Connections {
         target: SettingsStore
@@ -677,33 +717,103 @@ Page {
                         }
                     }
 
+                    Item { Layout.preferredHeight: 8 }
+                }
+            }
+
+            // Pinned under the scrolling form, so the way to start is always in
+            // view however long the form or the notice above it gets.
+            Rectangle { Layout.fillWidth: true; height: 1; color: Theme.rule }
+            ColumnLayout {
+                objectName: "recordingActions"
+                // A layout inside a layout fills the width unless told not to.
+                Layout.fillWidth: false
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: Math.min(640, parent.width - 64)
+                Layout.topMargin: 16
+                Layout.bottomMargin: 20
+                spacing: 0
+
+                Rectangle {
+                    objectName: "preflightNotice"
+                    Layout.fillWidth: true
+                    Layout.bottomMargin: 14
+                    visible: scr.preflight.length > 0
+                    implicitHeight: preflightRows.implicitHeight + 24
+                    radius: Theme.rMd
+                    color: Theme.paperSub
+                    border.width: 1
+                    border.color: Theme.rule
+
+                    ColumnLayout {
+                        id: preflightRows
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.leftMargin: 14
+                        anchors.rightMargin: 10
+                        spacing: 8
+
+                        Repeater {
+                            model: scr.preflight
+                            RowLayout {
+                                id: preflightRow
+                                required property var modelData
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                Rectangle {
+                                    Layout.preferredWidth: 6
+                                    Layout.preferredHeight: 6
+                                    Layout.alignment: Qt.AlignVCenter
+                                    radius: 3
+                                    color: Theme.warn
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: preflightRow.modelData.text
+                                    wrapMode: Text.WordWrap
+                                    lineHeight: 1.35
+                                    font.family: Theme.fontUi
+                                    font.pixelSize: Theme.fsBody
+                                    color: Theme.ink2
+                                }
+                                MeetyButton {
+                                    Layout.alignment: Qt.AlignVCenter
+                                    visible: preflightRow.modelData.category >= 0
+                                    variant: "ghost"
+                                    text: preflightRow.modelData.action
+                                    onClicked: scr.shell.showSettingsAt(preflightRow.modelData.category)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                MeetyButton {
+                    Layout.fillWidth: true
+                    variant: "accent"
+                    large: true
+                    iconName: "mic"
+                    text: qsTr("Начать запись")
+                    onClicked: scr.start(nameField.text)
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: 10
+                    spacing: 10
                     MeetyButton {
                         Layout.fillWidth: true
-                        variant: "accent"
-                        large: true
-                        iconName: "mic"
-                        text: qsTr("Начать запись")
-                        onClicked: scr.start(nameField.text)
+                        iconName: "doc"
+                        text: qsTr("Импорт файла…")
+                        onClicked: filePicker.open()
                     }
-                    RowLayout {
+                    MeetyButton {
                         Layout.fillWidth: true
-                        Layout.topMargin: 10
-                        spacing: 10
-                        MeetyButton {
-                            Layout.fillWidth: true
-                            iconName: "doc"
-                            text: qsTr("Импорт файла…")
-                            onClicked: filePicker.open()
-                        }
-                        MeetyButton {
-                            Layout.fillWidth: true
-                            iconName: "folder"
-                            text: qsTr("Из папки…")
-                            onClicked: scanDialog.openScan()
-                        }
+                        iconName: "folder"
+                        text: qsTr("Из папки…")
+                        onClicked: scanDialog.openScan()
                     }
-
-                    Item { Layout.preferredHeight: 60 }
                 }
             }
         }

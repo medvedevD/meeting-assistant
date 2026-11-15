@@ -5,6 +5,7 @@ import QtQuick
 
 Item {
     property var shell
+    property int initialCategory: 0
     property var store
     property string meetingId
 }

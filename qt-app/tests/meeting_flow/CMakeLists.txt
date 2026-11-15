@@ -12,7 +12,7 @@ target_include_directories(tst_meeting_flow PRIVATE
 target_compile_definitions(tst_meeting_flow PRIVATE
     MA_MEETING_FLOW_QML_IMPORT_DIR="${CMAKE_CURRENT_BINARY_DIR}/imports")
 
-foreach(_singleton ActiveJobsStore AudioDevicesStore SettingsStore)
+foreach(_singleton ActiveJobsStore AudioDevicesStore SettingsStore SetupStore)
     set_source_files_properties("${CMAKE_CURRENT_SOURCE_DIR}/../../qml/${_singleton}.qml"
         PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 endforeach()
@@ -25,6 +25,7 @@ ma_add_test_qml_module(tst_meeting_flow
         MeetingStore.qml
         Request.qml
         SettingsStore.qml
+        SetupStore.qml
         components/MeetyButton.qml
         components/MeetyCard.qml
         components/MeetyCheckDelegate.qml

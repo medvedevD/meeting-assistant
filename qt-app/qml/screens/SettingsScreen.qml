@@ -14,6 +14,8 @@ import MeetingAssistant
 Page {
     id: scr
     property var shell
+    // Index in the category list of the section to open with.
+    property int initialCategory: 0
     font.family: Theme.fontUi
     font.pixelSize: Theme.fsBody
 
@@ -181,7 +183,7 @@ Page {
                     anchors.topMargin: 16
                     anchors.bottomMargin: 16
                     clip: true
-                    currentIndex: 0
+                    currentIndex: scr.initialCategory
                     model: settingsNavModel
                     delegate: Rectangle {
                         required property int index
