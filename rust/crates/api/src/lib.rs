@@ -1,14 +1,19 @@
 mod router;
 mod routes;
 mod settings_service;
+mod setup_status_service;
 mod template_service;
 mod transcription_model_service;
 
 pub use router::{
     create_router, create_server_router, no_default_template, AppState, AudioApi,
-    DefaultTemplateFn, LiveJobs, VersionInfo,
+    DefaultTemplateFn, LiveJobs, ServerServices, VersionInfo,
 };
 pub use settings_service::SettingsService;
+pub use setup_status_service::{
+    MinutesSetup, MinutesSetupState, RecoveredRecording, SetupStatus, SetupStatusService,
+    TranscriptionSetup, TranscriptionSetupState,
+};
 pub use template_service::{TemplateDto, TemplateError, TemplateNotice, TemplateService};
 pub use transcription_model_service::{
     InstallStarted, InstallationView, ModelServiceError, TranscriptionModelService,

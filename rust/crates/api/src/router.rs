@@ -32,10 +32,11 @@ pub fn no_default_template() -> DefaultTemplateFn {
 }
 pub use crate::routes::audio::AudioApi;
 use crate::routes::{
-    audio, health, jobs, meetings, protocols, recordings, settings, templates,
+    audio, health, jobs, meetings, protocols, recordings, settings, setup_status, templates,
     transcription_models, version,
 };
 use crate::settings_service::SettingsService;
+use crate::setup_status_service::SetupStatusService;
 use crate::template_service::TemplateService;
 use crate::transcription_model_service::TranscriptionModelService;
 
@@ -76,6 +77,15 @@ pub fn create_router(state: AppState) -> Router {
     api_routes().with_state(Arc::new(state))
 }
 
+/// The services behind the routes that keep their own state, off [`AppState`].
+pub struct ServerServices {
+    pub settings: Arc<dyn SettingsService>,
+    pub templates: Arc<dyn TemplateService>,
+    pub transcription_models: Arc<dyn TranscriptionModelService>,
+    pub setup_status: Arc<dyn SetupStatusService>,
+    pub audio: Arc<AudioApi>,
+}
+
 /// Builds the full sidecar router:
 /// - the 7 `/api/v1/*` routes, each gated by a `Bearer <auth_token>` check
 ///   (401 without a valid token);
@@ -85,13 +95,17 @@ pub fn create_router(state: AppState) -> Router {
 /// stdout handshake — never argv, never logged.
 pub fn create_server_router(
     state: AppState,
-    settings_service: Arc<dyn SettingsService>,
-    template_service: Arc<dyn TemplateService>,
-    transcription_model_service: Arc<dyn TranscriptionModelService>,
-    audio_api: Arc<AudioApi>,
+    services: ServerServices,
     auth_token: String,
     build_version: impl Into<String>,
 ) -> Router {
+    let ServerServices {
+        settings: settings_service,
+        templates: template_service,
+        transcription_models: transcription_model_service,
+        setup_status: setup_status_service,
+        audio: audio_api,
+    } = services;
     let token: Arc<str> = Arc::from(auth_token.as_str());
 
     let api = api_routes()
@@ -125,6 +139,13 @@ pub fn create_server_router(
             require_bearer,
         ))
         .with_state(transcription_model_service);
+
+    let setup_status = setup_status_routes()
+        .route_layer(middleware::from_fn_with_state(
+            token.clone(),
+            require_bearer,
+        ))
+        .with_state(setup_status_service);
 
     // Audio routes (device enumeration + live level monitor) carry their own
     // state, same separate-state + bearer pattern as settings/templates.
@@ -169,6 +190,7 @@ pub fn create_server_router(
         .merge(settings)
         .merge(templates)
         .merge(transcription_models)
+        .merge(setup_status)
         .merge(audio)
         .layer(governor);
 
@@ -224,6 +246,10 @@ fn settings_routes() -> Router<Arc<dyn SettingsService>> {
             "/api/v1/settings/secret-store/reset",
             post(settings::reset_secret_store),
         )
+}
+
+fn setup_status_routes() -> Router<Arc<dyn SetupStatusService>> {
+    Router::new().route("/api/v1/setup-status", get(setup_status::get))
 }
 
 fn audio_routes() -> Router<Arc<AudioApi>> {
@@ -443,6 +469,32 @@ mod tests {
         }
     }
 
+    struct FakeSetupStatus;
+
+    impl crate::SetupStatusService for FakeSetupStatus {
+        fn status(&self) -> crate::SetupStatus {
+            crate::SetupStatus {
+                transcription: crate::TranscriptionSetup {
+                    state: crate::TranscriptionSetupState::Missing,
+                    reason: Some("model_not_selected".to_string()),
+                    source: "managed".to_string(),
+                    model_id: None,
+                    recommended_model_id: "small".to_string(),
+                    installation: None,
+                },
+                minutes: crate::MinutesSetup {
+                    state: crate::MinutesSetupState::Skipped,
+                    provider: "anthropic".to_string(),
+                },
+                cpu_supported: true,
+                recovered_recordings: vec![crate::RecoveredRecording {
+                    meeting_id: "m-1".to_string(),
+                    name: "Recovered".to_string(),
+                }],
+            }
+        }
+    }
+
     fn server() -> Router {
         create_server_router(
             AppState {
@@ -457,13 +509,16 @@ mod tests {
                 progress: meeting_core::LiveProgress::new(),
                 default_template: super::no_default_template(),
             },
-            Arc::new(FakeSettings),
-            Arc::new(FakeTemplates),
-            Arc::new(FakeTranscriptionModels),
-            Arc::new(AudioApi {
-                enumerator: meeting_core::fakes::FakeAudioDeviceEnumerator::new(),
-                monitor: meeting_core::fakes::FakeAudioLevelMonitor::new(),
-            }),
+            ServerServices {
+                settings: Arc::new(FakeSettings),
+                templates: Arc::new(FakeTemplates),
+                transcription_models: Arc::new(FakeTranscriptionModels),
+                setup_status: Arc::new(FakeSetupStatus),
+                audio: Arc::new(AudioApi {
+                    enumerator: meeting_core::fakes::FakeAudioDeviceEnumerator::new(),
+                    monitor: meeting_core::fakes::FakeAudioLevelMonitor::new(),
+                }),
+            },
             TOKEN.to_string(),
             "0.1.0-test",
         )
@@ -498,6 +553,7 @@ mod tests {
         ("POST", "/api/v1/transcription-models/base/install"),
         ("GET", "/api/v1/transcription-models/installations/job-1"),
         ("DELETE", "/api/v1/transcription-models/base"),
+        ("GET", "/api/v1/setup-status"),
         ("GET", "/api/v1/audio/devices"),
         ("POST", "/api/v1/audio/monitor"),
         ("GET", "/api/v1/audio/monitor/abc"),
@@ -556,6 +612,39 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn setup_status_wire_shape() {
+        let resp = server()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/setup-status")
+                    .header("Authorization", format!("Bearer {TOKEN}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({
+                "transcription": {
+                    "state": "missing",
+                    "reason": "model_not_selected",
+                    "source": "managed",
+                    "model_id": null,
+                    "recommended_model_id": "small",
+                    "installation": null,
+                },
+                "minutes": { "state": "skipped", "provider": "anthropic" },
+                "cpu_supported": true,
+                "recovered_recordings": [{ "meeting_id": "m-1", "name": "Recovered" }],
+            })
+        );
     }
 
     #[tokio::test]

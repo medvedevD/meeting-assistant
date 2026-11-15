@@ -104,6 +104,19 @@ impl AppTranscriptionModelService {
             })
     }
 
+    /// The download that has not finished yet, if there is one.
+    pub fn active_installation(&self) -> Option<InstallationView> {
+        self.jobs
+            .iter()
+            .find(|job| {
+                matches!(
+                    job.status,
+                    InstallStatus::Queued | InstallStatus::Downloading
+                )
+            })
+            .map(|job| job.view())
+    }
+
     fn set_job(&self, job: InstallJob) {
         self.jobs.insert(job.job_id.clone(), job);
     }
