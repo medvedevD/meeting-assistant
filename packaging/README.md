@@ -173,10 +173,17 @@ FFmpeg compliance mirrors Qt's (dynamic link + written offer + source URL) in
     [`docs/INSTALL.md`](../docs/INSTALL.md) describes.
   - **Screen Recording** permission does not carry over to an update. An ad-hoc
     signature changes with every build and macOS keeps the grant for the previous one,
-    so the switch shows on but recording fails until the user removes the app from the
-    list and adds it again. The recording screen and the release notes say so.
-    `NSScreenCaptureUsageDescription` is in the signed `Info.plist`, which is what
-    makes macOS ask instead of killing the process.
+    so the switch shows on but recording fails. Removing the app from the list and
+    adding it back does not help; resetting the grant does
+    (`tccutil reset ScreenCapture com.meeting-assistant.app`), after which the next
+    start brings up the macOS prompt and granting asks to reopen the app. The
+    recording screen's "Reset permission" button runs that reset, and the release
+    notes say so. `NSScreenCaptureUsageDescription` is in the signed `Info.plist`,
+    which is what makes macOS ask instead of killing the process.
+  - **Keychain** access to each saved API key does not carry over either: the first
+    read by an updated build waits for a macOS prompt. Nothing reads a key at startup
+    or for the settings view, so the prompt comes when minutes are generated or a key
+    is checked (see "Keychain reads on macOS" in `RULES.md`).
 - **macOS exit: Developer ID.** It removes the Gatekeeper step and keeps the Screen
   Recording grant across updates. It is a configuration change:
   1. `codesign-deep.sh`: set `IDENTITY` to the Developer ID Application certificate and
