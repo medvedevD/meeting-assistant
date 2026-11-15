@@ -68,6 +68,7 @@ qt_add_executable(meeting-assistant-qt
     src/ApiClient.h        src/ApiClient.cpp
     src/JobPoller.h        src/JobPoller.cpp
     src/PathUtils.h
+    src/MicrophonePermission.h
     src/ScreenCapturePermission.h
     "${_gen_header}")
 
@@ -79,6 +80,11 @@ qt_add_executable(meeting-assistant-qt
 # `meeting-assistant-qt` executable) is untouched. packaging/macos/build-app.sh
 # configures with -DMA_MACOS_APP_BUNDLE=ON for the real artefact.
 option(MA_MACOS_APP_BUNDLE "Build MeetingAssistant.app bundle (packaging)" OFF)
+# The bundle identifier. macOS keys its privacy grants (microphone, screen
+# recording) and the keychain access list on it, so a bundle built to try those
+# flows can take another id and leave the installed app's grants alone.
+set(MA_MACOS_BUNDLE_ID "com.meeting-assistant.app" CACHE STRING
+    "CFBundleIdentifier of MeetingAssistant.app")
 if(APPLE AND MA_MACOS_APP_BUNDLE)
     set(_app_icns "${CMAKE_CURRENT_SOURCE_DIR}/../packaging/assets/meeting-assistant.icns")
     target_sources(meeting-assistant-qt PRIVATE "${_app_icns}")
@@ -86,7 +92,7 @@ if(APPLE AND MA_MACOS_APP_BUNDLE)
         MACOSX_PACKAGE_LOCATION "Resources")
     set(MACOSX_BUNDLE_BUNDLE_NAME            "Meeting Assistant")
     set(MACOSX_BUNDLE_EXECUTABLE_NAME        "MeetingAssistant")
-    set(MACOSX_BUNDLE_GUI_IDENTIFIER         "com.meeting-assistant.app")
+    set(MACOSX_BUNDLE_GUI_IDENTIFIER         "${MA_MACOS_BUNDLE_ID}")
     set(MACOSX_BUNDLE_BUNDLE_VERSION         "${PROJECT_VERSION}")
     set(MACOSX_BUNDLE_SHORT_VERSION_STRING   "${PROJECT_VERSION}")
     set(MACOSX_BUNDLE_ICON_FILE              "meeting-assistant.icns")
@@ -132,6 +138,11 @@ set_source_files_properties(qml/ActiveJobsStore.qml PROPERTIES
 set_source_files_properties(qml/AudioDevicesStore.qml PROPERTIES
     QT_QML_SINGLETON_TYPE TRUE)
 
+# SetupStore is the shared "what is still missing" singleton: one answer from
+# the sidecar for every screen that warns about an unfinished setup.
+set_source_files_properties(qml/SetupStore.qml PROPERTIES
+    QT_QML_SINGLETON_TYPE TRUE)
+
 option(MA_ENABLE_QML_CACHEGEN
     "Compile QML into cachegen C++ files for the GUI target" ON)
 set(_qml_cachegen_args)
@@ -150,6 +161,7 @@ qt_add_qml_module(meeting-assistant-qt
         qml/SettingsStore.qml
         qml/ActiveJobsStore.qml
         qml/AudioDevicesStore.qml
+        qml/SetupStore.qml
         qml/Request.qml
         qml/screens/MeetingListScreen.qml
         qml/screens/WelcomeScreen.qml
@@ -159,6 +171,9 @@ qt_add_qml_module(meeting-assistant-qt
         qml/screens/MeetingNoProtocolScreen.qml
         qml/screens/SettingsScreen.qml
         qml/screens/DiagnosticsScreen.qml
+        qml/screens/welcome/FirstRunSteps.qml
+        qml/screens/welcome/LaunchNotices.qml
+        qml/screens/welcome/SetupStepRow.qml
         qml/screens/settings/WhisperPanel.qml
         qml/screens/settings/LlmPanel.qml
         qml/screens/settings/TemplatesPanel.qml

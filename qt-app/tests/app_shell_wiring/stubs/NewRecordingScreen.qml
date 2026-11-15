@@ -5,6 +5,7 @@ import QtQuick
 
 Item {
     property var shell
+    property bool importOnOpen: false
     property var store
     property string meetingId
 }

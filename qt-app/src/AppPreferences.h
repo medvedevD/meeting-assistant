@@ -11,6 +11,8 @@ class AppPreferences final : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool onboardingCompleted READ onboardingCompleted NOTIFY
                    onboardingCompletedChanged)
+    Q_PROPERTY(bool microphoneTested READ microphoneTested NOTIFY
+                   microphoneTestedChanged)
     Q_PROPERTY(bool firstRunPreviewEnabled READ firstRunPreviewEnabled CONSTANT)
 
 public:
@@ -25,15 +27,22 @@ public:
 
     Q_INVOKABLE void completeOnboarding();
 
+    // Whether the first-run microphone test has ever heard a signal, so the
+    // step stays done on the next launch.
+    bool microphoneTested() const { return m_microphoneTested; }
+    Q_INVOKABLE void markMicrophoneTested();
+
     static bool firstRunPreviewFromEnvironment();
 
 signals:
     void onboardingCompletedChanged();
+    void microphoneTestedChanged();
 
 private:
     void initialize();
 
     std::unique_ptr<QSettings> m_settings;
     bool m_onboardingCompleted = false;
+    bool m_microphoneTested = false;
     bool m_firstRunPreviewEnabled = false;
 };

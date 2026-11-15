@@ -41,7 +41,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use meeting_core::entities::Meeting;
 use meeting_core::ports::MeetingRepo;
@@ -274,7 +274,7 @@ pub(crate) fn ffmpeg_streaming_wav(samples: &[i16]) -> Vec<u8> {
 }
 
 /// Tally of what the startup pass did (for logging / tests).
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct RecoveryReport {
     pub scanned: usize,
     pub wav_reconstructed: usize,
@@ -288,6 +288,10 @@ pub struct RecoveryReport {
     pub legs_kept_one: usize,
     /// Mixed recordings whose legs held no usable audio.
     pub legs_failed: usize,
+    /// `recording.wav` of every recording this pass repaired: rebuilt from its
+    /// legs, given a valid header, or given back its `meetings` row. The UI
+    /// tells the user about these.
+    pub recovered: Vec<PathBuf>,
 }
 
 /// Mixes the mic and system legs (first two paths) of a mixed recording into
@@ -424,7 +428,9 @@ async fn run_recovery_with(
             continue;
         }
         let audio_path = dir.join("recording.wav");
+        let mut repaired = false;
         if !audio_path.is_file() {
+            repaired = true;
             match recover_mixed_legs(&audio_path, mix) {
                 LegsRecovery::NoLegs => continue,
                 LegsRecovery::Mixed => {
@@ -457,6 +463,7 @@ async fn run_recovery_with(
             Ok(WavRecovery::AlreadyValid { .. }) => report.wav_already_valid += 1,
             Ok(WavRecovery::Reconstructed { frames }) => {
                 report.wav_reconstructed += 1;
+                repaired = true;
                 tracing::info!(
                     "recovery: reconstructed {} ({frames} frames)",
                     audio_path.display()
@@ -476,6 +483,7 @@ async fn run_recovery_with(
                 match repo.save(&meeting).await {
                     Ok(()) => {
                         report.rows_recreated += 1;
+                        repaired = true;
                         tracing::info!(
                             "recovery: recreated meetings row for {}",
                             audio_path.display()
@@ -492,6 +500,9 @@ async fn run_recovery_with(
             Err(e) => {
                 tracing::warn!("recovery: lookup failed for {}: {e}", audio_path.display());
             }
+        }
+        if repaired {
+            report.recovered.push(audio_path);
         }
     }
 
@@ -610,7 +621,6 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     use crate::db::{Db, SqliteMeetingRepo};
 

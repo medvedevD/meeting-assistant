@@ -5,6 +5,7 @@ pub mod meetings;
 pub mod protocols;
 pub mod recordings;
 pub mod settings;
+pub mod setup_status;
 pub mod templates;
 pub mod transcription_models;
 pub mod version;

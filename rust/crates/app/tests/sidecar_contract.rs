@@ -416,6 +416,7 @@ fn every_api_route_is_bearer_gated_401_without_token() {
         ("POST", "/api/v1/transcription-models/base/install"),
         ("GET", "/api/v1/transcription-models/installations/job-1"),
         ("DELETE", "/api/v1/transcription-models/base"),
+        ("GET", "/api/v1/setup-status"),
     ];
 
     for (method, path) in routes {
@@ -548,6 +549,127 @@ fn transcription_model_install_job_exposes_progress_and_terminal_error() {
     assert!(
         status["status"] == "failed" || status["status"] == "done",
         "install job should reach a terminal state in the isolated test env: {status}"
+    );
+}
+
+// ── Setup status ─────────────────────────────────────────────────────────────
+
+fn setup_status(s: &Sidecar) -> serde_json::Value {
+    let resp = client()
+        .get(format!("{}/api/v1/setup-status", s.base_url()))
+        .bearer_auth(&s.handshake.token)
+        .send()
+        .expect("get setup status");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    resp.json().expect("json")
+}
+
+#[test]
+fn setup_status_on_a_new_profile_names_what_is_missing() {
+    let s = Sidecar::spawn();
+
+    let status = setup_status(&s);
+
+    assert_eq!(status["transcription"]["state"], "missing");
+    assert_eq!(status["transcription"]["reason"], "model_not_selected");
+    assert_eq!(status["transcription"]["source"], "managed");
+    assert_eq!(status["transcription"]["model_id"], serde_json::Value::Null);
+    assert_eq!(
+        status["transcription"]["installation"],
+        serde_json::Value::Null
+    );
+    assert!(status["transcription"]["recommended_model_id"].is_string());
+    assert_eq!(status["minutes"]["state"], "missing");
+    assert_eq!(status["minutes"]["provider"], "anthropic");
+    assert!(status["cpu_supported"].is_boolean());
+    assert_eq!(status["recovered_recordings"], serde_json::json!([]));
+}
+
+#[test]
+fn setup_status_follows_settings_secrets_and_the_model_file() {
+    let s = Sidecar::spawn();
+    let c = client();
+    let tok = &s.handshake.token;
+    let settings_url = format!("{}/api/v1/settings", s.base_url());
+    let put_settings = |body: &serde_json::Value| {
+        let resp = c
+            .put(&settings_url)
+            .bearer_auth(tok)
+            .json(body)
+            .send()
+            .expect("put settings");
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
+    };
+    let mut settings: serde_json::Value = c
+        .get(&settings_url)
+        .bearer_auth(tok)
+        .send()
+        .expect("get settings")
+        .json()
+        .expect("json");
+    assert_eq!(settings["minutes_setup_skipped"], false);
+
+    // "Later" for minutes: no key, and the user said so.
+    settings["minutes_setup_skipped"] = serde_json::json!(true);
+    put_settings(&settings);
+    assert_eq!(setup_status(&s)["minutes"]["state"], "skipped");
+
+    // A stored key for the active provider wins over "later".
+    let secret = c
+        .put(format!("{settings_url}/secret"))
+        .bearer_auth(tok)
+        .json(&serde_json::json!({"provider": "anthropic", "value": "sk-test"}))
+        .send()
+        .expect("put secret");
+    assert_eq!(secret.status(), reqwest::StatusCode::NO_CONTENT);
+    assert_eq!(setup_status(&s)["minutes"]["state"], "ready");
+
+    // A keyless provider needs nothing stored.
+    settings["llm"]["active"] = serde_json::json!("ollama");
+    put_settings(&settings);
+    let status = setup_status(&s);
+    assert_eq!(status["minutes"]["state"], "ready");
+    assert_eq!(status["minutes"]["provider"], "ollama");
+
+    // Select a catalogue model whose file is in place.
+    let models = tempfile::tempdir().unwrap();
+    let model_file = models.path().join("ggml-base.bin");
+    std::fs::write(&model_file, b"model").unwrap();
+    settings["paths"]["models_dir"] = serde_json::json!(models.path());
+    settings["transcriber"]["model_source"] = serde_json::json!("managed");
+    settings["transcriber"]["model_id"] = serde_json::json!("base");
+    put_settings(&settings);
+    let status = setup_status(&s);
+    assert_eq!(status["transcription"]["state"], "ready");
+    assert_eq!(status["transcription"]["reason"], serde_json::Value::Null);
+    assert_eq!(status["transcription"]["model_id"], "base");
+
+    // The file disappears between two looks: broken, not "never set up".
+    std::fs::remove_file(&model_file).unwrap();
+    let status = setup_status(&s);
+    assert_eq!(status["transcription"]["state"], "missing");
+    assert_eq!(status["transcription"]["reason"], "model_missing");
+}
+
+#[test]
+fn setup_status_names_the_recording_recovered_at_this_start() {
+    let data = tempfile::tempdir().unwrap();
+    let data_path = data.path().to_path_buf();
+    plant_crashed_recording(&recordings_dir(&data_path));
+
+    let s = Sidecar::spawn_in(&data_path, &[], data);
+
+    let meetings: serde_json::Value = client()
+        .get(format!("{}/api/v1/meetings", s.base_url()))
+        .bearer_auth(&s.handshake.token)
+        .send()
+        .expect("list meetings")
+        .json()
+        .expect("json");
+    let meeting = &meetings.as_array().expect("meetings array")[0];
+    assert_eq!(
+        setup_status(&s)["recovered_recordings"],
+        serde_json::json!([{ "meeting_id": meeting["id"], "name": meeting["name"] }])
     );
 }
 
